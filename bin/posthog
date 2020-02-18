@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+
+require 'posthog'
+require 'rubygems'
+require 'commander/import'
+require 'time'
+require 'json'
+
+program :name, 'posthog'
+program :version, '1.0.0'
+program :description, 'PostHog API'
+
+def json_hash(str)
+  if str
+    return JSON.parse(str)
+  end
+end
+
+command :capture do |c|
+  c.description = 'capture an event'
+
+  c.option '--api-key=<string>', String, 'The PostHog API Key'
+  c.option '--api-host=<url>', String, 'The PostHog API URL host part (scheme+domain)'
+  c.option '--distinct-id=<distinct_id>', String, 'The distinct id to send the event as'
+  c.option '--event=<event>', String, 'The event name to send with the event'
+  c.option '--properties=<properties>', 'The properties to send (JSON-encoded)'
+
+  c.action do |args, options|
+    posthog = PostHog::Client.new({
+      api_key: options.api_key,
+      api_host: options.api_host,
+      on_error: Proc.new { |status, msg| print msg }
+    })
+
+    posthog.capture({
+      distinct_id: options.distinct_id,
+      event: options.event,
+      properties: json_hash(options.properties)
+    })
+
+    posthog.flush
+  end
+end
+
+command :identify do |c|
+  c.description = 'identify the user'
+
+  c.option '--api-key=<api_key>', String, 'The PostHog API Key'
+  c.option '--api-host=<url>', String, 'The PostHog API URL host part (scheme+domain)'
+  c.option '--distinct-id=<distinct_id>', String, 'The distinct id to send the event as'
+  c.option '--properties=<properties>', 'The properties to send (JSON-encoded)'
+
+  c.action do |args, options|
+    posthog = PostHog::Client.new({
+      api_key: options.api_key,
+      api_host: options.api_host,
+      on_error: Proc.new { |status, msg| print msg }
+    })
+
+    posthog.identify({
+      distinct_id: options.distinct_id,
+      properties: json_hash(options.properties)
+    })
+
+    posthog.flush
+  end
+end
+
+command :alias do |c|
+  c.description = 'set an alias for a distinct id'
+
+  c.option '--api-key=<api_key>', String, 'The PostHog API Key'
+  c.option '--api-host=<url>', String, 'The PostHog API URL host part (scheme+domain)'
+  c.option '--distinct-id=<distinct_id>', String, 'The distinct id'
+  c.option '--alias=<alias>', 'The alias to give to the distinct id'
+
+  c.action do |args, options|
+    posthog = PostHog::Client.new({
+      api_key: options.api_key,
+      api_host: options.api_host,
+      on_error: Proc.new { |status, msg| print msg }
+    })
+
+    posthog.alias({
+      distinct_id: options.distinct_id,
+      alias: options.alias,
+    })
+
+    posthog.flush
+  end
+end
