@@ -21,10 +21,7 @@ class PostHog
         common.merge({
           :type => 'capture',
           :event => event.to_s,
-          :properties => properties.merge({
-            "$lib" => 'posthog-ruby',
-            "$lib_version" => PostHog::VERSION.to_s
-          })
+          :properties => properties.merge(common[:properties] || {})
         })
       end
 
@@ -42,7 +39,8 @@ class PostHog
         common.merge({
           :type => 'identify',
           :event => '$identify',
-          :'$set' => properties
+          :'$set' => properties,
+          :properties => properties.merge(common[:properties] || {})
         })
       end
 
@@ -64,7 +62,7 @@ class PostHog
           :properties => {
             :distinct_id => distinct_id,
             :alias => alias_field,
-          }
+          }.merge(common[:properties] || {})
         })
       end
 
@@ -88,7 +86,11 @@ class PostHog
           :library => 'posthog-ruby',
           :library_version => PostHog::VERSION.to_s,
           :messageId => message_id,
-          :distinct_id => distinct_id
+          :distinct_id => distinct_id,
+          :properties => {
+            "$lib" => 'posthog-ruby',
+            "$lib_version" => PostHog::VERSION.to_s
+          }
         }
         parsed
       end
