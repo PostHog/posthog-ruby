@@ -21,7 +21,10 @@ class PostHog
         common.merge({
           :type => 'capture',
           :event => event.to_s,
-          :properties => properties
+          :properties => properties.merge({
+            "$lib" => 'posthog-ruby',
+            "$lib_version" => PostHog::VERSION.to_s
+          })
         })
       end
 
