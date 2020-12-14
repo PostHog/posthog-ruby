@@ -1,7 +1,7 @@
 class PostHog
   module Defaults
     module Request
-      HOST = 't.posthog.com'
+      HOST = 'app.posthog.com'
       PORT = 443
       PATH = '/batch/'
       SSL = true
