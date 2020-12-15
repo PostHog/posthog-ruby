@@ -3,3 +3,5 @@ Gemfile.lock
 coverage/
 .bundle
 vendor/bundle
+.idea
+
