@@ -65,4 +65,3 @@ class PostHog
     end
   end
 end
-

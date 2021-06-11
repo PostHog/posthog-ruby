@@ -2,16 +2,12 @@ require 'spec_helper'
 
 class PostHog
   describe Worker do
-    before do
-      PostHog::Transport.stub = true
-    end
+    before { PostHog::Transport.stub = true }
 
     describe '#init' do
       it 'accepts string keys' do
         queue = Queue.new
-        worker = PostHog::Worker.new(queue,
-                                                'secret',
-                                                'batch_size' => 100)
+        worker = PostHog::Worker.new(queue, 'secret', 'batch_size' => 100)
         batch = worker.instance_variable_get(:@batch)
         expect(batch.instance_variable_get(:@max_message_count)).to eq(100)
       end
@@ -51,14 +47,15 @@ class PostHog
           .and_return(PostHog::Response.new(400, 'Some error'))
 
         status = error = nil
-        on_error = proc do |yielded_status, yielded_error|
-          sleep 0.2 # Make this take longer than thread spin-up (below)
-          status, error = yielded_status, yielded_error
-        end
+        on_error =
+          proc do |yielded_status, yielded_error|
+            sleep 0.2 # Make this take longer than thread spin-up (below)
+            status, error = yielded_status, yielded_error
+          end
 
         queue = Queue.new
         queue << {}
-        worker = described_class.new(queue, 'secret', :on_error => on_error)
+        worker = described_class.new(queue, 'secret', on_error: on_error)
 
         # This is to ensure that Client#flush doesn't finish before calling
         # the error handler.
@@ -74,17 +71,13 @@ class PostHog
       end
 
       it 'does not call on_error if the request is good' do
-        on_error = proc do |status, error|
-          puts "#{status}, #{error}"
-        end
+        on_error = proc { |status, error| puts "#{status}, #{error}" }
 
         expect(on_error).to_not receive(:call)
 
         queue = Queue.new
         queue << Requested::CAPTURE
-        worker = described_class.new(queue,
-                                     'testsecret',
-                                     :on_error => on_error)
+        worker = described_class.new(queue, 'testsecret', on_error: on_error)
         worker.run
 
         expect(queue).to be_empty
@@ -106,9 +99,7 @@ class PostHog
         queue << good_message
         queue << bad_message
 
-        worker = described_class.new(queue,
-                                     'testsecret',
-                                     :on_error => on_error)
+        worker = described_class.new(queue, 'testsecret', on_error: on_error)
         worker.run
         expect(queue).to be_empty
       end
@@ -125,10 +116,10 @@ class PostHog
       it 'returns true if there is a current batch' do
         PostHog::Transport
           .any_instance
-          .stub(:send) {
+          .stub(:send) do
             sleep(0.2)
             PostHog::Response.new(200, 'Success')
-          }
+          end
 
         queue = Queue.new
         queue << Requested::CAPTURE

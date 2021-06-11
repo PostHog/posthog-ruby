@@ -3,10 +3,12 @@ require 'spec_helper'
 class PostHog
   describe Client do
     let(:client) do
-      Client.new(:api_key => API_KEY).tap { |client|
-        # Ensure that worker doesn't consume items from the queue
-        client.instance_variable_set(:@worker, NoopWorker.new)
-      }
+      Client
+        .new(api_key: API_KEY)
+        .tap do |client|
+          # Ensure that worker doesn't consume items from the queue
+          client.instance_variable_set(:@worker, NoopWorker.new)
+        end
     end
     let(:queue) { client.instance_variable_get :@queue }
 
@@ -16,45 +18,43 @@ class PostHog
       end
 
       it 'does not error if a api_key is supplied' do
-        expect do
-          Client.new :api_key => API_KEY
-        end.to_not raise_error
+        expect { Client.new api_key: API_KEY }.to_not raise_error
       end
 
       it 'does not error if a api_key is supplied as a string' do
-        expect do
-          Client.new 'api_key' => API_KEY
-        end.to_not raise_error
+        expect { Client.new 'api_key' => API_KEY }.to_not raise_error
       end
     end
 
     describe '#capture' do
       it 'errors without an event' do
-        expect { client.capture(:distinct_id => 'user') }.to raise_error(ArgumentError)
+        expect { client.capture(distinct_id: 'user') }.to raise_error(
+          ArgumentError
+        )
       end
 
       it 'errors without a distinct_id' do
-        expect { client.capture(:event => 'Event') }.to raise_error(ArgumentError)
+        expect { client.capture(event: 'Event') }.to raise_error(ArgumentError)
       end
 
       it 'errors if properties is not a hash' do
         expect {
-          client.capture({
-            :distinct_id => 'user',
-            :event => 'Event',
-            :properties => [1, 2, 3]
-          })
+          client.capture(
+            { distinct_id: 'user', event: 'Event', properties: [1, 2, 3] }
+          )
         }.to raise_error(ArgumentError)
       end
 
       it 'uses the timestamp given' do
         time = Time.parse('1990-07-16 13:30:00.123 UTC')
 
-        client.capture({
-          :event => 'testing the timestamp',
-          :distinct_id => 'joe',
-          :timestamp => time
-        })
+        client.capture(
+          {
+            event: 'testing the timestamp',
+            distinct_id: 'joe',
+            timestamp: time
+          }
+        )
 
         msg = queue.pop
 
@@ -76,17 +76,19 @@ class PostHog
       end
 
       it 'converts time and date properties into iso8601 format' do
-        client.capture({
-          :distinct_id => 'user',
-          :event => 'Event',
-          :properties => {
-            :time => Time.utc(2013),
-            :time_with_zone => Time.zone.parse('2013-01-01'),
-            :date_time => DateTime.new(2013, 1, 1),
-            :date => Date.new(2013, 1, 1),
-            :nottime => 'x'
+        client.capture(
+          {
+            distinct_id: 'user',
+            event: 'Event',
+            properties: {
+              time: Time.utc(2013),
+              time_with_zone: Time.zone.parse('2013-01-01'),
+              date_time: DateTime.new(2013, 1, 1),
+              date: Date.new(2013, 1, 1),
+              nottime: 'x'
+            }
           }
-        })
+        )
 
         message = queue.pop
         properties = message[:properties]
@@ -123,16 +125,18 @@ class PostHog
       end
 
       it 'converts time and date properties into iso8601 format' do
-        client.identify({
-          :distinct_id => 'user',
-          :properties => {
-            :time => Time.utc(2013),
-            :time_with_zone =>  Time.zone.parse('2013-01-01'),
-            :date_time => DateTime.new(2013, 1, 1),
-            :date => Date.new(2013, 1, 1),
-            :nottime => 'x'
+        client.identify(
+          {
+            distinct_id: 'user',
+            properties: {
+              time: Time.utc(2013),
+              time_with_zone: Time.zone.parse('2013-01-01'),
+              date_time: DateTime.new(2013, 1, 1),
+              date: Date.new(2013, 1, 1),
+              nottime: 'x'
+            }
           }
-        })
+        )
 
         message = queue.pop
         properties = message[:'$set'] # NB!!!!!
@@ -151,11 +155,11 @@ class PostHog
 
     describe '#alias' do
       it 'errors without from' do
-        expect { client.alias :distinct_id => 1234 }.to raise_error(ArgumentError)
+        expect { client.alias distinct_id: 1234 }.to raise_error(ArgumentError)
       end
 
       it 'errors without to' do
-        expect { client.alias :alias => 1234 }.to raise_error(ArgumentError)
+        expect { client.alias alias: 1234 }.to raise_error(ArgumentError)
       end
 
       it 'does not error with the required options' do
@@ -163,19 +167,19 @@ class PostHog
       end
 
       it 'does not error with the required options as strings' do
-        expect do
-          client.alias Utils.stringify_keys(ALIAS)
-        end.to_not raise_error
+        expect { client.alias Utils.stringify_keys(ALIAS) }.to_not raise_error
       end
     end
 
     describe '#flush' do
-      let(:client_with_worker) {
-        Client.new(:api_key => API_KEY).tap { |client|
-          queue = client.instance_variable_get(:@queue)
-          client.instance_variable_set(:@worker, DummyWorker.new(queue))
-        }
-      }
+      let(:client_with_worker) do
+        Client
+          .new(api_key: API_KEY)
+          .tap do |client|
+            queue = client.instance_variable_get(:@queue)
+            client.instance_variable_set(:@worker, DummyWorker.new(queue))
+          end
+      end
 
       it 'waits for the queue to finish on a flush' do
         client_with_worker.identify Queued::IDENTIFY
@@ -185,7 +189,7 @@ class PostHog
         expect(client_with_worker.queued_messages).to eq(0)
       end
 
-      unless defined? JRUBY_VERSION
+      unless defined?(JRUBY_VERSION)
         it 'completes when the process forks' do
           client_with_worker.identify Queued::IDENTIFY
 
@@ -203,7 +207,9 @@ class PostHog
     context 'common' do
       check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
 
-      let(:data) { { :distinct_id => 1, :alias => 3, :message_id => 5, :event => 'cockatoo' } }
+      let(:data) do
+        { distinct_id: 1, alias: 3, message_id: 5, event: 'cockatoo' }
+      end
 
       it 'returns false if queue is full' do
         client.instance_variable_set(:@max_queue_size, 1)

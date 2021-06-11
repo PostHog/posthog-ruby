@@ -11,9 +11,7 @@ class PostHog
     describe '#initialize' do
       let!(:net_http) { Net::HTTP.new(anything, anything) }
 
-      before do
-        allow(Net::HTTP).to receive(:new) { net_http }
-      end
+      before { allow(Net::HTTP).to receive(:new) { net_http } }
 
       it 'sets an initalized Net::HTTP read_timeout' do
         expect(net_http).to receive(:use_ssl=)
@@ -86,8 +84,9 @@ class PostHog
         end
 
         it 'sets passed in backoff backoff policy' do
-          expect(subject.instance_variable_get(:@backoff_policy))
-            .to eq(backoff_policy)
+          expect(subject.instance_variable_get(:@backoff_policy)).to eq(
+            backoff_policy
+          )
         end
 
         it 'initializes a new Net::HTTP with passed in host and port' do
@@ -98,9 +97,9 @@ class PostHog
     end
 
     describe '#send' do
-      let(:response) {
+      let(:response) do
         Net::HTTPResponse.new(http_version, status_code, response_body)
-      }
+      end
       let(:http_version) { 1.1 }
       let(:status_code) { 200 }
       let(:response_body) { {}.to_json }
@@ -121,17 +120,15 @@ class PostHog
           'Accept' => 'application/json',
           'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
         }
-        expect(Net::HTTP::Post).to receive(:new).with(
-          path, default_headers
-        ).and_call_original
+        expect(Net::HTTP::Post).to receive(:new)
+          .with(path, default_headers)
+          .and_call_original
 
         subject.send(api_key, batch)
       end
 
       context 'with a stub' do
-        before do
-          allow(described_class).to receive(:stub) { true }
-        end
+        before { allow(described_class).to receive(:stub) { true } }
 
         it 'returns a 200 response' do
           expect(subject.send(api_key, batch).status).to eq(200)
@@ -153,15 +150,17 @@ class PostHog
           let(:body) { body }
           let(:retries) { 4 }
           let(:backoff_policy) { FakeBackoffPolicy.new([1000, 1000, 1000]) }
-          subject {
-            described_class.new(retries: retries,
-                                backoff_policy: backoff_policy)
-          }
+          subject do
+            described_class.new(
+              retries: retries,
+              backoff_policy: backoff_policy
+            )
+          end
 
           it 'retries the request' do
-            expect(subject)
-              .to receive(:sleep)
-              .exactly(retries - 1).times
+            expect(subject).to receive(:sleep)
+              .exactly(retries - 1)
+              .times
               .with(1)
               .and_return(nil)
             subject.send(api_key, batch)
@@ -176,9 +175,7 @@ class PostHog
           subject { described_class.new(retries: retries, backoff: backoff) }
 
           it 'does not retry the request' do
-            expect(subject)
-              .to receive(:sleep)
-              .never
+            expect(subject).to receive(:sleep).never
             subject.send(api_key, batch)
           end
         end

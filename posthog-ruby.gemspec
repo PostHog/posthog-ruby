@@ -3,7 +3,7 @@ require File.expand_path('../lib/posthog/version', __FILE__)
 Gem::Specification.new do |spec|
   spec.name = 'posthog-ruby'
   spec.version = PostHog::VERSION
-  spec.files = Dir.glob("{lib,bin}/**/*")
+  spec.files = Dir.glob('{lib,bin}/**/*')
   spec.require_paths = ['lib']
   spec.bindir = 'bin'
   spec.executables = ['posthog']

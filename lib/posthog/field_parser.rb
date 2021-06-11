@@ -18,11 +18,13 @@ class PostHog
 
         isoify_dates! properties
 
-        common.merge({
-          :type => 'capture',
-          :event => event.to_s,
-          :properties => properties.merge(common[:properties] || {})
-        })
+        common.merge(
+          {
+            type: 'capture',
+            event: event.to_s,
+            properties: properties.merge(common[:properties] || {})
+          }
+        )
       end
 
       # In addition to the common fields, identify accepts:
@@ -36,12 +38,14 @@ class PostHog
 
         isoify_dates! properties
 
-        common.merge({
-          :type => 'identify',
-          :event => '$identify',
-          :'$set' => properties,
-          :properties => properties.merge(common[:properties] || {})
-        })
+        common.merge(
+          {
+            type: 'identify',
+            event: '$identify',
+            '$set': properties,
+            properties: properties.merge(common[:properties] || {})
+          }
+        )
       end
 
       # In addition to the common fields, alias accepts:
@@ -55,15 +59,17 @@ class PostHog
         alias_field = fields[:alias]
         check_presence! alias_field, 'alias'
 
-        common.merge({
-          :type => 'alias',
-          :event => '$create_alias',
-          :distinct_id => nil,
-          :properties => {
-            :distinct_id => distinct_id,
-            :alias => alias_field,
-          }.merge(common[:properties] || {})
-        })
+        common.merge(
+          {
+            type: 'alias',
+            event: '$create_alias',
+            distinct_id: nil,
+            properties:
+              { distinct_id: distinct_id, alias: alias_field }.merge(
+                common[:properties] || {}
+              )
+          }
+        )
       end
 
       private
@@ -82,21 +88,23 @@ class PostHog
         check_presence! distinct_id, 'distinct_id'
 
         parsed = {
-          :timestamp => datetime_in_iso8601(timestamp),
-          :library => 'posthog-ruby',
-          :library_version => PostHog::VERSION.to_s,
-          :messageId => message_id,
-          :distinct_id => distinct_id,
-          :properties => {
-            "$lib" => 'posthog-ruby',
-            "$lib_version" => PostHog::VERSION.to_s
+          timestamp: datetime_in_iso8601(timestamp),
+          library: 'posthog-ruby',
+          library_version: PostHog::VERSION.to_s,
+          messageId: message_id,
+          distinct_id: distinct_id,
+          properties: {
+            '$lib' => 'posthog-ruby',
+            '$lib_version' => PostHog::VERSION.to_s
           }
         }
         parsed
       end
 
       def check_timestamp!(timestamp)
-        raise ArgumentError, 'Timestamp must be a Time' unless timestamp.is_a? Time
+        unless timestamp.is_a? Time
+          raise ArgumentError, 'Timestamp must be a Time'
+        end
       end
 
       # private: Ensures that a string is non-empty

@@ -104,8 +104,8 @@ class PostHog
       else
         logger.warn(
           'Queue is full, dropping events. The :max_queue_size ' \
-          'configuration parameter can be increased to prevent this from ' \
-          'happening.'
+            'configuration parameter can be increased to prevent this from ' \
+            'happening.'
         )
         false
       end
@@ -120,9 +120,7 @@ class PostHog
       return if worker_running?
       @worker_mutex.synchronize do
         return if worker_running?
-        @worker_thread = Thread.new do
-          @worker.run
-        end
+        @worker_thread = Thread.new { @worker.run }
       end
     end
 
@@ -131,4 +129,3 @@ class PostHog
     end
   end
 end
-
