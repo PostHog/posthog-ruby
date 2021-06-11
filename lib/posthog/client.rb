@@ -41,10 +41,7 @@ class PostHog
       at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
 
-    def log 
-      puts 'hey'
-    end
-
+    
     # Synchronously waits until the worker has flushed the queue.
     #
     # Use only for scripts which are not long-running, and will specifically
