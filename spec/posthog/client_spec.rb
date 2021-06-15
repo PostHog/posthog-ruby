@@ -252,6 +252,15 @@ class PostHog
         expect(c.is_feature_enabled('complex_flag', 'some id')).to eq(true)
       end
 
+      it 'fails without a personal api key' do
+        bad_client = Client.new(:api_key => API_KEY).tap { |client|
+          client.instance_variable_set(:@worker, NoopWorker.new)
+        }
+        allow(bad_client.logger).to receive(:error)
+        expect(bad_client.logger).to receive(:error).with("You need to specify a personal_api_key to use feature flags")
+        bad_client.is_feature_enabled('some_key', 'some id')
+      end
+
     end
 
     context 'common' do
