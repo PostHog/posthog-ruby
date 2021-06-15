@@ -6,6 +6,7 @@ SimpleCov.formatter = SimpleCov::Formatter::Codecov
 
 require 'posthog'
 require 'active_support/time'
+require 'webmock/rspec'
 
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'

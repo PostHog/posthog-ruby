@@ -16,6 +16,7 @@ class PostHog
         @feature_flags = Concurrent::Array.new
         @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
 
+
         @task = Concurrent::TimerTask.new(execution_interval: polling_interval, timeout_interval: 15) do
             _load_feature_flags
         end
@@ -84,7 +85,9 @@ class PostHog
         res = _request('GET', 'api/feature_flag', true)
         @feature_flags.clear
         res['results'].each do |flag|
-          @feature_flags.push(flag)
+          if flag['active']
+            @feature_flags.push(flag)
+          end
         end
         if @loaded_flags_successfully_once.false?
           @loaded_flags_successfully_once.make_true
@@ -92,7 +95,7 @@ class PostHog
       end
 
       def _request(method, endpoint, usePersonalApiKey = false, data = {})
-        uri = URI("https://#{@host}/#{endpoint}/")
+        uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}")
         req = nil
         if usePersonalApiKey
           req = Net::HTTP::Get.new(uri)
