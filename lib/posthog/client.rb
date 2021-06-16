@@ -5,6 +5,8 @@ require 'posthog/defaults'
 require 'posthog/logging'
 require 'posthog/utils'
 require 'posthog/worker'
+require 'posthog/feature_flags'
+
 
 class PostHog
   class Client
@@ -25,12 +27,21 @@ class PostHog
       @worker_mutex = Mutex.new
       @worker = Worker.new(@queue, @api_key, opts)
       @worker_thread = nil
+      @feature_flags_poller = nil
+      @personal_api_key = nil
 
       check_api_key!
+
+      if opts[:personal_api_key].present?
+        @personal_api_key = opts[:personal_api_key]
+        @feature_flags_poller = FeatureFlagsPoller.new(opts[:feature_flags_polling_interval], opts[:personal_api_key], @api_key, opts[:host])
+      end
+
 
       at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
 
+    
     # Synchronously waits until the worker has flushed the queue.
     #
     # Use only for scripts which are not long-running, and will specifically
@@ -85,6 +96,36 @@ class PostHog
     # @return [Fixnum] number of messages in the queue
     def queued_messages
       @queue.length
+    end
+
+    def is_feature_enabled(flag_key, distinct_id, default_value=false)
+      unless @personal_api_key
+        logger.error('You need to specify a personal_api_key to use feature flags')
+        return
+      end
+      is_enabled = @feature_flags_poller.is_feature_enabled(flag_key, distinct_id, default_value)
+      capture({
+           'distinct_id': distinct_id,
+           'event': '$feature_flag_called',
+           'properties': {
+               '$feature_flag': flag_key,
+               '$feature_flag_response': is_enabled
+           }
+       })
+       return is_enabled
+    end
+
+    def reload_feature_flags
+      unless @personal_api_key
+        logger.error('You need to specify a personal_api_key to use feature flags')
+        return
+      end
+      @feature_flags_poller.load_feature_flags(true)
+    end
+
+    def shutdown
+      @feature_flags_poller.shutdown_poller
+      flush
     end
 
     private

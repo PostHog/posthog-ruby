@@ -200,6 +200,69 @@ class PostHog
       end
     end
 
+    describe 'feature flags' do
+      it 'decides flags correctly' do
+        api_feature_flag_res = {
+          "results": [
+            {
+              "id": 719,
+              "name": "",
+              "key": "simple_flag",
+              "active": true,
+              "is_simple_flag": true,
+              "rollout_percentage": nil
+            },
+            {
+              "id": 720,
+              "name": "",
+              "key": "disabled_flag",
+              "active": false,
+              "is_simple_flag": true,
+              "rollout_percentage": nil
+            },
+            {
+              "id": 721,
+              "name": "",
+              "key": "complex_flag",
+              "active": true,
+              "is_simple_flag": false,
+              "rollout_percentage": nil
+            },
+          ]
+        }
+
+        decide_res = {
+          "featureFlags": ["complex_flag"]
+        }
+      
+        # Mock response for api/feature_flag
+        stub_request(:get, "https://app.posthog.com/api/feature_flag/?token=testsecret").
+        to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # Mock response for decide
+        stub_request(:post, "https://app.posthog.com/decide/?token=testsecret").
+        to_return(status: 200, body: decide_res.to_json)
+
+        c = Client.new(:api_key => API_KEY, :personal_api_key => API_KEY).tap { |client|
+          client.instance_variable_set(:@worker, NoopWorker.new)
+        }
+
+        expect(c.is_feature_enabled('simple_flag', 'some id')).to eq(true)
+        expect(c.is_feature_enabled('disabled_flag', 'some id')).to eq(false)
+        expect(c.is_feature_enabled('complex_flag', 'some id')).to eq(true)
+      end
+
+      it 'fails without a personal api key' do
+        bad_client = Client.new(:api_key => API_KEY).tap { |client|
+          client.instance_variable_set(:@worker, NoopWorker.new)
+        }
+        allow(bad_client.logger).to receive(:error)
+        expect(bad_client.logger).to receive(:error).with("You need to specify a personal_api_key to use feature flags")
+        bad_client.is_feature_enabled('some_key', 'some id')
+      end
+
+    end
+
     context 'common' do
       check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
 

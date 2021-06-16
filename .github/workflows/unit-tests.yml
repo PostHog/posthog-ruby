@@ -1,0 +1,27 @@
+name: Unit Tests
+
+on: 
+  - pull_request
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      RAILS_ENV: test
+      GH_ACTIONS_UNIT_TESTS: 1
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          # Not needed with a .ruby-version file
+          ruby-version: 2.7
+          # runs 'bundle install' and caches installed gems automatically
+          bundler-cache: true
+
+      - name: Run RSpec tests
+        run: |
+          bundle exec rspec
