@@ -1,6 +1,7 @@
 name: Unit Tests
 
-on: [push, pull_request]
+on: 
+  - pull_request
 
 jobs:
   test:
@@ -8,6 +9,7 @@ jobs:
 
     env:
       RAILS_ENV: test
+      GH_ACTIONS_UNIT_TESTS: 1
 
     steps:
       - uses: actions/checkout@v2

@@ -1,8 +1,10 @@
 # https://github.com/codecov/codecov-ruby#usage
-require 'simplecov'
-SimpleCov.start
-require 'codecov'
-SimpleCov.formatter = SimpleCov::Formatter::Codecov
+if !ENV['GH_ACTIONS_UNIT_TESTS']
+  require 'simplecov'
+  SimpleCov.start
+  require 'codecov'
+  SimpleCov.formatter = SimpleCov::Formatter::Codecov
+end
 
 require 'posthog'
 require 'active_support/time'
