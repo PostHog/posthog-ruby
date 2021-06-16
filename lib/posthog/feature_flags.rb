@@ -32,7 +32,7 @@ class PostHog
         load_feature_flags
 
 
-        if @loaded_flags_successfully_once.false?
+        unless @loaded_flags_successfully_once
           return default_result
         end
 
@@ -84,20 +84,16 @@ class PostHog
       def _load_feature_flags()
         res = _request('GET', 'api/feature_flag', true)
         @feature_flags.clear
-        res['results'].each do |flag|
-          if flag['active']
-            @feature_flags.push(flag)
-          end
-        end
+        @feature_flags = res['results'].filter { |flag| flag['active'] }
         if @loaded_flags_successfully_once.false?
           @loaded_flags_successfully_once.make_true
         end
       end
 
-      def _request(method, endpoint, usePersonalApiKey = false, data = {})
+      def _request(method, endpoint, use_personal_api_key = false, data = {})
         uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}")
         req = nil
-        if usePersonalApiKey
+        if use_personal_api_key
           req = Net::HTTP::Get.new(uri)
           req['Authorization'] = "Bearer #{@personal_api_key}"
         else

@@ -32,7 +32,7 @@ class PostHog
 
       check_api_key!
 
-      if opts[:personal_api_key] != nil
+      if opts[:personal_api_key].present?
         @personal_api_key = opts[:personal_api_key]
         @feature_flags_poller = FeatureFlagsPoller.new(opts[:feature_flags_polling_interval], opts[:personal_api_key], @api_key, opts[:host])
       end
@@ -99,7 +99,7 @@ class PostHog
     end
 
     def is_feature_enabled(flag_key, distinct_id, default_value=false)
-      if !@personal_api_key
+      unless @personal_api_key
         logger.error('You need to specify a personal_api_key to use feature flags')
         return
       end
@@ -116,7 +116,7 @@ class PostHog
     end
 
     def reload_feature_flags
-      if !@personal_api_key
+      unless @personal_api_key
         logger.error('You need to specify a personal_api_key to use feature flags')
         return
       end

@@ -3,4 +3,7 @@ gemspec
 
 gem 'irb'
 gem 'concurrent-ruby', require: 'concurrent'
-gem 'webmock'
+
+group :development, :test do
+  gem 'webmock'
+end
