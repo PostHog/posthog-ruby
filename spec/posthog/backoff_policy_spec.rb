@@ -65,14 +65,14 @@ class PostHog
     end
 
     describe '#next_interval' do
-      subject {
+      subject do
         described_class.new(
           min_timeout_ms: 1000,
-          max_timeout_ms: 10000,
+          max_timeout_ms: 10_000,
           multiplier: 2,
           randomization_factor: 0.5
         )
-      }
+      end
 
       it 'returns exponentially increasing durations' do
         expect(subject.next_interval).to be_within(500).of(1000)
@@ -83,7 +83,7 @@ class PostHog
 
       it 'caps maximum duration at max_timeout_secs' do
         10.times { subject.next_interval }
-        expect(subject.next_interval).to eq(10000)
+        expect(subject.next_interval).to eq(10_000)
       end
     end
   end

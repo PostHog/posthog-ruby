@@ -16,68 +16,48 @@ Time.zone = 'UTC'
 API_KEY = 'testsecret'
 
 CAPTURE = {
-  :event => 'Ruby Library test event',
-  :properties => {
-    :type => 'Chocolate',
-    :is_a_lie => true,
-    :layers => 20,
-    :timestamp => Time.new
+  event: 'Ruby Library test event',
+  properties: {
+    type: 'Chocolate',
+    is_a_lie: true,
+    layers: 20,
+    timestamp: Time.new
   }
 }
 
-IDENTIFY = {
-  :'$set' => {
-    :likes_animals => true,
-    :instrument => 'Guitar',
-    :age => 25
-  }
-}
+IDENTIFY = { '$set': { likes_animals: true, instrument: 'Guitar', age: 25 } }
 
-ALIAS = {
-  :alias => 1234,
-  :distinct_id => 'abcd'
-}
+ALIAS = { alias: 1234, distinct_id: 'abcd' }
 
 GROUP = {}
 
 PAGE = {}
 
-SCREEN = {
-  :name => 'main'
-}
+SCREEN = { name: 'main' }
 
 DISTINCT_ID = 1234
 GROUP_ID = 1234
 
 # Hashes sent to the client, snake_case
 module Queued
-  CAPTURE = CAPTURE.merge :distinct_id => DISTINCT_ID
-  IDENTIFY = IDENTIFY.merge :distinct_id => DISTINCT_ID
-  GROUP = GROUP.merge :group_id => GROUP_ID, :distinct_id => DISTINCT_ID
-  PAGE = PAGE.merge :distinct_id => DISTINCT_ID
-  SCREEN = SCREEN.merge :distinct_id => DISTINCT_ID
+  CAPTURE = CAPTURE.merge distinct_id: DISTINCT_ID
+  IDENTIFY = IDENTIFY.merge distinct_id: DISTINCT_ID
+  GROUP = GROUP.merge group_id: GROUP_ID, distinct_id: DISTINCT_ID
+  PAGE = PAGE.merge distinct_id: DISTINCT_ID
+  SCREEN = SCREEN.merge distinct_id: DISTINCT_ID
 end
 
 # Hashes which are sent from the worker, camel_cased
 module Requested
-  CAPTURE = CAPTURE.merge({
-    :distinctId => DISTINCT_ID,
-    :type => 'capture'
-  })
+  CAPTURE = CAPTURE.merge({ distinctId: DISTINCT_ID, type: 'capture' })
 
-  IDENTIFY = IDENTIFY.merge({
-    :distinctId => DISTINCT_ID,
-    :type => 'identify'
-  })
+  IDENTIFY = IDENTIFY.merge({ distinctId: DISTINCT_ID, type: 'identify' })
 
-  GROUP = GROUP.merge({
-    :groupId => GROUP_ID,
-    :distinctId => DISTINCT_ID,
-    :type => 'group'
-  })
+  GROUP =
+    GROUP.merge({ groupId: GROUP_ID, distinctId: DISTINCT_ID, type: 'group' })
 
-  PAGE = PAGE.merge :distinctId => DISTINCT_ID
-  SCREEN = SCREEN.merge :distinctId => DISTINCT_ID
+  PAGE = PAGE.merge distinctId: DISTINCT_ID
+  SCREEN = SCREEN.merge distinctId: DISTINCT_ID
 end
 
 # A worker that doesn't consume jobs

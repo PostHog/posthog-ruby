@@ -7,7 +7,6 @@ require 'posthog/utils'
 require 'posthog/worker'
 require 'posthog/feature_flags'
 
-
 class PostHog
   class Client
     include PostHog::Utils
@@ -34,14 +33,18 @@ class PostHog
 
       if opts[:personal_api_key].present?
         @personal_api_key = opts[:personal_api_key]
-        @feature_flags_poller = FeatureFlagsPoller.new(opts[:feature_flags_polling_interval], opts[:personal_api_key], @api_key, opts[:host])
+        @feature_flags_poller =
+          FeatureFlagsPoller.new(
+            opts[:feature_flags_polling_interval],
+            opts[:personal_api_key],
+            @api_key,
+            opts[:host]
+          )
       end
-
 
       at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
 
-    
     # Synchronously waits until the worker has flushed the queue.
     #
     # Use only for scripts which are not long-running, and will specifically
@@ -98,26 +101,37 @@ class PostHog
       @queue.length
     end
 
-    def is_feature_enabled(flag_key, distinct_id, default_value=false)
+    def is_feature_enabled(flag_key, distinct_id, default_value = false)
       unless @personal_api_key
-        logger.error('You need to specify a personal_api_key to use feature flags')
+        logger.error(
+          'You need to specify a personal_api_key to use feature flags'
+        )
         return
       end
-      is_enabled = @feature_flags_poller.is_feature_enabled(flag_key, distinct_id, default_value)
-      capture({
-           'distinct_id': distinct_id,
-           'event': '$feature_flag_called',
-           'properties': {
-               '$feature_flag': flag_key,
-               '$feature_flag_response': is_enabled
-           }
-       })
-       return is_enabled
+      is_enabled =
+        @feature_flags_poller.is_feature_enabled(
+          flag_key,
+          distinct_id,
+          default_value
+        )
+      capture(
+        {
+          'distinct_id': distinct_id,
+          'event': '$feature_flag_called',
+          'properties': {
+            '$feature_flag': flag_key,
+            '$feature_flag_response': is_enabled
+          }
+        }
+      )
+      return is_enabled
     end
 
     def reload_feature_flags
       unless @personal_api_key
-        logger.error('You need to specify a personal_api_key to use feature flags')
+        logger.error(
+          'You need to specify a personal_api_key to use feature flags'
+        )
         return
       end
       @feature_flags_poller.load_feature_flags(true)
@@ -145,8 +159,8 @@ class PostHog
       else
         logger.warn(
           'Queue is full, dropping events. The :max_queue_size ' \
-          'configuration parameter can be increased to prevent this from ' \
-          'happening.'
+            'configuration parameter can be increased to prevent this from ' \
+            'happening.'
         )
         false
       end
@@ -161,9 +175,7 @@ class PostHog
       return if worker_running?
       @worker_mutex.synchronize do
         return if worker_running?
-        @worker_thread = Thread.new do
-          @worker.run
-        end
+        @worker_thread = Thread.new { @worker.run }
       end
     end
 
@@ -172,4 +184,3 @@ class PostHog
     end
   end
 end
-

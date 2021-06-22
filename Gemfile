@@ -6,4 +6,5 @@ gem 'concurrent-ruby', require: 'concurrent'
 
 group :development, :test do
   gem 'webmock'
+  gem 'prettier'
 end

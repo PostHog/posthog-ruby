@@ -5,18 +5,20 @@ class PostHog
       PORT = 443
       PATH = '/batch/'
       SSL = true
-      HEADERS = { 'Accept' => 'application/json',
-                  'Content-Type' => 'application/json',
-                  'User-Agent' => "posthog-ruby/#{PostHog::VERSION}" }
+      HEADERS = {
+        'Accept' => 'application/json',
+        'Content-Type' => 'application/json',
+        'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
+      }
       RETRIES = 10
     end
 
     module Queue
-      MAX_SIZE = 10000
+      MAX_SIZE = 10_000
     end
 
     module Message
-      MAX_BYTES = 32768 # 32Kb
+      MAX_BYTES = 32_768 # 32Kb
     end
 
     module MessageBatch
@@ -26,7 +28,7 @@ class PostHog
 
     module BackoffPolicy
       MIN_TIMEOUT_MS = 100
-      MAX_TIMEOUT_MS = 10000
+      MAX_TIMEOUT_MS = 10_000
       MULTIPLIER = 1.5
       RANDOMIZATION_FACTOR = 0.5
     end
