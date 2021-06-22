@@ -7,8 +7,7 @@ class PostHog
     #
     def initialize(status = 200, error = nil)
       @status = status
-      @error  = error
+      @error = error
     end
   end
 end
-

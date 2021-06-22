@@ -7,9 +7,7 @@ class PostHog
     # public: Return a new hash with keys converted from strings to symbols
     #
     def symbolize_keys(hash)
-      hash.each_with_object({}) do |(k, v), memo|
-        memo[k.to_sym] = v
-      end
+      hash.each_with_object({}) { |(k, v), memo| memo[k.to_sym] = v }
     end
 
     # public: Convert hash keys from strings to symbols in place
@@ -21,9 +19,7 @@ class PostHog
     # public: Return a new hash with keys as strings
     #
     def stringify_keys(hash)
-      hash.each_with_object({}) do |(k, v), memo|
-        memo[k.to_s] = v
-      end
+      hash.each_with_object({}) { |(k, v), memo| memo[k.to_s] = v }
     end
 
     # public: Returns a new hash with all the date values in the into iso8601
@@ -64,9 +60,8 @@ class PostHog
     end
 
     def time_in_iso8601(time, fraction_digits = 3)
-      fraction = if fraction_digits > 0
-                   ('.%06i' % time.usec)[0, fraction_digits + 1]
-                 end
+      fraction =
+        (('.%06i' % time.usec)[0, fraction_digits + 1] if fraction_digits > 0)
 
       "#{time.strftime('%Y-%m-%dT%H:%M:%S')}#{fraction}#{formatted_offset(time, true, 'Z')}"
     end
@@ -76,15 +71,19 @@ class PostHog
     end
 
     def formatted_offset(time, colon = true, alternate_utc_string = nil)
-      time.utc? && alternate_utc_string || seconds_to_utc_offset(time.utc_offset, colon)
+      time.utc? && alternate_utc_string ||
+        seconds_to_utc_offset(time.utc_offset, colon)
     end
 
     def seconds_to_utc_offset(seconds, colon = true)
-      (colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON) % [(seconds < 0 ? '-' : '+'), (seconds.abs / 3600), ((seconds.abs % 3600) / 60)]
+      (colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON) % [
+        (seconds < 0 ? '-' : '+'),
+        (seconds.abs / 3600),
+        ((seconds.abs % 3600) / 60)
+      ]
     end
 
     UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
   end
 end
-

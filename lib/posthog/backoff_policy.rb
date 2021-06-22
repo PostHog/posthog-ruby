@@ -15,7 +15,8 @@ class PostHog
       @min_timeout_ms = opts[:min_timeout_ms] || MIN_TIMEOUT_MS
       @max_timeout_ms = opts[:max_timeout_ms] || MAX_TIMEOUT_MS
       @multiplier = opts[:multiplier] || MULTIPLIER
-      @randomization_factor = opts[:randomization_factor] || RANDOMIZATION_FACTOR
+      @randomization_factor =
+        opts[:randomization_factor] || RANDOMIZATION_FACTOR
 
       @attempts = 0
     end
@@ -37,11 +38,7 @@ class PostHog
       max_deviation = base * randomization_factor
       deviation = random_number * max_deviation
 
-      if random_number < 0.5
-        base - deviation
-      else
-        base + deviation
-      end
+      random_number < 0.5 ? base - deviation : base + deviation
     end
   end
 end

@@ -26,8 +26,7 @@ class PostHog
       @headers = options[:headers] || HEADERS
       @path = options[:path] || PATH
       @retries = options[:retries] || RETRIES
-      @backoff_policy =
-        options[:backoff_policy] || PostHog::BackoffPolicy.new
+      @backoff_policy = options[:backoff_policy] || PostHog::BackoffPolicy.new
 
       http = Net::HTTP.new(options[:host], options[:port])
       http.use_ssl = options[:ssl]
@@ -43,15 +42,16 @@ class PostHog
     def send(api_key, batch)
       logger.debug("Sending request for #{batch.length} items")
 
-      last_response, exception = retry_with_backoff(@retries) do
-        status_code, body = send_request(api_key, batch)
-        error = JSON.parse(body)['error']
-        should_retry = should_retry_request?(status_code, body)
-        logger.debug("Response status code: #{status_code}")
-        logger.debug("Response error: #{error}") if error
+      last_response, exception =
+        retry_with_backoff(@retries) do
+          status_code, body = send_request(api_key, batch)
+          error = JSON.parse(body)['error']
+          should_retry = should_retry_request?(status_code, body)
+          logger.debug("Response status code: #{status_code}")
+          logger.debug("Response error: #{error}") if error
 
-        [Response.new(status_code, error), should_retry]
-      end
+          [Response.new(status_code, error), should_retry]
+        end
 
       if exception
         logger.error(exception.message)
@@ -95,7 +95,7 @@ class PostHog
 
       begin
         result, should_retry = yield
-        return [result, nil] unless should_retry
+        return result, nil unless should_retry
       rescue StandardError => e
         should_retry = true
         caught_exception = e
@@ -112,16 +112,13 @@ class PostHog
 
     # Sends a request for the batch, returns [status_code, body]
     def send_request(api_key, batch)
-      payload = JSON.generate(
-        api_key: api_key,
-        batch: batch
-      )
+      payload = JSON.generate(api_key: api_key, batch: batch)
 
       request = Net::HTTP::Post.new(@path, @headers)
 
       if self.class.stub
         logger.debug "stubbed request to #{@path}: " \
-          "api key = #{api_key}, batch = #{JSON.generate(batch)}"
+                       "api key = #{api_key}, batch = #{JSON.generate(batch)}"
 
         [200, '{}']
       else
@@ -140,4 +137,3 @@ class PostHog
     end
   end
 end
-

@@ -30,13 +30,14 @@ class PostHog
       def logger
         return @logger if @logger
 
-        base_logger = if defined?(Rails)
-                        Rails.logger
-                      else
-                        logger = Logger.new STDOUT
-                        logger.progname = 'PostHog'
-                        logger
-                      end
+        base_logger =
+          if defined?(Rails)
+            Rails.logger
+          else
+            logger = Logger.new STDOUT
+            logger.progname = 'PostHog'
+            logger
+          end
         @logger = PrefixedLogger.new(base_logger, '[posthog-ruby]')
       end
 
@@ -56,4 +57,3 @@ class PostHog
     end
   end
 end
-

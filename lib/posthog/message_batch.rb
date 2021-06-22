@@ -4,7 +4,8 @@ require 'posthog/logging'
 class PostHog
   # A batch of `Message`s to be sent to the API
   class MessageBatch
-    class JSONGenerationError < StandardError; end
+    class JSONGenerationError < StandardError
+    end
 
     extend Forwardable
     include PostHog::Logging
