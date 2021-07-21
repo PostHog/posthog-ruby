@@ -35,7 +35,6 @@ class PostHog
 
       feature_flag = nil
 
-      # puts @feature_flags
 
       @feature_flags.each do |flag|
         if key == flag['key']
