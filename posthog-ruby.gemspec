@@ -14,6 +14,8 @@ Gem::Specification.new do |spec|
   spec.homepage = 'https://github.com/PostHog/posthog-ruby'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 2.0'
+  
+  spec.add_dependency 'concurrent-ruby'
 
   # Used in the executable testing script
   spec.add_development_dependency 'commander', '~> 4.4'
