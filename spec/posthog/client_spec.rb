@@ -24,6 +24,11 @@ class PostHog
       it 'does not error if a api_key is supplied as a string' do
         expect { Client.new 'api_key' => API_KEY }.to_not raise_error
       end
+
+      it 'handles skip_ssl_verification' do
+        expect(PostHog::Transport).to receive(:new).with({api_host: nil, skip_ssl_verification: true})
+        expect { Client.new api_key: API_KEY, skip_ssl_verification: true }.to_not raise_error
+      end
     end
 
     describe '#capture' do
