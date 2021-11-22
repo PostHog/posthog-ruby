@@ -48,6 +48,11 @@ class PostHog
           expect(backoff_policy).to be_a(PostHog::BackoffPolicy)
         end
 
+        it 'uses the default verify mode' do
+          expect(net_http).to_not receive(:verify_mode=)
+          described_class.new
+        end
+
         it 'initializes a new Net::HTTP with default host and port' do
           expect(Net::HTTP).to receive(:new).with(
             described_class::HOST,
@@ -61,6 +66,7 @@ class PostHog
         let(:path) { 'my/cool/path' }
         let(:retries) { 1234 }
         let(:backoff_policy) { FakeBackoffPolicy.new([1, 2, 3]) }
+        let(:skip_ssl_verification) { true }
         let(:host) { 'http://www.example.com' }
         let(:port) { 8080 }
         let(:options) do
@@ -68,6 +74,7 @@ class PostHog
             path: path,
             retries: retries,
             backoff_policy: backoff_policy,
+            skip_ssl_verification: skip_ssl_verification,
             host: host,
             port: port
           }
@@ -87,6 +94,11 @@ class PostHog
           expect(subject.instance_variable_get(:@backoff_policy)).to eq(
             backoff_policy
           )
+        end
+
+        it 'skips SSL verification if passed' do
+          expect(net_http).to receive(:verify_mode=).with(OpenSSL::SSL::VERIFY_NONE)
+          described_class.new(options)
         end
 
         it 'initializes a new Net::HTTP with passed in host and port' do

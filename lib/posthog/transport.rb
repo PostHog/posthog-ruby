@@ -32,6 +32,9 @@ class PostHog
       http.use_ssl = options[:ssl]
       http.read_timeout = 8
       http.open_timeout = 4
+      if options[:skip_ssl_verification]
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      end
 
       @http = http
     end

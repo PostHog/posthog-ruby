@@ -28,7 +28,7 @@ class PostHog
       batch_size = options[:batch_size] || Defaults::MessageBatch::MAX_SIZE
       @batch = MessageBatch.new(batch_size)
       @lock = Mutex.new
-      @transport = Transport.new api_host: options[:api_host]
+      @transport = Transport.new api_host: options[:api_host], skip_ssl_verification: options[:skip_ssl_verification]
     end
 
     # public: Continuously runs the loop to check for new events
