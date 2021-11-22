@@ -1,7 +1,3 @@
-# Unreleased
-
-- Add ability to disable SSL verification by passing `skip_ssl_verification`
-
 # 1.2.1 - 2021-11-19
 
 - Add concurrent-ruby gem dependency (fixes #8)
