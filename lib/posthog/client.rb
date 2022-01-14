@@ -31,7 +31,7 @@ class PostHog
 
       check_api_key!
 
-      if opts[:personal_api_key].present?
+      if opts[:personal_api_key]
         @personal_api_key = opts[:personal_api_key]
         @feature_flags_poller =
           FeatureFlagsPoller.new(
