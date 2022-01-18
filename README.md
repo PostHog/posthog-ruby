@@ -14,14 +14,15 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 2. Update `lib/posthog/version.rb` with the new version. Commit the changes:
 
 ```shell
-git commit -am "Version 1.2.2" .
+git commit -am "Version 1.2.3"
+git tag -a 1.2.3 -m "Version 1.2.3"
 git push && git push --tags 
 ```
 3. Run
 
 ```shell
-gem build *.gemspec
-gem push *.gem
+gem build posthog-ruby.gemspec
+gem push posthog-ruby-1.2.3.gem
 ```
 
 3. Authenticate with your RubyGems account and approve the publish!
