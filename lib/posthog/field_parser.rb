@@ -54,7 +54,7 @@ class PostHog
       def parse_for_alias(fields)
         common = parse_common_fields(fields)
 
-        distinct_id = common[:distinct_id] # must move to properties...
+        distinct_id = common[:distinct_id] # must both be set and move to properties
 
         alias_field = fields[:alias]
         check_presence! alias_field, 'alias'
@@ -63,7 +63,7 @@ class PostHog
           {
             type: 'alias',
             event: '$create_alias',
-            distinct_id: nil,
+            distinct_id: distinct_id,
             properties:
               { distinct_id: distinct_id, alias: alias_field }.merge(
                 common[:properties] || {}
