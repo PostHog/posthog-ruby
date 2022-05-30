@@ -174,6 +174,28 @@ class PostHog
       it 'does not error with the required options as strings' do
         expect { client.alias Utils.stringify_keys(ALIAS) }.to_not raise_error
       end
+
+      it 'sets distinct_id property' do
+        client.alias(
+          {
+            distinct_id: 'old_user',
+            alias: 'new_user'
+          }
+        )
+
+        message = queue.pop
+        expect(message).to include(
+          {
+            type: 'alias',
+            distinct_id: 'old_user',
+            event: "$create_alias"
+          }
+        )
+        expect(message[:properties]).to include(
+          distinct_id: 'old_user',
+          alias: 'new_user'
+        )
+      end
     end
 
     describe '#flush' do
