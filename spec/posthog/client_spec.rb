@@ -2,15 +2,7 @@ require 'spec_helper'
 
 class PostHog
   describe Client do
-    let(:client) do
-      Client
-        .new(api_key: API_KEY)
-        .tap do |client|
-          # Ensure that worker doesn't consume items from the queue
-          client.instance_variable_set(:@worker, NoopWorker.new)
-        end
-    end
-    let(:queue) { client.instance_variable_get :@queue }
+    let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
 
     describe '#initialize' do
       it 'errors if no api_key is supplied' do
@@ -61,22 +53,20 @@ class PostHog
           }
         )
 
-        msg = queue.pop
-
-        expect(Time.parse(msg[:timestamp])).to eq(time)
+        expect(Time.parse(client.dequeue_last_message[:timestamp])).to eq(time)
       end
 
       it 'does not error with the required options' do
         expect do
           client.capture Queued::CAPTURE
-          queue.pop
+          client.dequeue_last_message
         end.to_not raise_error
       end
 
       it 'does not error when given string keys' do
         expect do
           client.capture Utils.stringify_keys(Queued::CAPTURE)
-          queue.pop
+          client.dequeue_last_message
         end.to_not raise_error
       end
 
@@ -95,8 +85,7 @@ class PostHog
           }
         )
 
-        message = queue.pop
-        properties = message[:properties]
+        properties = client.dequeue_last_message[:properties]
 
         date_time = DateTime.new(2013, 1, 1)
         expect(Time.iso8601(properties[:time])).to eq(date_time)
@@ -118,14 +107,14 @@ class PostHog
       it 'does not error with the required options' do
         expect do
           client.identify Queued::IDENTIFY
-          queue.pop
+          client.dequeue_last_message
         end.to_not raise_error
       end
 
       it 'does not error with the required options as strings' do
         expect do
           client.identify Utils.stringify_keys(Queued::IDENTIFY)
-          queue.pop
+          client.dequeue_last_message
         end.to_not raise_error
       end
 
@@ -143,8 +132,7 @@ class PostHog
           }
         )
 
-        message = queue.pop
-        properties = message[:'$set'] # NB!!!!!
+        properties = client.dequeue_last_message[:'$set'] # NB!!!!!
 
         date_time = DateTime.new(2013, 1, 1)
         expect(Time.iso8601(properties[:time])).to eq(date_time)
@@ -183,7 +171,7 @@ class PostHog
           }
         )
 
-        message = queue.pop
+        message = client.dequeue_last_message
         expect(message).to include(
           {
             type: 'alias',
@@ -199,31 +187,32 @@ class PostHog
     end
 
     describe '#flush' do
-      let(:client_with_worker) do
-        Client
-          .new(api_key: API_KEY)
-          .tap do |client|
-            queue = client.instance_variable_get(:@queue)
-            client.instance_variable_set(:@worker, DummyWorker.new(queue))
+      before do
+        clients_queue = client.instance_variable_get(:@queue)
+        empyting_worker = Class.new(NoopWorker) do # A worker that empties jobs
+          def run
+            @queue.clear
           end
+        end.new(clients_queue)
+        client.instance_variable_set(:@worker, empyting_worker)
       end
 
       it 'waits for the queue to finish on a flush' do
-        client_with_worker.identify Queued::IDENTIFY
-        client_with_worker.capture Queued::CAPTURE
-        client_with_worker.flush
+        client.identify Queued::IDENTIFY
+        client.capture Queued::CAPTURE
+        client.flush
 
-        expect(client_with_worker.queued_messages).to eq(0)
+        expect(client.queued_messages).to eq(0)
       end
 
       unless defined?(JRUBY_VERSION)
         it 'completes when the process forks' do
-          client_with_worker.identify Queued::IDENTIFY
+          client.identify Queued::IDENTIFY
 
           Process.fork do
-            client_with_worker.capture Queued::CAPTURE
-            client_with_worker.flush
-            expect(client_with_worker.queued_messages).to eq(0)
+            client.capture Queued::CAPTURE
+            client.flush
+            expect(client.queued_messages).to eq(0)
           end
 
           Process.wait
@@ -274,12 +263,7 @@ class PostHog
         stub_request(:post, 'https://app.posthog.com/decide/?token=testsecret')
           .to_return(status: 200, body: decide_res.to_json)
 
-        c =
-          Client
-            .new(api_key: API_KEY, personal_api_key: API_KEY)
-            .tap do |client|
-              client.instance_variable_set(:@worker, NoopWorker.new)
-            end
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
         expect(c.is_feature_enabled('simple_flag', 'some id')).to eq(true)
         expect(c.is_feature_enabled('disabled_flag', 'some id')).to eq(false)
@@ -287,12 +271,7 @@ class PostHog
       end
 
       it 'fails without a personal api key' do
-        bad_client =
-          Client
-            .new(api_key: API_KEY)
-            .tap do |client|
-              client.instance_variable_set(:@worker, NoopWorker.new)
-            end
+        bad_client = Client.new(api_key: API_KEY, test_mode: true)
         allow(bad_client.logger).to receive(:error)
         expect(bad_client.logger).to receive(:error).with(
           'You need to specify a personal_api_key to use feature flags'
@@ -314,16 +293,14 @@ class PostHog
         %i[capture identify alias].each do |s|
           expect(client.send(s, data)).to eq(true)
           expect(client.send(s, data)).to eq(false) # Queue is full
-          queue.pop(true)
+          client.clear
         end
       end
 
       it 'converts message id to string' do
         %i[capture identify alias].each do |s|
           client.send(s, data)
-          message = queue.pop(true)
-
-          expect(check_property.call(message, :messageId, '5')).to eq(true)
+          expect(check_property.call(client.dequeue_last_message, :messageId, '5')).to eq(true)
         end
       end
     end
