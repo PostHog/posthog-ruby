@@ -4,7 +4,7 @@ require 'time'
 require 'posthog/defaults'
 require 'posthog/logging'
 require 'posthog/utils'
-require 'posthog/worker'
+require 'posthog/send_worker'
 require 'posthog/noop_worker'
 require 'posthog/feature_flags'
 
@@ -27,10 +27,10 @@ class PostHog
       @api_key = opts[:api_key]
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
-      if opts[:test_mode]
-        @worker = NoopWorker.new(@queue)
+      @worker = if opts[:test_mode]
+        NoopWorker.new(@queue)
       else
-        @worker = Worker.new(@queue, @api_key, opts)
+        SendWorker.new(@queue, @api_key, opts)
       end
       @worker_thread = nil
       @feature_flags_poller = nil
