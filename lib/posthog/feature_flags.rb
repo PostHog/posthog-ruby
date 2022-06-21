@@ -91,7 +91,8 @@ class PostHog
     end
 
     def _request(method, endpoint, use_personal_api_key = false, data = {})
-      uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}&v=2")
+      decide_v2 = endpoint == 'decide' ? '&v=2' : ''
+      uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}#{decide_v2}")
       req = nil
       if use_personal_api_key
         req = Net::HTTP::Get.new(uri)

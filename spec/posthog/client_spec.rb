@@ -271,7 +271,7 @@ class PostHog
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # Mock response for decide
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2/?token=testsecret')
+        stub_request(:post, 'https://app.posthog.com/decide/?token=testsecret&v=2')
           .to_return(status: 200, body: decide_res.to_json)
 
         c =
@@ -305,7 +305,7 @@ class PostHog
           'https://app.posthog.com/api/feature_flag/?token=testsecret'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2/?token=testsecret')
+        stub_request(:post, 'https://app.posthog.com/decide/?token=testsecret&v=2')
           .to_return(status: 200, body: decide_res.to_json)
         
         c =
