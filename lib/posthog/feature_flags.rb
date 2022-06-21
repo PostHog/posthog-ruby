@@ -54,7 +54,7 @@ class PostHog
         return is_simple_flag_enabled(key, distinct_id, flag_rollout_pctg)
       else
         data = { 'distinct_id' => distinct_id }
-        res = _request('POST', 'decide/?v=2', false, data)
+        res = _request('POST', 'decide', false, data)
         return res['featureFlags'].fetch(key, default_result)
       end
 
@@ -91,7 +91,7 @@ class PostHog
     end
 
     def _request(method, endpoint, use_personal_api_key = false, data = {})
-      uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}")
+      uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}&v=2")
       req = nil
       if use_personal_api_key
         req = Net::HTTP::Get.new(uri)
