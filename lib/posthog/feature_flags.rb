@@ -35,7 +35,6 @@ class PostHog
 
       feature_flag = nil
 
-
       @feature_flags.each do |flag|
         if key == flag['key']
           feature_flag = flag
@@ -55,8 +54,8 @@ class PostHog
         return is_simple_flag_enabled(key, distinct_id, flag_rollout_pctg)
       else
         data = { 'distinct_id' => distinct_id }
-        res = _request('POST', 'decide', false, data)
-        return res['featureFlags'].include? key
+        res = _request('POST', 'decide/?v=2', false, data)
+        return res['featureFlags'].fetch(key, default_result)
       end
 
       return false
