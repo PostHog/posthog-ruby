@@ -4,7 +4,8 @@ require 'time'
 require 'posthog/defaults'
 require 'posthog/logging'
 require 'posthog/utils'
-require 'posthog/worker'
+require 'posthog/send_worker'
+require 'posthog/noop_worker'
 require 'posthog/feature_flags'
 
 class PostHog
@@ -15,7 +16,9 @@ class PostHog
     # @param [Hash] opts
     # @option opts [String] :api_key Your project's api_key
     # @option opts [FixNum] :max_queue_size Maximum number of calls to be
-    #   remain queued.
+    #   remain queued. Defaults to 10_000.
+    # @option opts [Bool] :test_mode +true+ if messages should remain
+    #   queued for testing. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
     def initialize(opts = {})
       symbolize_keys!(opts)
@@ -24,7 +27,11 @@ class PostHog
       @api_key = opts[:api_key]
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
-      @worker = Worker.new(@queue, @api_key, opts)
+      @worker = if opts[:test_mode]
+        NoopWorker.new(@queue)
+      else
+        SendWorker.new(@queue, @api_key, opts)
+      end
       @worker_thread = nil
       @feature_flags_poller = nil
       @personal_api_key = nil
@@ -45,7 +52,7 @@ class PostHog
       at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
 
-    # Synchronously waits until the worker has flushed the queue.
+    # Synchronously waits until the worker has cleared the queue.
     #
     # Use only for scripts which are not long-running, and will specifically
     # exit
@@ -54,6 +61,13 @@ class PostHog
         ensure_worker_running
         sleep(0.1)
       end
+    end
+
+    # Clears the queue without waiting.
+    #
+    # Use only in test mode
+    def clear
+      @queue.clear
     end
 
     # @!macro common_attrs
@@ -94,6 +108,11 @@ class PostHog
     def alias(attrs)
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_alias(attrs))
+    end
+
+    # @return [Hash] pops the last message from the queue
+    def dequeue_last_message
+      @queue.pop
     end
 
     # @return [Fixnum] number of messages in the queue
