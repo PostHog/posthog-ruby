@@ -1,3 +1,7 @@
+# 1.3.0 - 2022-06-24
+
+- Add support for running the client in "No-op" mode for testing (https://github.com/PostHog/posthog-ruby/pull/15)
+
 # 1.2.4 - 2022-05-30
 
 - Fix `create_alias` call (https://github.com/PostHog/posthog-ruby/pull/14)
