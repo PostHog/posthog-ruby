@@ -1,13 +1,17 @@
 require 'spec_helper'
 
 class PostHog
-  describe Worker do
-    before { PostHog::Transport.stub = true }
+  describe SendWorker do
+    around do |example|
+      PostHog::Transport.stub = true
+      example.call
+      PostHog::Transport.stub = false
+    end
 
     describe '#init' do
       it 'accepts string keys' do
         queue = Queue.new
-        worker = PostHog::Worker.new(queue, 'secret', 'batch_size' => 100)
+        worker = described_class.new(queue, 'secret', 'batch_size' => 100)
         batch = worker.instance_variable_get(:@batch)
         expect(batch.instance_variable_get(:@max_message_count)).to eq(100)
       end
@@ -31,7 +35,7 @@ class PostHog
 
           queue = Queue.new
           queue << {}
-          worker = PostHog::Worker.new(queue, 'secret')
+          worker = described_class.new(queue, 'secret')
           worker.run
 
           expect(queue).to be_empty
@@ -108,7 +112,7 @@ class PostHog
     describe '#is_requesting?' do
       it 'does not return true if there isn\'t a current batch' do
         queue = Queue.new
-        worker = PostHog::Worker.new(queue, 'testsecret')
+        worker = described_class.new(queue, 'testsecret')
 
         expect(worker.is_requesting?).to eq(false)
       end
@@ -123,7 +127,7 @@ class PostHog
 
         queue = Queue.new
         queue << Requested::CAPTURE
-        worker = PostHog::Worker.new(queue, 'testsecret')
+        worker = described_class.new(queue, 'testsecret')
 
         worker_thread = Thread.new { worker.run }
         eventually { expect(worker.is_requesting?).to eq(true) }

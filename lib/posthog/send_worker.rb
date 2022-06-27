@@ -4,7 +4,7 @@ require 'posthog/transport'
 require 'posthog/utils'
 
 class PostHog
-  class Worker
+  class SendWorker
     include PostHog::Utils
     include PostHog::Defaults
     include PostHog::Logging

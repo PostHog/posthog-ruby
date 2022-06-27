@@ -60,28 +60,6 @@ module Requested
   SCREEN = SCREEN.merge distinctId: DISTINCT_ID
 end
 
-# A worker that doesn't consume jobs
-class NoopWorker
-  def run
-    # Does nothing
-  end
-end
-
-# A worker that consumes all jobs
-class DummyWorker
-  def initialize(queue)
-    @queue = queue
-  end
-
-  def run
-    @queue.pop until @queue.empty?
-  end
-
-  def is_requesting?
-    false
-  end
-end
-
 # A backoff policy that returns a fixed list of values
 class FakeBackoffPolicy
   def initialize(interval_values)
