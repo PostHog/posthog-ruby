@@ -292,12 +292,7 @@ class PostHog
         stub_request(:post, 'https://app.posthog.com/decide/?token=testsecret&v=2')
           .to_return(status: 200, body: decide_res.to_json)
         
-        c =
-        Client
-          .new(api_key: API_KEY, personal_api_key: API_KEY)
-          .tap do |client|
-            client.instance_variable_set(:@worker, NoopWorker.new)
-          end
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
         expect(c.is_feature_enabled("beta-feature", "distinct_id")).to eq("variant-1")
       end
