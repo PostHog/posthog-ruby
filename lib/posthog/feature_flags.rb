@@ -91,10 +91,10 @@ class PostHog
     end
 
     def _request(method, endpoint, use_personal_api_key = false, data = {})
-      uri = URI("https://#{@host}/#{endpoint}/")
+      uri = URI("https://#{@host}/#{endpoint}")
       req = nil
       if use_personal_api_key
-        new_uri = uri + `?token=#{@project_api_key}`
+        new_uri = uri + `/?token=#{@project_api_key}`
         req = Net::HTTP::Get.new(new_uri)
         req['Authorization'] = "Bearer #{@personal_api_key}"
       else
