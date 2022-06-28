@@ -120,7 +120,7 @@ class PostHog
       @queue.length
     end
 
-    def is_feature_enabled(flag_key, distinct_id, default_value = false)
+    def is_feature_enabled(flag_key, distinct_id, default_value = false, groups = {})
       unless @personal_api_key
         logger.error(
           'You need to specify a personal_api_key to use feature flags'
@@ -131,7 +131,8 @@ class PostHog
         @feature_flags_poller.is_feature_enabled(
           flag_key,
           distinct_id,
-          default_value
+          default_value,
+          groups
         )
       capture(
         {
@@ -146,14 +147,14 @@ class PostHog
       return is_enabled
     end
 
-    def get_feature_flag(key, distinct_id)
+    def get_feature_flag(key, distinct_id, groups={})
       unless @personal_api_key
         logger.error(
           'You need to specify a personal_api_key to use feature flags'
         )
         return
       end
-      feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id)
+      feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id, groups)
       capture(
         {
           'distinct_id': distinct_id,

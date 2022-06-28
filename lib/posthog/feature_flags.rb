@@ -27,7 +27,7 @@ class PostHog
       @task.execute
     end
 
-    def is_feature_enabled(key, distinct_id, default_result = false)
+    def is_feature_enabled(key, distinct_id, default_result = false, groups = {})
       # make sure they're loaded on first run
       load_feature_flags
 
@@ -53,9 +53,8 @@ class PostHog
       if feature_flag['is_simple_flag']
         return is_simple_flag_enabled(key, distinct_id, flag_rollout_pctg)
       else
-        data = { 'distinct_id' => distinct_id }
-        res = _request('POST', 'decide/?v=2', false, data)
-        return res['featureFlags'][key] ? true : default_result
+        res = get_feature_variants(distinct_id, groups)
+        return res[key] ? true : default_result
       end
 
       return false
