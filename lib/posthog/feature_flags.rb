@@ -75,18 +75,22 @@ class PostHog
       end
     end
 
-    def get_feature_variants(distinct_id)
+    def get_feature_variants(distinct_id, groups = nil)
+      groups = {} unless groups.is_a?(Hash)
+
       request_data = {
             "distinct_id": distinct_id,
             "personal_api_key": @personal_api_key,
+            "groups": groups
       }
+
       decide_data = _request('POST', 'decide/?v=2', false)
       feature_variants = decide_data["featureFlags"]
       return feature_variants
     end
 
-    def get_feature_flag(key, distinct_id)
-      variants = get_feature_variants(distinct_id)
+    def get_feature_flag(key, distinct_id, groups = {})
+      variants = get_feature_variants(distinct_id, groups=groups)
       return variants.fetch(key, false)
     end
 
