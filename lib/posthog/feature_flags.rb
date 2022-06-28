@@ -90,7 +90,7 @@ class PostHog
 
     def get_feature_flag(key, distinct_id, groups = {})
       variants = get_feature_variants(distinct_id, groups=groups)
-      return variants.fetch(key, false)
+      return variants.fetch(key)
     end
 
     def shutdown_poller()
