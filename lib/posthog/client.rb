@@ -146,6 +146,27 @@ class PostHog
       return is_enabled
     end
 
+    def get_feature_flag(key, distinct_id)
+      unless @personal_api_key
+        logger.error(
+          'You need to specify a personal_api_key to use feature flags'
+        )
+        return
+      end
+      feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id)
+      capture(
+        {
+          'distinct_id': distinct_id,
+          'event': '$feature_flag_called',
+          'properties': {
+            '$feature_flag': key,
+            '$feature_flag_response': feature_flag
+          }
+        }
+      )
+      return feature_flag
+    end
+
     def reload_feature_flags
       unless @personal_api_key
         logger.error(

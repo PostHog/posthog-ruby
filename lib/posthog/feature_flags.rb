@@ -54,8 +54,8 @@ class PostHog
         return is_simple_flag_enabled(key, distinct_id, flag_rollout_pctg)
       else
         data = { 'distinct_id' => distinct_id }
-        res = _request('POST', 'decide', false, data)
-        return res['featureFlags'].fetch(key, default_result)
+        res = _request('POST', 'decide/?v=2', false, data)
+        return res['featureFlags'][key] ? true : default_result
       end
 
       return false
@@ -73,6 +73,21 @@ class PostHog
       if @loaded_flags_successfully_once.false? || force_reload
         _load_feature_flags
       end
+    end
+
+    def get_feature_variants(distinct_id)
+      request_data = {
+            "distinct_id": distinct_id,
+            "personal_api_key": @personal_api_key,
+      }
+      decide_data = _request('POST', 'decide/?v=2', false)
+      feature_variants = decide_data["featureFlags"]
+      return feature_variants
+    end
+
+    def get_feature_flag(key, distinct_id)
+      variants = get_feature_variants(distinct_id)
+      return variants.fetch(key, false)
     end
 
     def shutdown_poller()
@@ -94,8 +109,8 @@ class PostHog
       uri = URI("https://#{@host}/#{endpoint}")
       req = nil
       if use_personal_api_key
-        new_uri = uri + `/?token=#{@project_api_key}`
-        req = Net::HTTP::Get.new(new_uri)
+        uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}")
+        req = Net::HTTP::Get.new(uri)
         req['Authorization'] = "Bearer #{@personal_api_key}"
       else
         req = Net::HTTP::Post.new(uri)

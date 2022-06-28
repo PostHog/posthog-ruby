@@ -294,7 +294,33 @@ class PostHog
         
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-        expect(c.is_feature_enabled("beta-feature", "distinct_id")).to eq("variant-1")
+        expect(c.is_feature_enabled("beta-feature", "distinct_id")).to eq(true)
+      end
+
+      it 'gets feature flag' do
+        decide_res = {"featureFlags": {"beta-feature": "variant-1"}}
+        api_feature_flag_res = {
+          "results": [
+            {
+              "id": 1,
+              "name": '',
+              "key": 'beta-feature',
+              "active": true,
+              "is_simple_flag": false,
+              "rollout_percentage": 100
+            },]
+          }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+          .to_return(status: 200, body: decide_res.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        expect(c.get_feature_flag("beta-feature", "distinct_id")).to eq("variant-1")
       end
 
       it 'fails without a personal api key' do
