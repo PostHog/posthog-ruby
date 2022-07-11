@@ -97,6 +97,41 @@ class PostHog
 
         expect(properties[:nottime]).to eq('x')
       end
+
+      it 'captures feature flags' do
+        decide_res = {"featureFlags": {"beta-feature": "random-variant"}}
+        # Mock response for decide
+        api_feature_flag_res = {
+          "results": [
+            {
+              "id": 1,
+              "name": '',
+              "key": 'beta-feature',
+              "active": true,
+              "is_simple_flag": false,
+              "rollout_percentage": 100
+            },]
+          }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+          .to_return(status: 200, body: decide_res.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: "distinct_id",
+            event: "ruby test event",
+            send_feature_flags: true,
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties["$feature/beta-feature"]).to eq("random-variant")
+        expect(properties["$active_feature_flags"]).to eq(["beta-feature"])
+      end
     end
 
     describe '#identify' do
@@ -251,7 +286,7 @@ class PostHog
           ]
         }
 
-        decide_res = { "featureFlags": ['complex_flag'] }
+        decide_res = { "featureFlags": {"complex_flag": true} }
 
         # Mock response for api/feature_flag
         stub_request(
@@ -260,7 +295,7 @@ class PostHog
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # Mock response for decide
-        stub_request(:post, 'https://app.posthog.com/decide/?token=testsecret')
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
           .to_return(status: 200, body: decide_res.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -268,6 +303,59 @@ class PostHog
         expect(c.is_feature_enabled('simple_flag', 'some id')).to eq(true)
         expect(c.is_feature_enabled('disabled_flag', 'some id')).to eq(false)
         expect(c.is_feature_enabled('complex_flag', 'some id')).to eq(true)
+      end
+
+      it 'decides multivariate flags correctly' do 
+        decide_res = {"featureFlags": {"beta-feature": "variant-1"}}
+        api_feature_flag_res = {
+          "results": [
+            {
+              "id": 1,
+              "name": '',
+              "key": 'beta-feature',
+              "active": true,
+              "is_simple_flag": false,
+              "rollout_percentage": 100
+            },]
+          }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+          .to_return(status: 200, body: decide_res.to_json)
+        
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(c.is_feature_enabled("beta-feature", "distinct_id")).to eq(true)
+      end
+
+      it 'gets feature flag' do
+        decide_res = {"featureFlags": {"beta-feature": "variant-1"}}
+        api_feature_flag_res = {
+          "results": [
+            {
+              "id": 1,
+              "name": '',
+              "key": 'beta-feature',
+              "active": true,
+              "is_simple_flag": false,
+              "rollout_percentage": 100
+            },]
+          }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+          .to_return(status: 200, body: decide_res.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        expect(c.get_feature_flag("beta-feature", "distinct_id")).to eq("variant-1")
       end
 
       it 'fails without a personal api key' do

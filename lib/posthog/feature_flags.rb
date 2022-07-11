@@ -27,14 +27,13 @@ class PostHog
       @task.execute
     end
 
-    def is_feature_enabled(key, distinct_id, default_result = false)
+    def is_feature_enabled(key, distinct_id, default_result = false, groups = {})
       # make sure they're loaded on first run
       load_feature_flags
 
       return default_result unless @loaded_flags_successfully_once
 
       feature_flag = nil
-
 
       @feature_flags.each do |flag|
         if key == flag['key']
@@ -54,9 +53,8 @@ class PostHog
       if feature_flag['is_simple_flag']
         return is_simple_flag_enabled(key, distinct_id, flag_rollout_pctg)
       else
-        data = { 'distinct_id' => distinct_id }
-        res = _request('POST', 'decide', false, data)
-        return res['featureFlags'].include? key
+        res = get_feature_variants(distinct_id, groups)
+        return res[key] ? true : default_result
       end
 
       return false
@@ -76,6 +74,25 @@ class PostHog
       end
     end
 
+    def get_feature_variants(distinct_id, groups = nil)
+      groups = {} unless groups.is_a?(Hash)
+
+      request_data = {
+            "distinct_id": distinct_id,
+            "personal_api_key": @personal_api_key,
+            "groups": groups
+      }
+
+      decide_data = _request('POST', 'decide/?v=2', false)
+      feature_variants = decide_data["featureFlags"]
+      return feature_variants
+    end
+
+    def get_feature_flag(key, distinct_id, groups = {})
+      variants = get_feature_variants(distinct_id, groups=groups)
+      return variants.fetch(key)
+    end
+
     def shutdown_poller()
       @task.shutdown
     end
@@ -92,9 +109,10 @@ class PostHog
     end
 
     def _request(method, endpoint, use_personal_api_key = false, data = {})
-      uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}")
+      uri = URI("https://#{@host}/#{endpoint}")
       req = nil
       if use_personal_api_key
+        uri = URI("https://#{@host}/#{endpoint}/?token=#{@project_api_key}")
         req = Net::HTTP::Get.new(uri)
         req['Authorization'] = "Bearer #{@personal_api_key}"
       else

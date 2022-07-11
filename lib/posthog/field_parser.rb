@@ -79,10 +79,13 @@ class PostHog
       # - "timestamp"
       # - "distinct_id"
       # - "message_id"
+      # - "send_feature_flags"
       def parse_common_fields(fields)
         timestamp = fields[:timestamp] || Time.new
         distinct_id = fields[:distinct_id]
         message_id = fields[:message_id].to_s if fields[:message_id]
+        send_feature_flags = fields[:send_feature_flags]
+        groups = fields[:groups]
 
         check_timestamp! timestamp
         check_presence! distinct_id, 'distinct_id'
@@ -98,6 +101,14 @@ class PostHog
             '$lib_version' => PostHog::VERSION.to_s
           }
         }
+
+        if send_feature_flags
+          feature_variants = fields[:feature_variants]
+          feature_variants.each do |key, value|
+            parsed[:properties]["$feature/#{key}"] = value
+          end
+          parsed[:properties]["$active_feature_flags"] = feature_variants.keys
+        end
         parsed
       end
 
