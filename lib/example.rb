@@ -34,7 +34,7 @@ posthog.capture({
 posthog.identify({distinct_id: "new_distinct_id", properties: {"email": "something@something.com"}})
 
 # Add properties to a group
-# posthog.group_identify("company", "id:5", {"employees": 11})
+posthog.group_identify({group_type: "company", group_key: "id:5", properties: {"employees": 11}})
 
 # properties set only once to the person
 posthog.capture({distinct_id: "new_distinct_id", event: "signup", properties: { "$set_once": {"self_serve_signup": true}}})
