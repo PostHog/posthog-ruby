@@ -85,6 +85,7 @@ class PostHog
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
+
       if attrs[:send_feature_flags]
         feature_variants = @feature_flags_poller.get_feature_variants(attrs[:distinct_id], attrs[:groups])
         attrs[:feature_variants] = feature_variants
@@ -102,6 +103,19 @@ class PostHog
     def identify(attrs)
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_identify(attrs))
+    end
+
+    # Identifies a group
+    #
+    # @param [Hash] attrs
+    #
+    # @option attrs [String] :group_type Group type
+    # @option attrs [String] :group_key Group key
+    # @option attrs [Hash] :properties Group properties (optional)
+    # @macro common_attrs
+    def group_identify(attrs)
+      symbolize_keys! attrs
+      enqueue(FieldParser.parse_for_group_identify(attrs))
     end
 
     # Aliases a user from one id to another
