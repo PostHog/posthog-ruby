@@ -132,6 +132,21 @@ class PostHog
         expect(properties["$feature/beta-feature"]).to eq("random-variant")
         expect(properties["$active_feature_flags"]).to eq(["beta-feature"])
       end
+
+      it 'captures groups' do
+        client.capture(
+          {
+            distinct_id: "distinct_id",
+            event: "test_event",
+            groups: {
+              "company": "id:5",
+              "instance": "app.posthog.com"
+            }
+          }
+        )
+        properties = client.dequeue_last_message[:properties]
+        expect(properties["$groups"]).to eq({"company": "id:5", "instance": "app.posthog.com"})
+      end
     end
 
     describe '#identify' do
@@ -178,6 +193,31 @@ class PostHog
         expect(Date.iso8601(properties[:date])).to eq(date)
 
         expect(properties[:nottime]).to eq('x')
+      end
+    end
+
+    describe '#group_identify' do
+      it 'errors without group key or group type' do
+        expect { client.group_identify({}) }.to raise_error(ArgumentError)
+      end
+
+      it 'group identifies' do
+        properties =
+        client.group_identify(
+          {
+            group_type: "organization",
+            group_key: "id:5",
+            properties: {
+              trait: "value"
+            }
+          }
+        )
+        msg = client.dequeue_last_message
+
+        expect(msg[:distinct_id]).to eq("$organization_id:5")
+        expect(msg[:event]).to eq("$groupidentify")
+        expect(msg[:properties][:$group_type]).to eq("organization")
+        expect(msg[:properties][:$group_set][:trait]).to eq("value")
       end
     end
 

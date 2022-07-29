@@ -7,14 +7,21 @@ class PostHog
       #
       # - "event"
       # - "properties"
+      # - "groups"
       def parse_for_capture(fields)
         common = parse_common_fields(fields)
 
         event = fields[:event]
         properties = fields[:properties] || {}
+        groups = fields[:groups]
 
         check_presence!(event, 'event')
         check_is_hash!(properties, 'properties')
+
+        if groups
+          check_is_hash!(groups, 'groups')
+          properties["$groups"] = groups
+        end
 
         isoify_dates! properties
 
@@ -44,6 +51,33 @@ class PostHog
             event: '$identify',
             '$set': properties,
             properties: properties.merge(common[:properties] || {})
+          }
+        )
+      end
+
+      def parse_for_group_identify(fields)
+        properties = fields[:properties] || {}
+        group_type = fields[:group_type]
+        group_key = fields[:group_key]
+
+        check_presence!(group_type, 'group type')
+        check_presence!(group_key, 'group_key')
+        check_is_hash!(properties, 'properties')
+
+        distinct_id = "$#{group_type}_#{group_key}"
+        fields[:distinct_id] = distinct_id
+        common = parse_common_fields(fields)
+
+        isoify_dates! properties
+
+        common.merge(
+          {
+            event: '$groupidentify',
+            properties: {
+              "$group_type": group_type,
+              "$group_key": group_key,
+              "$group_set": properties.merge(common[:properties] || {})
+            },
           }
         )
       end
@@ -85,7 +119,6 @@ class PostHog
         distinct_id = fields[:distinct_id]
         message_id = fields[:message_id].to_s if fields[:message_id]
         send_feature_flags = fields[:send_feature_flags]
-        groups = fields[:groups]
 
         check_timestamp! timestamp
         check_presence! distinct_id, 'distinct_id'
