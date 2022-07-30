@@ -84,7 +84,7 @@ class PostHog
           response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties)
         rescue InconclusiveMatchError => e
         rescue StandardError => e
-          logger.error "Error computing flag locally: #{e}. #{e.backtrace.join("\n")}"
+          logger.error "Error computing flag locally: #{e}.}"
         end
       end
 
@@ -98,6 +98,35 @@ class PostHog
         end
       end
 
+      return response
+    end
+
+    def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {})
+      # make sure they're loaded on first run
+      load_feature_flags
+
+      response = {}
+      fallback_to_decide = @feature_flags.empty?
+
+      @feature_flags.each do |flag|
+        begin
+          response[flag['key']] = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+        rescue InconclusiveMatchError => e
+          fallback_to_decide = true
+        rescue StandardError => e
+          logger.error "Error computing flag locally: #{e}."
+          fallback_to_decide = true
+        end
+      end
+
+      if fallback_to_decide
+        begin
+          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
+          response = {**response, **flags}
+        rescue StandardError => e
+          logger.error "Error computing flag remotely: #{e}"
+        end
+      end
       return response
     end
 

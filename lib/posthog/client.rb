@@ -179,7 +179,7 @@ class PostHog
       return feature_flag
     end
 
-    def get_all_flags(distinct_id, groups={}, person_properties={}, group_properties={})
+    def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {})
       return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties)
     end
 
