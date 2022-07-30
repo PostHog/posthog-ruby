@@ -607,6 +607,11 @@ class PostHog
 
   describe 'consistency tests' do
 
+    # These tests are the same across all libraries
+    # See https://github.com/PostHog/posthog/blob/master/posthog/test/test_feature_flag.py#L627
+    # where this test has directly been copied from.
+    # They ensure that the server and library hash calculations are in sync.
+
     it 'is consistent for simple flags' do
       api_feature_flag_res = {
         "flags": [

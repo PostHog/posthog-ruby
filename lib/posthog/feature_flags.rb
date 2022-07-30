@@ -38,14 +38,6 @@ class PostHog
       end
     end
 
-    def is_simple_flag_enabled(key, distinct_id, rollout_percentage)
-      hash = Digest::SHA1.hexdigest "#{key}.#{distinct_id}"
-      return(
-        (Integer(hash[0..14], 16).to_f / 0xfffffffffffffff) <=
-          (rollout_percentage / 100)
-      )
-    end
-
     def load_feature_flags(force_reload = false)
       if @loaded_flags_successfully_once.false? || force_reload
         _load_feature_flags
@@ -96,7 +88,7 @@ class PostHog
         end
       end
 
-      if response == nil
+      if response.nil?
         begin
           flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
           response = flags[key]

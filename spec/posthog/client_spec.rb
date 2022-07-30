@@ -302,13 +302,18 @@ class PostHog
     describe 'feature flags' do
       it 'decides flags correctly' do
         api_feature_flag_res = {
-          "results": [
+          "flags": [
             {
               "id": 719,
               "name": '',
               "key": 'simple_flag',
               "active": true,
               "is_simple_flag": true,
+              "filters": {
+                "groups": [
+                  {"properties": [], "rollout_percentage": nil}
+                ]
+              },
               "rollout_percentage": nil
             },
             {
@@ -317,7 +322,11 @@ class PostHog
               "key": 'disabled_flag',
               "active": false,
               "is_simple_flag": true,
-              "rollout_percentage": nil
+              "filters": {
+                "groups": [
+                  {"properties": [], "rollout_percentage": nil}
+                ]
+              }
             },
             {
               "id": 721,
@@ -325,7 +334,12 @@ class PostHog
               "key": 'complex_flag',
               "active": true,
               "is_simple_flag": false,
-              "rollout_percentage": nil
+              "rollout_percentage": nil,
+              "filters": {
+                "groups": [
+                  {"properties": [], "rollout_percentage": nil}
+                ]
+              }
             }
           ]
         }
@@ -335,7 +349,7 @@ class PostHog
         # Mock response for api/feature_flag
         stub_request(
           :get,
-          'https://app.posthog.com/api/feature_flag/?token=testsecret'
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # Mock response for decide
@@ -347,59 +361,6 @@ class PostHog
         expect(c.is_feature_enabled('simple_flag', 'some id')).to eq(true)
         expect(c.is_feature_enabled('disabled_flag', 'some id')).to eq(false)
         expect(c.is_feature_enabled('complex_flag', 'some id')).to eq(true)
-      end
-
-      it 'decides multivariate flags correctly' do 
-        decide_res = {"featureFlags": {"beta-feature": "variant-1"}}
-        api_feature_flag_res = {
-          "results": [
-            {
-              "id": 1,
-              "name": '',
-              "key": 'beta-feature',
-              "active": true,
-              "is_simple_flag": false,
-              "rollout_percentage": 100
-            },]
-          }
-
-        stub_request(
-          :get,
-          'https://app.posthog.com/api/feature_flag/?token=testsecret'
-        ).to_return(status: 200, body: api_feature_flag_res.to_json)
-
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
-          .to_return(status: 200, body: decide_res.to_json)
-        
-        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
-
-        expect(c.is_feature_enabled("beta-feature", "distinct_id")).to eq(true)
-      end
-
-      it 'gets feature flag' do
-        decide_res = {"featureFlags": {"beta-feature": "variant-1"}}
-        api_feature_flag_res = {
-          "results": [
-            {
-              "id": 1,
-              "name": '',
-              "key": 'beta-feature',
-              "active": true,
-              "is_simple_flag": false,
-              "rollout_percentage": 100
-            },]
-          }
-
-        stub_request(
-          :get,
-          'https://app.posthog.com/api/feature_flag/?token=testsecret'
-        ).to_return(status: 200, body: api_feature_flag_res.to_json)
-
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
-          .to_return(status: 200, body: decide_res.to_json)
-
-        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
-        expect(c.get_feature_flag("beta-feature", "distinct_id")).to eq("variant-1")
       end
 
       it 'fails without a personal api key' do
