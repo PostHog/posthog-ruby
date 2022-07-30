@@ -20,8 +20,11 @@ class PostHog
     # @option opts [Bool] :test_mode +true+ if messages should remain
     #   queued for testing. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
+    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
     def initialize(opts = {})
       symbolize_keys!(opts)
+
+      opts[:host] ||= 'https://app.posthog.com'
 
       @queue = Queue.new
       @api_key = opts[:api_key]
@@ -34,20 +37,17 @@ class PostHog
       end
       @worker_thread = nil
       @feature_flags_poller = nil
-      @personal_api_key = nil
+      @personal_api_key = opts[:personal_api_key]
 
       check_api_key!
 
-      if opts[:personal_api_key]
-        @personal_api_key = opts[:personal_api_key]
-        @feature_flags_poller =
-          FeatureFlagsPoller.new(
-            opts[:feature_flags_polling_interval],
-            opts[:personal_api_key],
-            @api_key,
-            opts[:host]
-          )
-      end
+      @feature_flags_poller =
+        FeatureFlagsPoller.new(
+          opts[:feature_flags_polling_interval],
+          opts[:personal_api_key],
+          @api_key,
+          opts[:host]
+        )
 
       at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
@@ -82,6 +82,7 @@ class PostHog
     #
     # @option attrs [String] :event Event name
     # @option attrs [Hash] :properties Event properties (optional)
+    # @option attrs [Bool] :send_feature_flags Whether to send feature flags with this event (optional)
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
@@ -139,41 +140,32 @@ class PostHog
       @queue.length
     end
 
-    def is_feature_enabled(flag_key, distinct_id, default_value = false, groups = {})
-      unless @personal_api_key
-        logger.error(
-          'You need to specify a personal_api_key to use feature flags'
-        )
-        return
-      end
-      is_enabled =
-        @feature_flags_poller.is_feature_enabled(
-          flag_key,
-          distinct_id,
-          default_value,
-          groups
-        )
-      capture(
-        {
-          'distinct_id': distinct_id,
-          'event': '$feature_flag_called',
-          'properties': {
-            '$feature_flag': flag_key,
-            '$feature_flag_response': is_enabled
-          }
-        }
-      )
-      return is_enabled
+    def is_feature_enabled(flag_key, distinct_id, default_value = false, groups: {}, person_properties: {}, group_properties: {})
+      return !!get_feature_flag(flag_key, distinct_id, default_value, groups: groups, person_properties: person_properties, group_properties: group_properties)
     end
 
-    def get_feature_flag(key, distinct_id, groups={})
-      unless @personal_api_key
-        logger.error(
-          'You need to specify a personal_api_key to use feature flags'
-        )
-        return
-      end
-      feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id, groups)
+    # Returns whether the given feature flag is enabled for the given user or not
+    #
+    # @param [String] key The key of the feature flag
+    # @param [String] distinct_id The distinct id of the user
+    # @param [Hash] groups
+    # @param [Hash] person_properties key-value pairs of properties to associate with the user.
+    # @param [Hash] group_properties
+    # 
+    # @return [String, nil] The value of the feature flag
+    #
+    # The provided properties are used to calculate feature flags locally, if possible.
+    #
+    # `groups` are a mapping from group type to group key. So, if you have a group type of "organization" and a group key of "5",
+    # you would pass groups={"organization": "5"}.
+    # `group_properties` take the format: { group_type_name: { group_properties } }
+    # So, for example, if you have the group type "organization" and the group key "5", with the properties name, and employee count,
+    # you'll send these as:
+    # ```python
+    #     group_properties={"organization": {"name": "PostHog", "employees": 11}}
+    # ```
+    def get_feature_flag(key, distinct_id, default_value=false, groups: {}, person_properties: {}, group_properties: {})
+      feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id, default_value, groups, person_properties, group_properties)
       capture(
         {
           'distinct_id': distinct_id,
@@ -187,10 +179,14 @@ class PostHog
       return feature_flag
     end
 
+    def get_all_flags(distinct_id, groups={}, person_properties={}, group_properties={})
+      return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties)
+    end
+
     def reload_feature_flags
       unless @personal_api_key
         logger.error(
-          'You need to specify a personal_api_key to use feature flags'
+          'You need to specify a personal_api_key to locally evaluate feature flags'
         )
         return
       end

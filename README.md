@@ -4,6 +4,26 @@ Please see the main [PostHog docs](https://posthog.com/docs).
 
 Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-integration) details.
 
+## Developing Locally
+
+1. Install Ruby (and optionally `rbenv` to control ruby versions)
+2. Install Bundler
+3. Run `bundle install` to install dependencies
+
+## Running example file
+
+1. Build the `posthog-ruby` gem by calling: `gem build posthog-ruby.gemspec`.
+2. Install the gem locally: `gem install ./posthog-ruby-<version>.gem`
+3. Run `ruby example.rb`
+
+TODO: Doesn't work locally, defaults to https, ssl_verification only on workers, not on the whole client
+-> One part uses api_host, the other uses host, which is too messy.
+
+## Testing
+
+1. Run `bundle exec rspec`
+2. An example of running specific tests: `bundle exec rspec spec/posthog/client_spec.rb:26`
+
 ## Questions?
 
 ### [Join our Slack community.](https://join.slack.com/t/posthogusers/shared_invite/enQtOTY0MzU5NjAwMDY3LTc2MWQ0OTZlNjhkODk3ZDI3NDVjMDE1YjgxY2I4ZjI4MzJhZmVmNjJkN2NmMGJmMzc2N2U3Yjc3ZjI5NGFlZDQ)

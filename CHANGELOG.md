@@ -1,3 +1,10 @@
+# 2.0.0
+
+Breaking changes:
+
+1. `Client` initialisation doesn't take the `api_host` parameter anymore. Instead, it takes the `host` parameter, which needs to be fully qualified. For example: `https://api.posthog.com` is valid, while `api.posthog.com` is not valid.
+2. 
+
 # 1.3.0 - 2022-06-24
 
 - Add support for running the client in "No-op" mode for testing (https://github.com/PostHog/posthog-ruby/pull/15)

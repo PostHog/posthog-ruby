@@ -1,6 +1,10 @@
 require 'spec_helper'
 
 class PostHog
+
+  RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
+  # TODO: test that when `send_feature_flags` is true, and no personal API key is present, we don't blow up
+
   describe Client do
     let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
 
@@ -18,7 +22,7 @@ class PostHog
       end
 
       it 'handles skip_ssl_verification' do
-        expect(PostHog::Transport).to receive(:new).with({api_host: nil, skip_ssl_verification: true})
+        expect(PostHog::Transport).to receive(:new).with({api_host: 'https://app.posthog.com', skip_ssl_verification: true})
         expect { Client.new api_key: API_KEY, skip_ssl_verification: true }.to_not raise_error
       end
     end
@@ -115,7 +119,7 @@ class PostHog
 
         stub_request(
           :get,
-          'https://app.posthog.com/api/feature_flag/?token=testsecret'
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
         stub_request(:post, 'https://app.posthog.com/decide/?v=2')
           .to_return(status: 200, body: decide_res.to_json)
