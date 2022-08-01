@@ -1,5 +1,8 @@
 class PostHog
   module Defaults
+
+    MAX_HASH_SIZE = 50_000
+
     module Request
       HOST = 'app.posthog.com'
       PORT = 443

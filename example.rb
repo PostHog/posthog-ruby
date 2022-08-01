@@ -7,17 +7,18 @@ posthog = PostHog::Client.new({
    api_key: "phc_EKriuIZ8en7eBMCKkkgraMERQXkVM6g2gD050z2HIqf", # You can find this key on the /setup page in PostHog
    personal_api_key: "phx_XouNv5HTWQZkUvGkC4C8yq8cVmTI5eQ3oEkAWvniERn", # Required for local feature flag evaluation
    host: "http://localhost:8000", # Where you host PostHog. You can remove this line if using app.posthog.com
-   on_error: Proc.new { |status, msg| print msg }
+   on_error: Proc.new { |status, msg| print msg },
+   feature_flags_polling_interval: 10, # How often to poll for feature flags
 })
-
+posthog.logger.level = Logger::DEBUG
 # Capture an event
 posthog.capture({distinct_id: "distinct_id", event: "event", properties: {"property1": "value", "property2": "value"}, send_feature_flags: true})
 
 puts(posthog.is_feature_enabled("beta-feature", "distinct_id"))
 puts(posthog.is_feature_enabled("beta-feature", "new_distinct_id"))
-puts(posthog.is_feature_enabled("beta-feature", "distinct_id", {"company": "id:5"}))
+puts(posthog.is_feature_enabled("beta-feature", "distinct_id", {"company" => "id:5"}))
 
-puts("sleeping")
+# puts("sleeping")
 # sleep 5
 
 puts(posthog.is_feature_enabled("beta-feature", "distinct_id"))
@@ -46,5 +47,14 @@ posthog.capture({distinct_id: "new_distinct_id", event: "signup", properties: { 
 
 posthog.capture({distinct_id: "new_distinct_id", event: "signup", properties: { "$set": {"current_browser": "Chrome"}}})
 posthog.capture({distinct_id: "new_distinct_id", event: "signup", properties: { "$set": {"current_browser": "Firefox"}}})
+
+
+#############################################################################################
+# Local Evaluation Examples
+# requires a personal API key to work
+#############################################################################################
+
+# Assume test-flag has `City Name = Sydney` as a person property set, then this will evaluate locally & return true
+puts posthog.is_feature_enabled("test-flag", "random_id_12345", person_properties: {"$geoip_city_name" => "Sydney"})
 
 posthog.shutdown()

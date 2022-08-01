@@ -6,6 +6,7 @@ class PostHog
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
   describe 'local evaluation' do
+  
     it 'evaluates person properties' do
       api_feature_flag_res = {
         "flags": [
@@ -224,15 +225,20 @@ class PostHog
       # will fall back on `/decide`, as all properties present for second group, but that group resolves to false
       expect(c.get_feature_flag("complex-flag", "some-distinct-id_outside_rollout?", person_properties: {"region" => "USA", "email" => "a@b.com"})).to eq("decide-fallback-value")
       assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 1
+      expect(WebMock).to have_requested(:post, 'https://app.posthog.com/decide/?v=2').with(
+        body: {"distinct_id": "some-distinct-id_outside_rollout?", "groups": {}, "group_properties": {}, "person_properties": {"region" => "USA", "email" => "a@b.com"}, "token": "testsecret"})
       
       WebMock.reset_executed_requests!
       
       # same as above
       expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"doesnt_matter" => "1"})).to eq("decide-fallback-value")
       assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 1
+      
+      expect(WebMock).to have_requested(:post, 'https://app.posthog.com/decide/?v=2').with(
+        body: {"distinct_id": "some-distinct-id", "groups": {}, "group_properties": {}, "person_properties": {"doesnt_matter" => "1"}, "token": "testsecret"})
+        
       WebMock.reset_executed_requests!
       
-      # 
       expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq("decide-fallback-value")
       assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 1
       WebMock.reset_executed_requests!
@@ -558,6 +564,105 @@ class PostHog
       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
 
     end
+
+    it 'computes inactive flags locally as well' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "rollout_percentage": 100,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 100,
+                      }
+                  ]
+              },
+          },
+          {
+              "id": 2,
+              "name": "Beta Feature",
+              "key": "disabled-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 0,
+                      }
+                  ]
+              },
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => true, "disabled-feature" => false})
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+
+      # Now, after a poll interval, flag 1 is inactive, and flag 2 rollout is set to 100%.
+      api_feature_flag_res_updated = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": false,
+              "rollout_percentage": 100,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 100,
+                      }
+                  ]
+              },
+          },
+          {
+              "id": 2,
+              "name": "Beta Feature",
+              "key": "disabled-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 100,
+                      }
+                  ]
+              },
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res_updated.to_json)
+
+      # force reload to simulate poll interval
+      c.reload_feature_flags
+
+      expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => false, "disabled-feature" => true})
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+
+
+    end
   end
 
 
@@ -739,8 +844,6 @@ class PostHog
     end
   end
 
-  describe 'capture calls' do
-  end
 
   describe 'consistency tests' do
 

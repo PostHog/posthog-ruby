@@ -137,6 +137,79 @@ class PostHog
         expect(properties["$active_feature_flags"]).to eq(["beta-feature"])
       end
 
+      it 'captures feature flags when no personal API key is present' do
+        decide_res = {"featureFlags": {"beta-feature": "random-variant"}}
+        # Mock response for decide
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 401, body: {"error": "not authorized"}.to_json)
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+          .to_return(status: 200, body: decide_res.to_json)
+        c = Client.new(api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: "distinct_id",
+            event: "ruby test event",
+            send_feature_flags: true,
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties["$feature/beta-feature"]).to eq("random-variant")
+        expect(properties["$active_feature_flags"]).to eq(["beta-feature"])
+
+        assert_not_requested :get, 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      end
+
+      it 'manages memory well when sending feature flags' do
+        api_feature_flag_res = {
+          "flags": [
+            {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 100,
+                      }
+                  ],
+              },
+            },
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        stub_const("PostHog::Defaults::MAX_HASH_SIZE", 10)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(c.instance_variable_get(:@distinct_id_has_sent_flag_calls).length).to eq(0)
+
+        for i in 1..1000 do
+          distinct_id = "some-distinct-id#{i}"
+          c.get_feature_flag("beta-feature", distinct_id)
+
+          captured_message = c.dequeue_last_message
+          expect(captured_message[:distinct_id]).to eq(distinct_id)
+          expect(captured_message[:event]).to eq("$feature_flag_called")
+          expect(captured_message[:properties]).to eq({
+            "$feature_flag" => "beta-feature",
+            "$feature_flag_response" => true,
+            "$lib"=>"posthog-ruby",
+            "$lib_version"=>"1.3.0",
+          })
+          expect(c.instance_variable_get(:@distinct_id_has_sent_flag_calls).length <= 10).to eq(true)
+        end
+      end
+
       it 'captures groups' do
         client.capture(
           {
@@ -363,13 +436,13 @@ class PostHog
         expect(c.is_feature_enabled('complex_flag', 'some id')).to eq(true)
       end
 
-      it 'fails without a personal api key' do
-        bad_client = Client.new(api_key: API_KEY, test_mode: true)
-        allow(bad_client.logger).to receive(:error)
-        expect(bad_client.logger).to receive(:error).with(
-          'You need to specify a personal_api_key to use feature flags'
-        )
-        bad_client.is_feature_enabled('some_key', 'some id')
+      it 'doesnt fail without a personal api key' do
+        client = Client.new(api_key: API_KEY, test_mode: true)
+
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body: {"featureFlags": {'some_key': true}}.to_json)
+
+        expect(client.is_feature_enabled('some_key', 'some id')).to eq(true)
       end
     end
 

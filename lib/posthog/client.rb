@@ -48,6 +48,8 @@ class PostHog
           @api_key,
           opts[:host]
         )
+      
+      @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) { |hash, key| hash[key] = Array.new }
 
       at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
@@ -166,16 +168,19 @@ class PostHog
     # ```
     def get_feature_flag(key, distinct_id, default_value=false, groups: {}, person_properties: {}, group_properties: {})
       feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id, default_value, groups, person_properties, group_properties)
-      capture(
-        {
-          'distinct_id': distinct_id,
-          'event': '$feature_flag_called',
-          'properties': {
-            '$feature_flag': key,
-            '$feature_flag_response': feature_flag
+      if !@distinct_id_has_sent_flag_calls[distinct_id].include?(key)
+        capture(
+          {
+            'distinct_id': distinct_id,
+            'event': '$feature_flag_called',
+            'properties': {
+              '$feature_flag' => key,
+              '$feature_flag_response' => feature_flag
+            }
           }
-        }
-      )
+        )
+        @distinct_id_has_sent_flag_calls[distinct_id] << key
+      end
       return feature_flag
     end
 

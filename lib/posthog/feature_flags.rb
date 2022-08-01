@@ -14,7 +14,7 @@ class PostHog
     include PostHog::Logging
 
     def initialize(polling_interval, personal_api_key, project_api_key, host)
-      @polling_interval = polling_interval || 60 * 5
+      @polling_interval = polling_interval || 30
       @personal_api_key = personal_api_key
       @project_api_key = project_api_key
       @host = host
@@ -82,9 +82,11 @@ class PostHog
       if !feature_flag.nil?
         begin
           response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties)
+          logger.debug "Successfully computed flag locally: #{key} -> #{response}"
         rescue InconclusiveMatchError => e
+          logger.debug "Failed to compute flag #{key} locally: #{e}"
         rescue StandardError => e
-          logger.error "Error computing flag locally: #{e}.}"
+          logger.error "Error computing flag locally: #{e}"
         end
       end
 
@@ -92,6 +94,7 @@ class PostHog
         begin
           flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
           response = flags[key]
+          logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}"
           response = default_result
@@ -169,17 +172,17 @@ class PostHog
       elsif operator == 'not_icontains'
         return !override_value.to_s.downcase.include?(value.to_s.downcase)
       elsif operator == 'regex'
-        is_valid_regex(value.to_s) and !Regexp.new(value.to_s).match(override_value.to_s).nil?
+        return is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(override_value.to_s).nil?
       elsif operator == 'not_regex'
-        is_valid_regex(value.to_s) and Regexp.new(value.to_s).match(override_value.to_s).nil?
+        return is_valid_regex(value.to_s) && Regexp.new(value.to_s).match(override_value.to_s).nil?
       elsif operator == 'gt'
-        override_value.class == value.class and override_value > value
+        return override_value.class == value.class && override_value > value
       elsif operator == 'gte'
-        override_value.class == value.class and override_value >= value
+        return override_value.class == value.class && override_value >= value
       elsif operator == 'lt'
-        override_value.class == value.class and override_value < value
+        return override_value.class == value.class && override_value < value
       elsif operator == 'lte'
-        override_value.class == value.class and override_value <= value
+        return override_value.class == value.class && override_value <= value
       else
         return false
       end
@@ -200,6 +203,10 @@ class PostHog
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
       if flag['ensure_experience_continuity']
         raise InconclusiveMatchError.new("Flag has experience continuity enabled")
+      end
+
+      if !flag['active']
+        return false
       end
 
       flag_filters = flag['filters'] || {}
@@ -316,8 +323,9 @@ class PostHog
       if !res.key?('flags')
         logger.error "Failed to load feature flags: #{res}"
       else
-        @feature_flags = res['flags'].filter { |flag| flag['active'] }
+        @feature_flags = res['flags'] || []
         @group_type_mapping = res['group_type_mapping'] || {}
+        logger.debug "Loaded #{@feature_flags.length} feature flags"
         if @loaded_flags_successfully_once.false?
           @loaded_flags_successfully_once.make_true
         end
@@ -351,10 +359,7 @@ class PostHog
         res_body = nil
         Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https') do |http|
           res = http.request(request_object)
-          p res
-          res_body = JSON.parse(res.body)
-          p res_body
-          return res_body
+          return JSON.parse(res.body)
         end
       rescue Timeout::Error,
              Errno::EINVAL,
