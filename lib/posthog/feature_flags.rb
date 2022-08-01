@@ -45,8 +45,6 @@ class PostHog
     end
 
     def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
-      # TODO: why isn't the default simply {} ?
-      groups = {} unless groups.is_a?(Hash)
 
       request_data = {
         "distinct_id": distinct_id,

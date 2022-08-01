@@ -3,7 +3,6 @@ require 'spec_helper'
 class PostHog
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
-  # TODO: test that when `send_feature_flags` is true, and no personal API key is present, we don't blow up
 
   describe Client do
     let(:client) { Client.new(api_key: API_KEY, test_mode: true) }

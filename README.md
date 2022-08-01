@@ -16,9 +16,6 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 2. Install the gem locally: `gem install ./posthog-ruby-<version>.gem`
 3. Run `ruby example.rb`
 
-TODO: Doesn't work locally, defaults to https, ssl_verification only on workers, not on the whole client
--> One part uses api_host, the other uses host, which is too messy.
-
 ## Testing
 
 1. Run `bundle exec rspec`

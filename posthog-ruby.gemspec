@@ -17,8 +17,6 @@ Gem::Specification.new do |spec|
   
   spec.add_dependency "concurrent-ruby", "~> 1", "< 1.1.10"
 
-  # TODO: timertask timeout pinning? "concurrent-ruby", "~> 1", "< 1.1.10"
-
   # Used in the executable testing script
   spec.add_development_dependency 'commander', '~> 4.4'
 
