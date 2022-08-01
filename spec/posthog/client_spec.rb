@@ -106,7 +106,7 @@ class PostHog
         decide_res = {"featureFlags": {"beta-feature": "random-variant"}}
         # Mock response for decide
         api_feature_flag_res = {
-          "results": [
+          "flags": [
             {
               "id": 1,
               "name": '',
@@ -188,6 +188,7 @@ class PostHog
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         stub_const("PostHog::Defaults::MAX_HASH_SIZE", 10)
+        stub_const("PostHog::VERSION", "1.2.4")
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
@@ -204,7 +205,7 @@ class PostHog
             "$feature_flag" => "beta-feature",
             "$feature_flag_response" => true,
             "$lib"=>"posthog-ruby",
-            "$lib_version"=>"1.3.0",
+            "$lib_version"=>"1.2.4",
           })
           expect(c.instance_variable_get(:@distinct_id_has_sent_flag_calls).length <= 10).to eq(true)
         end
