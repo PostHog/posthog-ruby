@@ -193,7 +193,7 @@ class PostHog
 
         expect(c.instance_variable_get(:@distinct_id_has_sent_flag_calls).length).to eq(0)
 
-        for i in 1..1000 do
+        1000.times { |i|
           distinct_id = "some-distinct-id#{i}"
           c.get_feature_flag("beta-feature", distinct_id)
 
@@ -207,7 +207,7 @@ class PostHog
             "$lib_version"=>"1.2.4",
           })
           expect(c.instance_variable_get(:@distinct_id_has_sent_flag_calls).length <= 10).to eq(true)
-        end
+        }
       end
 
       it 'captures groups' do

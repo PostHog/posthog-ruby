@@ -44,7 +44,7 @@ class PostHog
           else
             logger = Logger.new STDOUT
             logger.progname = 'PostHog'
-            logger.level = Logger::INFO
+            logger.level = Logger::WARN
             logger
           end
         @logger = PrefixedLogger.new(base_logger, '[posthog-ruby]')

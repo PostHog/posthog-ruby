@@ -45,6 +45,8 @@ class PostHog
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_feature_flag("person-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq(true)
+      expect(c.get_feature_flag("person-flag", "some-distinct-id", person_properties: {"region": "USA"})).to eq(true)
+      expect(c.get_feature_flag("person-flag", "some-distinct-id", person_properties: {"region": "Canada"})).to eq(false)
       expect(c.get_feature_flag("person-flag", "some-distinct-id", person_properties: {"region" => "Canada"})).to eq(false)
 
     end
@@ -91,10 +93,13 @@ class PostHog
 
       # groups not passed in, hence false
       expect(c.get_feature_flag("group-flag", "some-distinct-id", group_properties: {"company" => {"name" => "Project Name 1"}})).to eq(false)
+      expect(c.get_feature_flag("group-flag", "some-distinct-id", group_properties: {"company": {"name": "Project Name 1"}})).to eq(false)
       expect(c.get_feature_flag("group-flag", "some-distinct-2", group_properties: {"company" => {"name" => "Project Name 2"}})).to eq(false)
 
       # this is good
       expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company" => "amazon_without_rollout"}, group_properties: {"company" => {"name" => "Project Name 1"}})).to eq(true)
+      expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company": "amazon_without_rollout"}, group_properties: {"company" => {"name" => "Project Name 1"}})).to eq(true)
+      expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company" => "amazon_without_rollout"}, group_properties: {"company" => {"name": "Project Name 1"}})).to eq(true)
       
       # rollout % not met
       expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company" => "amazon"}, group_properties: {"company" => {"name" => "Project Name 1"}})).to eq(false)
@@ -215,6 +220,7 @@ class PostHog
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region" => "USA", "name" => "Aloha"})).to eq(true)
+      expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
       
       
@@ -1881,7 +1887,7 @@ class PostHog
         true,
       ]
 
-      for i in 0..999 do
+      1000.times { |i|
         distinctID = "distinct_id_#{i}"
 
         feature_flag_match = c.is_feature_enabled("simple-flag", distinctID)
@@ -1891,7 +1897,7 @@ class PostHog
         else
           expect(feature_flag_match).to be false
         end
-      end
+      }
     end
 
     it 'is consistent for multivariate flags' do
@@ -2932,7 +2938,7 @@ class PostHog
         "first-variant",
       ]
 
-      for i in 0..999 do
+      1000.times { |i|
         distinctID = "distinct_id_#{i}"
 
         feature_flag_match = c.get_feature_flag("multivariate-flag", distinctID)
@@ -2942,7 +2948,7 @@ class PostHog
         else
           expect(feature_flag_match).to be false
         end
-      end
+      }
     end
   end
 

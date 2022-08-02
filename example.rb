@@ -50,7 +50,7 @@ posthog.capture({distinct_id: "new_distinct_id", event: "signup", properties: { 
 
 
 #############################################################################################
-# Local Evaluation Examples
+# Feature flag local evaluation examples
 # requires a personal API key to work
 #############################################################################################
 

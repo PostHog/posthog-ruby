@@ -5,7 +5,7 @@ Breaking changes:
 1. Minimum PostHog version requirement: 1.38
 2. Regular feature flag evaluation (i.e. by requesting from your PostHog servers) doesn't require a personal API key.
 3. `Client` initialisation doesn't take the `api_host` parameter anymore. Instead, it takes the `host` parameter, which needs to be fully qualified. For example: `https://api.posthog.com` is valid, while `api.posthog.com` is not valid.
-4. The log level by default is set to INFO. You can change it to DEBUG if you want to debug the client by running `client.logger.level = Logger::INFO`, where client is your initialized `PostHog::Client` instance.
+4. The log level by default is set to WARN. You can change it to DEBUG if you want to debug the client by running `client.logger.level = Logger::DEBUG`, where client is your initialized `PostHog::Client` instance.
 5. Default polling interval for feature flags is now set at 30 seconds. If you don't want local evaluation, don't set a personal API key in the library.
 6. Feature flag defaults apply only when there's an error fetching feature flag results. Earlier, if the default was set to `True`, even if a flag resolved to `False`, the default would override this.
 

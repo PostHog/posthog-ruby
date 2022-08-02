@@ -86,6 +86,15 @@ class PostHog
     UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
 
+    def is_valid_regex(regex)
+      begin
+        Regexp.new(regex)
+        return true
+      rescue RegexpError
+        return false
+      end
+    end
+
     class SizeLimitedHash < Hash
       def initialize(max_length, *args, &block)
         super(*args, &block)

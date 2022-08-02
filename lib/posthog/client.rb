@@ -163,8 +163,8 @@ class PostHog
     # `group_properties` take the format: { group_type_name: { group_properties } }
     # So, for example, if you have the group type "organization" and the group key "5", with the properties name, and employee count,
     # you'll send these as:
-    # ```python
-    #     group_properties={"organization": {"name": "PostHog", "employees": 11}}
+    # ```ruby
+    #     group_properties: {"organization": {"name": "PostHog", "employees": 11}}
     # ```
     def get_feature_flag(key, distinct_id, default_value=false, groups: {}, person_properties: {}, group_properties: {})
       feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id, default_value, groups, person_properties, group_properties)
