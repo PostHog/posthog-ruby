@@ -143,8 +143,8 @@ class PostHog
       @queue.length
     end
 
-    def is_feature_enabled(flag_key, distinct_id, default_value = false, groups: {}, person_properties: {}, group_properties: {})
-      return !!get_feature_flag(flag_key, distinct_id, default_value, groups: groups, person_properties: person_properties, group_properties: group_properties)
+    def is_feature_enabled(flag_key, distinct_id, default_value = false, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
+      return !!get_feature_flag(flag_key, distinct_id, default_value, groups: groups, person_properties: person_properties, group_properties: group_properties, only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events)
     end
 
     # Returns whether the given feature flag is enabled for the given user or not
@@ -167,22 +167,26 @@ class PostHog
     # ```ruby
     #     group_properties: {"organization": {"name": "PostHog", "employees": 11}}
     # ```
-    def get_feature_flag(key, distinct_id, default_value=false, groups: {}, person_properties: {}, group_properties: {})
-      feature_flag = @feature_flags_poller.get_feature_flag(key, distinct_id, default_value, groups, person_properties, group_properties)
-      if !@distinct_id_has_sent_flag_calls[distinct_id].include?(key)
+    def get_feature_flag(key, distinct_id, default_value=false, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
+      feature_flag_response, flag_was_locally_evaluated = @feature_flags_poller.get_feature_flag(key, distinct_id, default_value, groups, person_properties, group_properties, only_evaluate_locally)
+
+      feature_flag_reported_key = "#{key}_#{feature_flag_response}"
+      if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
         capture(
           {
             'distinct_id': distinct_id,
             'event': '$feature_flag_called',
             'properties': {
               '$feature_flag' => key,
-              '$feature_flag_response' => feature_flag
-            }
+              '$feature_flag_response' => feature_flag_response,
+              'locally_evaluated' => flag_was_locally_evaluated
+            },
+            'groups': groups,
           }
         )
-        @distinct_id_has_sent_flag_calls[distinct_id] << key
+        @distinct_id_has_sent_flag_calls[distinct_id] << feature_flag_reported_key
       end
-      return feature_flag
+      feature_flag_response
     end
 
     # Returns all flags for a given user
@@ -193,8 +197,8 @@ class PostHog
     # @param [Hash] group_properties
     # 
     # @return [Hash] String (not symbol) key value pairs of flag and their values
-    def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {})
-      return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties)
+    def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
+      return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
     end
 
     def reload_feature_flags

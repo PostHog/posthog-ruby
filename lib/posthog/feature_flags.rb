@@ -66,7 +66,7 @@ class PostHog
       end
     end
 
-    def get_feature_flag(key, distinct_id, default_result = false, groups = {}, person_properties = {}, group_properties = {})
+    def get_feature_flag(key, distinct_id, default_result = false, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       # make sure they're loaded on first run
       load_feature_flags
 
@@ -99,7 +99,9 @@ class PostHog
         end
       end
 
-      if response.nil?
+      flag_was_locally_evaluated = !response.nil?
+
+      if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
           flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
           response = flags[key]
@@ -110,10 +112,10 @@ class PostHog
         end
       end
 
-      return response
+      [response, flag_was_locally_evaluated]
     end
 
-    def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {})
+    def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       # returns a string hash of all flags
 
       # make sure they're loaded on first run
@@ -133,7 +135,7 @@ class PostHog
         end
       end
 
-      if fallback_to_decide
+      if fallback_to_decide && !only_evaluate_locally
         begin
           flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
           response = {**response, **flags}

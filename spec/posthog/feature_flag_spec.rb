@@ -316,6 +316,70 @@ class PostHog
 
     end
 
+    it 'dont fall back to decide when local evaluation is set' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "beta-feature",
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [{"key": "id", "value": 98, "operator": nil, "type": "cohort"}],
+                        "rollout_percentage": 100,
+                    }
+                ],
+            },
+          },
+          {
+            "id": 2,
+            "name": "Beta Feature",
+            "key": "beta-feature2",
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [
+                            {
+                                "key": "region",
+                                "operator": "exact",
+                                "value": ["USA"],
+                                "type": "person",
+                            }
+                        ],
+                        "rollout_percentage": 100,
+                    }
+                ],
+            },
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body: {"featureFlags": {"beta-feature": "alakazam", "beta-feature2": "alakazam2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      # beta-feature should fallback to decide because property type is unknown
+      # but doesn't because only_evaluate_locally is true
+      expect(c.get_feature_flag("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to eq(nil)
+      expect(c.is_feature_enabled("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to eq(false)
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+
+      # beta-feature2 should fallback to decide because region property not given with call
+      # but doesn't because only_evaluate_locally is true
+      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to eq(nil)
+      expect(c.is_feature_enabled("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to eq(false)
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+
+    end
+
     it 'defaults dont hinder regular evaluation' do
       api_feature_flag_res = {
         "flags": [
@@ -497,6 +561,73 @@ class PostHog
       expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => "variant-1", "beta-feature2" => "variant-2", "disabled-feature" => false})
       assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 1
       WebMock.reset_executed_requests!
+
+    end
+
+    it 'get all flags with fallback but only_locally_evaluated set' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "rollout_percentage": 100,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 100,
+                      }
+                  ]
+              },
+          },
+          {
+              "id": 2,
+              "name": "Beta Feature",
+              "key": "disabled-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [],
+                          "rollout_percentage": 0,
+                      }
+                  ]
+              },
+          },
+          {
+              "id": 3,
+              "name": "Beta Feature",
+              "key": "beta-feature2",
+              "is_simple_flag": false,
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [{"key": "country", "value": "US"}],
+                          "rollout_percentage": 0,
+                      }
+                  ]
+              },
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      # beta-feature2 has no value
+      expect(c.get_all_flags("distinct-id", only_evaluate_locally: true)).to eq({"beta-feature" => true, "disabled-feature" => false})
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
 
     end
 

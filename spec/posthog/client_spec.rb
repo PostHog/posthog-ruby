@@ -205,9 +205,94 @@ class PostHog
             "$feature_flag_response" => true,
             "$lib"=>"posthog-ruby",
             "$lib_version"=>"1.2.4",
+            "$groups"=>{},
+            "locally_evaluated"=>true,
           })
           expect(c.instance_variable_get(:@distinct_id_has_sent_flag_calls).length <= 10).to eq(true)
         }
+      end
+
+      it '$feature_flag_called is called appropriately when querying flags' do
+        api_feature_flag_res = {
+          "flags": [
+            {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [{"key": "region", "value": "USA"}],
+                          "rollout_percentage": 100,
+                      }
+                  ],
+              },
+            },
+          ]
+        }
+
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body:{"featureFlags": {"decide-flag": "decide-value"}}.to_json)  
+        
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        stub_const("PostHog::Defaults::MAX_HASH_SIZE", 10)
+        stub_const("PostHog::VERSION", "1.2.4")
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        allow(c).to receive(:capture)
+        expect(c).to receive(:capture).with({
+          distinct_id: "some-distinct-id",
+          event: "$feature_flag_called",
+          properties: {
+            "$feature_flag" => "beta-feature",
+            "$feature_flag_response" => true,
+            "locally_evaluated"=>true,
+          },
+          groups: {},
+        }).exactly(1).times
+        expect(c.get_feature_flag('beta-feature', 'some-distinct-id', person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
+
+
+        # called again for same user, shouldn't call capture again
+        # expect(c).not_to receive(:capture)
+        expect(c.get_feature_flag('beta-feature', 'some-distinct-id', person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
+
+        # called for different user, should call capture again
+        expect(c).to receive(:capture).with({
+          distinct_id: "some-distinct-id2",
+          event: "$feature_flag_called",
+          properties: {
+            "$feature_flag" => "beta-feature",
+            "$feature_flag_response" => true,
+            "locally_evaluated"=>true,
+          },
+          groups: {},
+        }).exactly(1).times
+        expect(c.get_feature_flag('beta-feature', 'some-distinct-id2', person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
+
+        # called for different user, but send configuration is false, so should NOT call capture again
+        expect(c.get_feature_flag('beta-feature', 'some-distinct-id2', person_properties: {"region": "USA", "name": "Aloha"}, send_feature_flag_events: false)).to eq(true)
+
+        # called for different flag, falls back to decide, should call capture again
+        expect(c).to receive(:capture).with({
+          distinct_id: "some-distinct-id2345",
+          event: "$feature_flag_called",
+          properties: {
+            "$feature_flag" => "decide-flag",
+            "$feature_flag_response" => "decide-value",
+            "locally_evaluated"=>false,
+          },
+          groups: {'organization': 'org1'},
+        }).exactly(1).times
+        expect(c.get_feature_flag('decide-flag', 'some-distinct-id2345', person_properties: {"region": "USA", "name": "Aloha"}, groups: {'organization': 'org1'})).to eq("decide-value")
+
+        expect(c).not_to receive(:capture)
+        expect(c.is_feature_enabled('decide-flag', 'some-distinct-id2345', person_properties: {"region": "USA", "name": "Aloha"}, groups: {'organization': 'org1'})).to eq(true)
       end
 
       it 'captures groups' do
