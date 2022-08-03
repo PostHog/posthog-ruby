@@ -12,7 +12,6 @@ Breaking changes:
 New Changes:
 
 1. You can now evaluate feature flags locally (i.e. without sending a request to your PostHog servers) by setting a personal API key, and passing in groups and person properties to `is_feature_enabled` and `get_feature_flag` calls.
-    1. Note that `group_properties` and `person_properties` parameters don't accept symbols as hash keys, only strings.
 2. Introduces a `get_all_flags` method that returns all feature flags. This is useful for when you want to seed your frontend with some initial flags, given a user ID.
 
 
