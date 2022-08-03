@@ -21,6 +21,7 @@ class PostHog
     #   queued for testing. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
+    # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes. Measured in seconds, defaults to 30.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -184,6 +185,14 @@ class PostHog
       return feature_flag
     end
 
+    # Returns all flags for a given user
+    #
+    # @param [String] distinct_id The distinct id of the user
+    # @param [Hash] groups
+    # @param [Hash] person_properties key-value pairs of properties to associate with the user.
+    # @param [Hash] group_properties
+    # 
+    # @return [Hash] String (not symbol) key value pairs of flag and their values
     def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {})
       return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties)
     end

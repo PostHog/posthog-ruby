@@ -62,7 +62,7 @@ class PostHog
       if !decide_data.key?(:featureFlags)
         raise DecideAPIError.new(decide_data.to_json)
       else
-        decide_data[:featureFlags] || {}
+        stringify_keys(decide_data[:featureFlags] || {})
       end
     end
 
@@ -114,6 +114,8 @@ class PostHog
     end
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {})
+      # returns a string hash of all flags
+
       # make sure they're loaded on first run
       load_feature_flags
 
@@ -206,7 +208,6 @@ class PostHog
       return false if !flag[:active]
 
       flag_filters = flag[:filters] || {}
-      symbolize_keys! flag_filters
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
       if !aggregation_group_type_index.nil?
@@ -237,7 +238,6 @@ class PostHog
 
     def match_feature_flag_properties(flag, distinct_id, properties)
       flag_filters = flag[:filters] || {}
-      symbolize_keys! flag_filters
 
       flag_conditions = flag_filters[:groups] || []
       is_inconclusive = false
@@ -265,12 +265,10 @@ class PostHog
     end
 
     def is_condition_match(flag, distinct_id, condition, properties)
-      symbolize_keys! condition
       rollout_percentage = condition[:rollout_percentage]
 
       if !(condition[:properties] || []).empty?
         if !condition[:properties].all? { |prop|
-            symbolize_keys! prop
             FeatureFlagsPoller.match_property(prop, properties)
           }
           return false
@@ -307,14 +305,9 @@ class PostHog
       lookup_table = []
       value_min = 0
       flag_filters = flag[:filters] || {}
-      symbolize_keys! flag_filters
-
       variants = flag_filters[:multivariate] || {}
-      symbolize_keys! variants
-
       multivariates = variants[:variants] || []
       multivariates.each do |variant|
-        symbolize_keys! variant
         value_max = value_min + variant[:rollout_percentage].to_f / 100
         lookup_table << {'value_min': value_min, 'value_max': value_max, 'key': variant[:key]}
         value_min = value_max
@@ -329,13 +322,8 @@ class PostHog
       if !res.key?(:flags)
         logger.error "Failed to load feature flags: #{res}"
       else
-        @feature_flags = res[:flags] || []
-        @feature_flags.each do |flag|
-          symbolize_keys! flag
-        end
-        
+        @feature_flags = res[:flags] || []        
         @group_type_mapping = res[:group_type_mapping] || {}
-        symbolize_keys! @group_type_mapping
 
         logger.debug "Loaded #{@feature_flags.length} feature flags"
         if @loaded_flags_successfully_once.false?
@@ -371,7 +359,7 @@ class PostHog
         res_body = nil
         Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https') do |http|
           res = http.request(request_object)
-          symbolize_keys! JSON.parse(res.body)
+          JSON.parse(res.body, {symbolize_names: true})
         end
       rescue Timeout::Error,
              Errno::EINVAL,
