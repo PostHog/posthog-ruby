@@ -66,7 +66,7 @@ class PostHog
       end
     end
 
-    def get_feature_flag(key, distinct_id, default_result = false, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+    def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       # make sure they're loaded on first run
       load_feature_flags
 
@@ -105,10 +105,12 @@ class PostHog
         begin
           flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
           response = flags[key]
+          if response.nil?
+            response = false
+          end
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}. #{e.backtrace.join("\n")}"
-          response = default_result
         end
       end
 
@@ -338,7 +340,6 @@ class PostHog
       uri = URI("#{@host}/api/feature_flag/local_evaluation?token=#{@project_api_key}")
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
-      req['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
 
       _request(uri, req)
     end

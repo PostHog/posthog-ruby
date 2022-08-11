@@ -368,19 +368,19 @@ class PostHog
 
       # beta-feature should fallback to decide because property type is unknown
       # but doesn't because only_evaluate_locally is true
-      expect(c.get_feature_flag("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to eq(nil)
-      expect(c.is_feature_enabled("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to eq(false)
+      expect(c.get_feature_flag("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
+      expect(c.is_feature_enabled("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
 
       # beta-feature2 should fallback to decide because region property not given with call
       # but doesn't because only_evaluate_locally is true
-      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to eq(nil)
-      expect(c.is_feature_enabled("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to eq(false)
+      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
+      expect(c.is_feature_enabled("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
 
     end
 
-    it 'defaults dont hinder regular evaluation' do
+    it "doesn't return undefined when flag is evaluated successfully" do
       api_feature_flag_res = {
         "flags": [
           {
@@ -411,18 +411,18 @@ class PostHog
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       # beta-feature resolves to False, so no matter the default, stays False
-      expect(c.get_feature_flag("beta-feature", "some-distinct-id", true)).to be_falsey
-      expect(c.get_feature_flag("beta-feature", "some-distinct-id", false)).to be_falsey
+      expect(c.get_feature_flag("beta-feature", "some-distinct-id")).to be(false)
+      expect(c.is_feature_enabled("beta-feature", "some-distinct-id")).to be(false)
       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
 
       # beta-feature2 falls back to decide, and whatever decide returns is the value
-      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", true)).to be_falsey
-      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", false)).to be_falsey
+      expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(false)
+      expect(c.is_feature_enabled("beta-feature2", "some-distinct-id")).to be(false)
       assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 2
       WebMock.reset_executed_requests!
     end
 
-    it 'defaults come into play when decide errors out' do
+    it 'returns undefined when decide errors out' do
       api_feature_flag_res = {
         "flags": [
           {
@@ -453,10 +453,9 @@ class PostHog
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       # beta-feature2 falls back to decide, which on error returns default
-      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", true)).to be(true)
-      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", 'xyz')).to eq('xyz')
-      expect(c.get_feature_flag("beta-feature2", "some-distinct-id", false)).to eq(false)
-      assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 3
+      expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(nil)
+      expect(c.is_feature_enabled("beta-feature2", "some-distinct-id")).to be(nil)
+      assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 2
       WebMock.reset_executed_requests!
     end
 

@@ -276,7 +276,7 @@ class PostHog
         expect(c.get_feature_flag('beta-feature', 'some-distinct-id2', person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
 
         # called for different user, but send configuration is false, so should NOT call capture again
-        expect(c.get_feature_flag('beta-feature', 'some-distinct-id2', person_properties: {"region": "USA", "name": "Aloha"}, send_feature_flag_events: false)).to eq(true)
+        expect(c.get_feature_flag('beta-feature', 'some-distinct-id23', person_properties: {"region": "USA", "name": "Aloha"}, send_feature_flag_events: false)).to eq(true)
 
         # called for different flag, falls back to decide, should call capture again
         expect(c).to receive(:capture).with({

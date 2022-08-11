@@ -143,8 +143,12 @@ class PostHog
       @queue.length
     end
 
-    def is_feature_enabled(flag_key, distinct_id, default_value = false, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
-      return !!get_feature_flag(flag_key, distinct_id, default_value, groups: groups, person_properties: person_properties, group_properties: group_properties, only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events)
+    def is_feature_enabled(flag_key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
+      response = get_feature_flag(flag_key, distinct_id, groups: groups, person_properties: person_properties, group_properties: group_properties, only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events)
+      if response.nil?
+        return nil
+      end
+      !!response
     end
 
     # Returns whether the given feature flag is enabled for the given user or not
@@ -167,8 +171,8 @@ class PostHog
     # ```ruby
     #     group_properties: {"organization": {"name": "PostHog", "employees": 11}}
     # ```
-    def get_feature_flag(key, distinct_id, default_value=false, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
-      feature_flag_response, flag_was_locally_evaluated = @feature_flags_poller.get_feature_flag(key, distinct_id, default_value, groups, person_properties, group_properties, only_evaluate_locally)
+    def get_feature_flag(key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
+      feature_flag_response, flag_was_locally_evaluated = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
 
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
       if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
