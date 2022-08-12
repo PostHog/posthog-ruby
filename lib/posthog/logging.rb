@@ -23,6 +23,14 @@ class PostHog
     def error(msg)
       @logger.error("#{@prefix} #{msg}")
     end
+
+    def level=(severity)
+      @logger.level = severity
+    end
+
+    def level
+      @logger.level
+    end
   end
 
   module Logging
@@ -36,6 +44,7 @@ class PostHog
           else
             logger = Logger.new STDOUT
             logger.progname = 'PostHog'
+            logger.level = Logger::WARN
             logger
           end
         @logger = PrefixedLogger.new(base_logger, '[posthog-ruby]')
