@@ -978,6 +978,45 @@ class PostHog
       expect(FeatureFlagsPoller.match_property(property_d, { 'key' => 44 })).to be false
 
     end
+
+    it 'with date operators' do
+      # is date before
+      property_a = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_before'}
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-03-01' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-04-30' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30)})).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3)})).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3, '+2')})).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.parse('2022-04-30')})).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-05-30'})).to be false
+
+      # error handling
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 1})).to raise_error(InconclusiveMatchError)
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'abcdef'})).to raise_error(InconclusiveMatchError)
+
+      # is date after
+      property_b = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_after'}
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-05-02' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-05-30' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => DateTime.new(2022, 5, 30)})).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => DateTime.new(2022, 5, 1, 1, 2, 3)})).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => DateTime.parse('2022-05-30')})).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-04-30'})).to be false
+
+      # invalid flag property
+      property_c = { 'key' => 'key', 'value' => 1234, 'operator' => 'is_date_before'}
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => '2022-05-30'})).to raise_error(InconclusiveMatchError)
+
+      #timezone aware property
+      property_d = { 'key' => 'key', 'value' => '2022-04-05T12:34:12+01:00', 'operator' => 'is_date_before'}
+      expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-05-30'})).to be false
+      expect(FeatureFlagsPoller.match_property(property_d, {'key' => '2022-03-30'})).to be true
+      expect(FeatureFlagsPoller.match_property(property_d, {'key' => '2022-04-05 12:34:11 +01:00'})).to be true
+      expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-05 12:34:13 +01:00'})).to be false
+      expect(FeatureFlagsPoller.match_property(property_d, {'key' => '2022-04-05 11:34:11 +00:00'})).to be true
+      expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-05 11:34:13 +00:00'})).to be false
+
+    end
   end
 
 
