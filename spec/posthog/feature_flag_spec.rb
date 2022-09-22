@@ -991,8 +991,8 @@ class PostHog
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-05-30'})).to be false
 
       # error handling
-      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 1})).to raise_error(InconclusiveMatchError)
-      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'abcdef'})).to raise_error(InconclusiveMatchError)
+      expect{ FeatureFlagsPoller.match_property(property_a, { 'key' => 1}) }.to raise_error(InconclusiveMatchError)
+      expect{ FeatureFlagsPoller.match_property(property_a, { 'key' => 'abcdef'}) }.to raise_error(InconclusiveMatchError)
 
       # is date after
       property_b = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_after'}
@@ -1005,7 +1005,7 @@ class PostHog
 
       # invalid flag property
       property_c = { 'key' => 'key', 'value' => 1234, 'operator' => 'is_date_before'}
-      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => '2022-05-30'})).to raise_error(InconclusiveMatchError)
+      expect{ FeatureFlagsPoller.match_property(property_c, { 'key' => '2022-05-30'}) }.to raise_error(InconclusiveMatchError)
 
       #timezone aware property
       property_d = { 'key' => 'key', 'value' => '2022-04-05T12:34:12+01:00', 'operator' => 'is_date_before'}
