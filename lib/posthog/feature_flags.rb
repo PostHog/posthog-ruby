@@ -247,10 +247,22 @@ class PostHog
       is_inconclusive = false
       result = nil
 
-      flag_conditions.each do |condition|
+      # Stable sort conditions with variant overrides to the top. This ensures that if overrides are present, they are
+      # evaluated first, and the variant override is applied to the first matching condition.
+      sorted_flag_conditions = flag_conditions.each_with_index.sort_by { |condition, idx| [condition[:variant].nil? ? 1 : -1, idx] }
+
+      sorted_flag_conditions.each do |condition, idx|
         begin
           if is_condition_match(flag, distinct_id, condition, properties)
-            result = get_matching_variant(flag, distinct_id) || true
+            variant_override = condition[:variant]
+            flag_multivariate = flag_filters[:multivariate] || {}
+            flag_variants = flag_multivariate[:variants] || []
+            if flag_variants.map{|variant| variant[:key]}.include?(condition[:variant])
+                variant = variant_override
+            else
+                variant = get_matching_variant(flag, distinct_id)
+            end
+            result = variant || true
             break
           end
         rescue InconclusiveMatchError => e
