@@ -196,6 +196,14 @@ class PostHog
         override_value.class == value.class && override_value < value
       when 'lte'
         override_value.class == value.class && override_value <= value
+      when 'is_date_before', 'is_date_after'
+        parsed_date = PostHog::Utils::convert_to_datetime(value)
+        override_date = PostHog::Utils::convert_to_datetime(override_value)
+        if operator == 'is_date_before'
+          return override_date < parsed_date
+        else
+          return override_date > parsed_date
+        end
       else
         logger.error "Unknown operator: #{operator}"
         false

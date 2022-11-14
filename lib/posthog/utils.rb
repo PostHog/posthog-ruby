@@ -1,6 +1,10 @@
 require 'securerandom'
 
 class PostHog
+
+  class InconclusiveMatchError < StandardError
+  end
+
   module Utils
     extend self
 
@@ -81,6 +85,22 @@ class PostHog
         (seconds.abs / 3600),
         ((seconds.abs % 3600) / 60)
       ]
+    end
+
+    def convert_to_datetime(value)
+      if value.respond_to?(:strftime)
+        parsed_date = value
+        return parsed_date
+      elsif value.respond_to?(:to_str)
+        begin
+          parsed_date = DateTime.parse(value)
+          return parsed_date
+        rescue ArgumentError => e
+          raise InconclusiveMatchError.new("#{value} is not in a valid date format")
+        end
+      else
+        raise InconclusiveMatchError.new("The date provided must be a string or date object")
+      end
     end
 
     UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
