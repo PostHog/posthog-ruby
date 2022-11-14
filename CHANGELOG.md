@@ -1,3 +1,8 @@
+# 2.1.0 - 2022-11-14
+
+1. Add support for datetime operators for local feature flag evaluation
+2. Add support for variant overrides for local feature flag evaluation
+
 # 2.0.0 - 2022-08-12
 
 Breaking changes:
