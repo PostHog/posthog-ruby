@@ -799,6 +799,207 @@ class PostHog
 
 
     end
+
+    it 'gets feature flag with variant overrides' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "rollout_percentage": 100,
+              "filters": {
+                    "groups": [
+                        {
+                            "properties": [
+                                {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
+                            ],
+                            "rollout_percentage": 100,
+                            "variant": "second-variant",
+                        },
+                        {"rollout_percentage": 50, "variant": "first-variant"},
+                    ],
+                    "multivariate": {
+                        "variants": [
+                            {"key": "first-variant", "name": "First Variant", "rollout_percentage": 50},
+                            {"key": "second-variant", "name": "Second Variant", "rollout_percentage": 25},
+                            {"key": "third-variant", "name": "Third Variant", "rollout_percentage": 25},
+                        ]
+                    },
+                }
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
+      expect(c.get_feature_flag("beta-feature", "example_id")).to eq("first-variant")
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+    end
+
+    it 'gets feature flag with clashing variant overrides' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "rollout_percentage": 100,
+              "filters": {
+                    "groups": [
+                        {
+                            "properties": [
+                                {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
+                            ],
+                            "rollout_percentage": 100,
+                            "variant": "second-variant",
+                        },
+                        # since second-variant comes first in the list, it will be the one that gets picked
+                        {
+                            "properties": [
+                                {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
+                            ],
+                            "rollout_percentage": 100,
+                            "variant": "first-variant",
+                        },
+                        {"rollout_percentage": 50, "variant": "first-variant"},
+                    ],
+                    "multivariate": {
+                        "variants": [
+                            {"key": "first-variant", "name": "First Variant", "rollout_percentage": 50},
+                            {"key": "second-variant", "name": "Second Variant", "rollout_percentage": 25},
+                            {"key": "third-variant", "name": "Third Variant", "rollout_percentage": 25},
+                        ]
+                    },
+                }
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
+      expect(c.get_feature_flag("beta-feature", "example_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+    end
+
+    it 'gets feature flag with invalid variant overrides' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "rollout_percentage": 100,
+              "filters": {
+                    "groups": [
+                        {
+                            "properties": [
+                                {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
+                            ],
+                            "rollout_percentage": 100,
+                            "variant": "second???",
+                        },
+                        {"rollout_percentage": 50, "variant": "first??"},
+                    ],
+                    "multivariate": {
+                        "variants": [
+                            {"key": "first-variant", "name": "First Variant", "rollout_percentage": 50},
+                            {"key": "second-variant", "name": "Second Variant", "rollout_percentage": 25},
+                            {"key": "third-variant", "name": "Third Variant", "rollout_percentage": 25},
+                        ]
+                    },
+                }
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("third-variant")
+      expect(c.get_feature_flag("beta-feature", "example_id")).to eq("second-variant")
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+    end
+    
+    it 'gets feature flag with multiple variant overrides' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+              "id": 1,
+              "name": "Beta Feature",
+              "key": "beta-feature",
+              "is_simple_flag": false,
+              "active": true,
+              "rollout_percentage": 100,
+              "filters": {
+                  "groups": [
+                    {
+                        "rollout_percentage": 100,
+                        # The override applies even if the first condition matches all and gives everyone their default group
+                    },
+                    {
+                        "properties": [
+                            {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
+                        ],
+                        "rollout_percentage": 100,
+                        "variant": "second-variant",
+                    },
+                    {"rollout_percentage": 50, "variant": "third-variant"},
+                  ],
+                  "multivariate": {
+                      "variants": [
+                          {"key": "first-variant", "name": "First Variant", "rollout_percentage": 50},
+                          {"key": "second-variant", "name": "Second Variant", "rollout_percentage": 25},
+                          {"key": "third-variant", "name": "Third Variant", "rollout_percentage": 25},
+                      ]
+                  },
+                }
+          },
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
+      expect(c.get_feature_flag("beta-feature", "example_id")).to eq("third-variant")
+      expect(c.get_feature_flag("beta-feature", "another_id")).to eq("second-variant")
+      assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+    end
   end
 
 
