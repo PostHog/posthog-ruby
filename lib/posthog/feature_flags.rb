@@ -140,7 +140,10 @@ class PostHog
       if fallback_to_decide && !only_evaluate_locally
         begin
           flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
+          symbolize_keys! response
+          symbolize_keys! flags
           response = {**response, **flags}
+          response = stringify_keys(response || {})
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}"
         end
