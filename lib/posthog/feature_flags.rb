@@ -120,12 +120,13 @@ class PostHog
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
     # returns a string hash of all flags
-      flags = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      response = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally)
+      flags = response[0]
     end
 
     def get_all_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      _, payloads = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      payloads
+      response = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally)
+      payloads = response[1]
     end
 
     def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -139,7 +140,7 @@ class PostHog
         begin
           match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
           response[flag[:key]] = match_value
-          match_payload = _compute_flag_payload_locally(flag, match_value)
+          match_payload = _compute_flag_payload_locally(flag[:key], match_value)
           payloads[flag[:key]] = match_payload
         rescue InconclusiveMatchError => e
           fallback_to_decide = true
@@ -157,7 +158,7 @@ class PostHog
           logger.error "Error computing flag remotely: #{e}"
         end
       end
-      response, payloads, fallback_to_decide
+      [response, payloads, fallback_to_decide]
     end
 
     def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -169,31 +170,17 @@ class PostHog
           person_properties=person_properties,
           group_properties=group_properties,
           only_evaluate_locally=true,
-        )
+        )[0]
       end
       response = nil
       if match_value != nil
-        response = compute_payload_locally(key, match_value)
+        response = _compute_flag_payload_locally(key, match_value)
       end
       if response != nil and !only_evaluate_locally
         decide_payloads = get_all_payloads(distinct_id, groups, person_properties, group_properties)
         response = decide_payloads[key.downcase.to_sym] || nil
       end
       response
-    end
-
-    def compute_payload_locally(key, match_value):
-      payload = nil
-
-      if @feature_flags_by_key == nil
-          return payload
-
-      flag_definition = @feature_flags_by_key[key] || {}
-      flag_filters = flag_definition["filters"] || {}
-      flag_payloads = flag_filters["payloads"] || {}
-      payload = flag_payloads[match_value.to_str.downcase]  || nil
-      
-      payload
     end
 
     def shutdown_poller()
@@ -298,12 +285,12 @@ class PostHog
 
     def _compute_flag_payload_locally(key, match_value)
       response = nil
-      if [true, false].include? match_value
-        response = @feature_flags_by_key.dig(key.to_sym, :filters, :payloads, match_value.to_str.to_sym)
-      elsif match_value.is_a? String
-        response = @feature_flags_by_key.dig(key.to_sym, :filters, :payloads, match_value.to_sym)
-      end
 
+      if [true, false].include? match_value
+        response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_s.to_sym)
+      elsif match_value.is_a? String
+        response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_sym)
+      end
       response
     end
 
