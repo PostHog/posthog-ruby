@@ -25,6 +25,7 @@ class PostHog
       @feature_flags = Concurrent::Array.new
       @group_type_mapping = Concurrent::Hash.new
       @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
+      @feature_flags_by_key = nil
 
       @task =
         Concurrent::TimerTask.new(
@@ -118,17 +119,28 @@ class PostHog
     end
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      # returns a string hash of all flags
+    # returns a string hash of all flags
+      flags = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+    end
 
-      # make sure they're loaded on first run
+    def get_all_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      _, payloads = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      payloads
+    end
+
+    def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       load_feature_flags
 
       response = {}
+      payloads = {}
       fallback_to_decide = @feature_flags.empty?
 
       @feature_flags.each do |flag|
         begin
-          response[flag[:key]] = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+          match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+          response[flag[:key]] = match_value
+          match_payload = _compute_flag_payload_locally(flag, match_value)
+          payloads[flag[:key]] = match_payload
         rescue InconclusiveMatchError => e
           fallback_to_decide = true
         rescue StandardError => e
@@ -145,7 +157,43 @@ class PostHog
           logger.error "Error computing flag remotely: #{e}"
         end
       end
+      response, payloads, fallback_to_decide
+    end
+
+    def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      if match_value == nil
+        match_value = get_feature_flag(
+          key,
+          distinct_id,
+          groups=groups,
+          person_properties=person_properties,
+          group_properties=group_properties,
+          only_evaluate_locally=true,
+        )
+      end
+      response = nil
+      if match_value != nil
+        response = compute_payload_locally(key, match_value)
+      end
+      if response != nil and !only_evaluate_locally
+        decide_payloads = get_all_payloads(distinct_id, groups, person_properties, group_properties)
+        response = decide_payloads[key.downcase.to_sym] || nil
+      end
       response
+    end
+
+    def compute_payload_locally(key, match_value):
+      payload = nil
+
+      if @feature_flags_by_key == nil
+          return payload
+
+      flag_definition = @feature_flags_by_key[key] || {}
+      flag_filters = flag_definition["filters"] || {}
+      flag_payloads = flag_filters["payloads"] || {}
+      payload = flag_payloads[match_value.to_str.downcase]  || nil
+      
+      payload
     end
 
     def shutdown_poller()
@@ -248,6 +296,17 @@ class PostHog
 
     end
 
+    def _compute_flag_payload_locally(key, match_value)
+      response = nil
+      if [true, false].include? match_value
+        response = @feature_flags_by_key.dig(key.to_sym, :filters, :payloads, match_value.to_str.to_sym)
+      elsif match_value.is_a? String
+        response = @feature_flags_by_key.dig(key.to_sym, :filters, :payloads, match_value.to_sym)
+      end
+
+      response
+    end
+
     def match_feature_flag_properties(flag, distinct_id, properties)
       flag_filters = flag[:filters] || {}
 
@@ -346,7 +405,13 @@ class PostHog
       if !res.key?(:flags)
         logger.error "Failed to load feature flags: #{res}"
       else
-        @feature_flags = res[:flags] || []        
+        @feature_flags = res[:flags] || []
+        @feature_flags_by_key = {}
+        @feature_flags.each do |flag|
+          if flag[:key] != nil
+            @feature_flags_by_key[flag[:key]] = flag
+          end
+        end
         @group_type_mapping = res[:group_type_mapping] || {}
 
         logger.debug "Loaded #{@feature_flags.length} feature flags"
