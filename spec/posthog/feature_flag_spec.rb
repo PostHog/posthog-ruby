@@ -3356,64 +3356,92 @@ class PostHog
       .to_return(status: 200, body:{"featureFlags": {"person-flag" => "person-flag-value"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
-      # expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq(300)
+      expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq(300)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value: true, person_properties: {"region" => "USA"})).to eq(300)
       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
     end
 
-  #   it 'evaluates boolean feature flags with decide' do
-  #     stub_request(:post, 'https://app.posthog.com/decide/?v=2')
-  #       .to_return(status: 200, body:{"featureFlagsPayload": {"person-flag" => 300}}.to_json)
-  #     c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
-  #     expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties={"region": "USA"})).to eq(300)
-  #     expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value=true, person_properties={"region": "USA"})).to eq(300)
+    it 'evaluates boolean feature flags with decide' do
+      basic_flag_res = {
+        "id": 1,
+            "name": "Beta Feature",
+            "key": "person-flag",
+            "is_simple_flag": true,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [
+                            {
+                                "key": "region",
+                                "operator": "exact",
+                                "value": ["USA"],
+                                "type": "person",
+                            }
+                        ],
+                        "rollout_percentage": 100,
+                    }
+                ],
+                "payloads": {"true": 300},
+            },
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: {"flags": [basic_flag_res]}.to_json)
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body:{"featureFlagPayloads": {"person-flag" => 300}}.to_json)
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+      expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region": "USA"})).to eq(300)
+      expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value: true, person_properties: {"region": "USA"})).to eq(300)
 
-  #     assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 2
-  #   end
+      # assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 2
+    end
 
-  #   it 'with multivariate feature flag payloads' do
-  #     multivariate_flag = {
-  #           "id": 1,
-  #           "name": "Beta Feature",
-  #           "key": "beta-feature",
-  #           "is_simple_flag": False,
-  #           "active": True,
-  #           "rollout_percentage": 100,
-  #           "filters": {
-  #               "groups": [
-  #                   {
-  #                       "properties": [
-  #                           {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
-  #                       ],
-  #                       "rollout_percentage": 100,
-  #                       "variant": "second???",
-  #                   },
-  #                   {"rollout_percentage": 50, "variant": "first??"},
-  #               ],
-  #               "multivariate": {
-  #                   "variants": [
-  #                       {"key": "first-variant", "name": "First Variant", "rollout_percentage": 50},
-  #                       {"key": "second-variant", "name": "Second Variant", "rollout_percentage": 25},
-  #                       {"key": "third-variant", "name": "Third Variant", "rollout_percentage": 25},
-  #                   ]
-  #               },
-  #               "payloads": {"first-variant": "some-payload", "third-variant": {"a": "json"}},
-  #           },
-  #       }
+    it 'with multivariate feature flag payloads' do
+      multivariate_flag = {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "beta-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "rollout_percentage": 100,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [
+                            {"key": "email", "type": "person", "value": "test@posthog.com", "operator": "exact"}
+                        ],
+                        "rollout_percentage": 100,
+                        "variant": "second???",
+                    },
+                    {"rollout_percentage": 50, "variant": "first??"},
+                ],
+                "multivariate": {
+                    "variants": [
+                        {"key": "first-variant", "name": "First Variant", "rollout_percentage": 50},
+                        {"key": "second-variant", "name": "Second Variant", "rollout_percentage": 25},
+                        {"key": "third-variant", "name": "Third Variant", "rollout_percentage": 25},
+                    ]
+                },
+                "payloads": {"first-variant": "some-payload", "third-variant": {"a": "json"}},
+            },
+        }
 
-  #       stub_request(
-  #         :get,
-  #         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
-  #       ).to_return(status: 200, body: [multivariate_flag].to_json)
-  #       stub_request(:post, 'https://app.posthog.com/decide/?v=2')
-  #       .to_return(status: 200, body:{"featureFlags": {}}.to_json)
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: {"flags": [multivariate_flag]}.to_json)
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body:{"featureFlags": {}}.to_json)
 
-  #       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-  #       expect(c.get_feature_flag_payload("beta-feature", "test_id", person_properties={"email": "test@posthog.com"})).to eq({"a": "json"})
-  #       expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value="third-variant", person_properties={"email": "test@posthog.com"})).to eq({"a": "json"})
-  #       expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value="first-variant", person_properties={"email": "test@posthog.com"})).to eq("some-payload")
-  #       assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
-  #   end
+        expect(c.get_feature_flag_payload("beta-feature", "test_id", person_properties: {"email": "test@posthog.com"})).to eq({"a": "json"})
+        expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value: "third-variant", person_properties: {"email": "test@posthog.com"})).to eq({"a": "json"})
+        # Force different match value
+        expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value: "first-variant", person_properties: {"email": "test@posthog.com"})).to eq("some-payload")
+        assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+    end
   end
 end

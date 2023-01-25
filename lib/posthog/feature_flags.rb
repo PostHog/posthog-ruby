@@ -120,12 +120,12 @@ class PostHog
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
     # returns a string hash of all flags
-      response = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally)
+      response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
       flags = response[0]
     end
 
     def get_all_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      response = get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally)
+      response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
       payloads = response[1]
     end
 
@@ -150,14 +150,14 @@ class PostHog
         end
       end
 
-      if fallback_to_decide && !only_evaluate_locally
-        begin
-          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
-          response = {**response, **flags}
-        rescue StandardError => e
-          logger.error "Error computing flag remotely: #{e}"
-        end
-      end
+      # if fallback_to_decide && !only_evaluate_locally
+      #   begin
+      #     flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
+      #     response = {**response, **flags}
+      #   rescue StandardError => e
+      #     logger.error "Error computing flag remotely: #{e}"
+      #   end
+      # end
       [response, payloads, fallback_to_decide]
     end
 
@@ -176,9 +176,9 @@ class PostHog
       if match_value != nil
         response = _compute_flag_payload_locally(key, match_value)
       end
-      if response != nil and !only_evaluate_locally
+      if response == nil and !only_evaluate_locally
         decide_payloads = get_all_payloads(distinct_id, groups, person_properties, group_properties)
-        response = decide_payloads[key.downcase.to_sym] || nil
+        response = decide_payloads[key.downcase] || nil
       end
       response
     end
