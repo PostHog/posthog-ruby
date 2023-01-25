@@ -150,14 +150,14 @@ class PostHog
         end
       end
 
-      # if fallback_to_decide && !only_evaluate_locally
-      #   begin
-      #     flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
-      #     response = {**response, **flags}
-      #   rescue StandardError => e
-      #     logger.error "Error computing flag remotely: #{e}"
-      #   end
-      # end
+      if fallback_to_decide && !only_evaluate_locally
+        begin
+          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
+          response = {**response, **flags}
+        rescue StandardError => e
+          logger.error "Error computing flag remotely: #{e}"
+        end
+      end
       [response, payloads, fallback_to_decide]
     end
 
