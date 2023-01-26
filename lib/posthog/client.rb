@@ -214,6 +214,10 @@ class PostHog
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties, group_properties, only_evaluate_locally)
     end
 
+    def get_all_flags_and_payloads(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
+      @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+    end
+
     def reload_feature_flags
       unless @personal_api_key
         logger.error(

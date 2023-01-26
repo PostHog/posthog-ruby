@@ -50,7 +50,24 @@ class PostHog
     end
 
     def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
+      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
+      if !decide_data.key?(:featureFlags)
+        raise DecideAPIError.new(decide_data.to_json)
+      else
+        stringify_keys(decide_data[:featureFlags] || {})
+      end
+    end
 
+    def get_feature_payloads(distinct_id, groups={}, person_properties={}, group_properties={})
+      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
+      if !decide_data.key?(:featureFlagPayloads)
+        raise DecideAPIError.new(decide_data.to_json)
+      else
+        stringify_keys(decide_data[:featureFlagPayloads] || {})
+      end
+    end
+
+    def get_decide(distinct_id, groups={}, person_properties={}, group_properties={})
       request_data = {
         "distinct_id": distinct_id,
         "groups": groups,
@@ -59,12 +76,7 @@ class PostHog
       }
 
       decide_data = _request_feature_flag_evaluation(request_data)
-
-      if !decide_data.key?(:featureFlags)
-        raise DecideAPIError.new(decide_data.to_json)
-      else
-        stringify_keys(decide_data[:featureFlags] || {})
-      end
+      decide_data
     end
 
     def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -121,27 +133,29 @@ class PostHog
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
     # returns a string hash of all flags
       response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
-      flags = response[0]
+      flags = response[:featureFlags]
     end
 
-    def get_all_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+    def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
-      payloads = response[1]
+      payloads = response[:featureFlagPayloads]
     end
 
     def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       load_feature_flags
 
-      response = {}
+      flags = {}
       payloads = {}
       fallback_to_decide = @feature_flags.empty?
 
       @feature_flags.each do |flag|
         begin
           match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
-          response[flag[:key]] = match_value
+          flags[flag[:key]] = match_value
           match_payload = _compute_flag_payload_locally(flag[:key], match_value)
-          payloads[flag[:key]] = match_payload
+          if match_payload
+            payloads[flag[:key]] = match_payload
+          end
         rescue InconclusiveMatchError => e
           fallback_to_decide = true
         rescue StandardError => e
@@ -149,16 +163,18 @@ class PostHog
           fallback_to_decide = true
         end
       end
-
       if fallback_to_decide && !only_evaluate_locally
         begin
-          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
-          response = {**response, **flags}
+          flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
+          symbolize_keys! flags
+          symbolize_keys! payloads
+          flags = stringify_keys({**flags, **flags_and_payloads[:featureFlags]})
+          payloads = stringify_keys({**payloads, **flags_and_payloads[:featureFlagPayloads]})
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}"
         end
       end
-      [response, payloads, fallback_to_decide]
+      {"featureFlags": flags, "featureFlagPayloads": payloads}
     end
 
     def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -177,7 +193,7 @@ class PostHog
         response = _compute_flag_payload_locally(key, match_value)
       end
       if response == nil and !only_evaluate_locally
-        decide_payloads = get_all_payloads(distinct_id, groups, person_properties, group_properties)
+        decide_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
         response = decide_payloads[key.downcase] || nil
       end
       response

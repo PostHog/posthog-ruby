@@ -3323,6 +3323,227 @@ class PostHog
   end
 
   describe 'associated payloads' do
+    it 'get all flags and payloads with fallback' do
+      flag_res = [
+        {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "beta-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "rollout_percentage": 100,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [],
+                        "rollout_percentage": 100,
+                    }
+                ],
+                "payloads": {
+                    "true": "some-payload",
+                },
+            },
+        },
+        {
+            "id": 2,
+            "name": "Beta Feature",
+            "key": "disabled-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [],
+                        "rollout_percentage": 0,
+                    }
+                ],
+                "payloads": {
+                    "true": "another-payload",
+                },
+            },
+        },
+        {
+            "id": 3,
+            "name": "Beta Feature",
+            "key": "beta-feature2",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [{"key": "country", "value": "US"}],
+                        "rollout_percentage": 0,
+                    }
+                ],
+                "payloads": {
+                    "true": "payload-3",
+                },
+            },
+        },
+      ]
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: {"flags": flag_res}.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body:{
+          "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"},
+          "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
+      }.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+      expect(c.get_all_flags_and_payloads("distinct_id")[:featureFlagPayloads]).to eq({"beta-feature" => 100, "beta-feature2" => 300})
+      assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 1
+    end
+
+    it 'get all flags and payloads with fallback and empty local flags' do
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: {"flags": []}.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body:{
+        "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"},
+        "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
+      }.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_all_flags_and_payloads("distinct_id")[:featureFlagPayloads]).to eq({"beta-feature" => 100, "beta-feature2" => 300})
+      assert_requested :post, 'https://app.posthog.com/decide/?v=2', times: 1
+    end
+
+    it 'get all flags and payloads with fallback but only local eval is set' do
+      flag_res = [
+        {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "beta-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "rollout_percentage": 100,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [],
+                        "rollout_percentage": 100,
+                    }
+                ],
+                "payloads": {
+                    "true": "some-payload",
+                },
+            },
+        },
+        {
+            "id": 2,
+            "name": "Beta Feature",
+            "key": "disabled-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [],
+                        "rollout_percentage": 0,
+                    }
+                ],
+                "payloads": {
+                    "true": "another-payload",
+                },
+            },
+        },
+        {
+            "id": 3,
+            "name": "Beta Feature",
+            "key": "beta-feature2",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [{"key": "country", "value": "US"}],
+                        "rollout_percentage": 0,
+                    }
+                ],
+                "payloads": {
+                    "true": "payload-3",
+                },
+            },
+        },
+      ]
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: {"flags": flag_res}.to_json)
+
+      stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        .to_return(status: 200, body:{
+        "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"},
+        "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
+      }.to_json)
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_all_flags_and_payloads("distinct_id", only_evaluate_locally: true)[:featureFlagPayloads]).to eq({"beta-feature" => "some-payload"})
+    end
+
+    it 'get all flags and payloads with no fallback' do
+      basic_flag = {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "beta-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "rollout_percentage": 100,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [],
+                        "rollout_percentage": 100,
+                    }
+                ],
+                "payloads": {
+                    "true": "new",
+                },
+            },
+        }
+        disabled_flag = {
+            "id": 2,
+            "name": "Beta Feature",
+            "key": "disabled-feature",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [],
+                        "rollout_percentage": 0,
+                    }
+                ],
+                "payloads": {
+                    "true": "some-payload",
+                },
+            },
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: {"flags": [basic_flag, disabled_flag]}.to_json)
+  
+        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+          .to_return(status: 200, body:{
+          "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"}
+        }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(c.get_all_flags_and_payloads("distinct_id")[:featureFlagPayloads]).to eq({"beta-feature" => "new"})
+        assert_not_requested :post, 'https://app.posthog.com/decide/?v=2'
+    end
+
     it 'evaluates boolean feature flags locally' do
       basic_flag_res = {
         "id": 1,
@@ -3433,7 +3654,7 @@ class PostHog
           'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: {"flags": [multivariate_flag]}.to_json)
         stub_request(:post, 'https://app.posthog.com/decide/?v=2')
-        .to_return(status: 200, body:{"featureFlags": {}}.to_json)
+        .to_return(status: 200, body:{}.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
