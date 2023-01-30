@@ -58,15 +58,6 @@ class PostHog
       end
     end
 
-    def get_feature_payloads(distinct_id, groups={}, person_properties={}, group_properties={})
-      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
-      if !decide_data.key?(:featureFlagPayloads)
-        raise DecideAPIError.new(decide_data.to_json)
-      else
-        stringify_keys(decide_data[:featureFlagPayloads] || {})
-      end
-    end
-
     def get_decide(distinct_id, groups={}, person_properties={}, group_properties={})
       request_data = {
         "distinct_id": distinct_id,
@@ -166,10 +157,10 @@ class PostHog
       if fallback_to_decide && !only_evaluate_locally
         begin
           flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
-          symbolize_keys! flags
-          symbolize_keys! payloads
-          flags = stringify_keys({**flags, **flags_and_payloads[:featureFlags]})
-          payloads = stringify_keys({**payloads, **flags_and_payloads[:featureFlagPayloads]})
+          decide_flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
+          decide_payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+          flags = {**flags, **decide_flags}
+          payloads = {**payloads, **decide_payloads}
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}"
         end
