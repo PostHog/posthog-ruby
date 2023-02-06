@@ -64,7 +64,6 @@ puts posthog.get_all_flags("distinct_id_random_22", person_properties: {"$geoip_
 
 #############################################################################################
 # Feature flag payload examples
-# requires a personal API key to work
 #############################################################################################
 
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id")

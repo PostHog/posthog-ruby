@@ -76,7 +76,6 @@ class PostHog
       }
 
       decide_data = _request_feature_flag_evaluation(request_data)
-      decide_data
     end
 
     def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)

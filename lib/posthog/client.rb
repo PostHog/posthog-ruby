@@ -209,11 +209,24 @@ class PostHog
     #
     # @param [String] key The key of the feature flag
     # @param [String] distinct_id The distinct id of the user
-    # @param [String or boolean] match_value The value of the feature flag to be matched
+    # @option [String or boolean] match_value The value of the feature flag to be matched
+    # @option [Hash] groups
+    # @option [Hash] person_properties key-value pairs of properties to associate with the user.
+    # @option [Hash] group_properties
+    # @option [Boolean] only_evaluate_locally
+    #
     def get_feature_flag_payload(key, distinct_id, match_value: nil, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties, group_properties, only_evaluate_locally)
     end
 
+    # Returns all flags and payloads for a given user
+    #
+    # @param [String] distinct_id The distinct id of the user
+    # @option [Hash] groups
+    # @option [Hash] person_properties key-value pairs of properties to associate with the user.
+    # @option [Hash] group_properties
+    # @option [Boolean] only_evaluate_locally
+    #
     def get_all_flags_and_payloads(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
       @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
     end
