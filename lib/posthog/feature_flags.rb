@@ -10,9 +10,6 @@ class PostHog
   class InconclusiveMatchError < StandardError
   end
 
-  class DecideAPIError < StandardError
-  end
-
   class FeatureFlagsPoller
     include PostHog::Logging
     include PostHog::Utils
@@ -52,7 +49,7 @@ class PostHog
     def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
       decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
       if !decide_data.key?(:featureFlags)
-        raise DecideAPIError.new(decide_data.to_json)
+        logger.error "Missing feature flags key: #{decide_data.to_json}"
       else
         stringify_keys(decide_data[:featureFlags] || {})
       end
@@ -61,7 +58,7 @@ class PostHog
     def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
       if !decide_data.key?(:featureFlagPayloads)
-        raise DecideAPIError.new(decide_data.to_json)
+        logger.error "Missing feature flag payloads key: #{decide_data.to_json}"
       else
         stringify_keys(decide_data[:featureFlagPayloads] || {})
       end
