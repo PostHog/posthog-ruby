@@ -554,7 +554,7 @@ class PostHog
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, decide_endpoint)
-      .to_return(status: 200, body:{"featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"}}.to_json)
+      .to_return(status: 200, body:{"featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2", "disabled-feature": false}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 

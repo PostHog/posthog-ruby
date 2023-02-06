@@ -162,8 +162,8 @@ class PostHog
           flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
           decide_flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
           decide_payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
-          flags = {**flags, **decide_flags}
-          payloads = {**payloads, **decide_payloads}
+          flags = decide_flags
+          payloads = decide_payloads
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}"
         end
