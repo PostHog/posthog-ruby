@@ -394,7 +394,6 @@ class PostHog
 
     def _load_feature_flags()
       res = _request_feature_flag_definitions
-      @feature_flags.clear
 
       if !res.key?(:flags)
         logger.error "Failed to load feature flags: #{res}"
