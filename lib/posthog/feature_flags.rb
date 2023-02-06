@@ -50,6 +50,7 @@ class PostHog
       decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
       if !decide_data.key?(:featureFlags)
         logger.error "Missing feature flags key: #{decide_data.to_json}"
+        {}
       else
         stringify_keys(decide_data[:featureFlags] || {})
       end
@@ -59,6 +60,7 @@ class PostHog
       decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
       if !decide_data.key?(:featureFlagPayloads)
         logger.error "Missing feature flag payloads key: #{decide_data.to_json}"
+        {}
       else
         stringify_keys(decide_data[:featureFlagPayloads] || {})
       end
