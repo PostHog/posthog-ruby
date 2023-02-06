@@ -3585,39 +3585,16 @@ class PostHog
     end
 
     it 'evaluates boolean feature flags with decide' do
-      basic_flag_res = {
-        "id": 1,
-            "name": "Beta Feature",
-            "key": "person-flag",
-            "is_simple_flag": true,
-            "active": true,
-            "filters": {
-                "groups": [
-                    {
-                        "properties": [
-                            {
-                                "key": "region",
-                                "operator": "exact",
-                                "value": ["USA"],
-                                "type": "person",
-                            }
-                        ],
-                        "rollout_percentage": 100,
-                    }
-                ],
-                "payloads": {"true": 300},
-            },
-      }
       stub_request(
         :get,
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
-      ).to_return(status: 200, body: {"flags": [basic_flag_res]}.to_json)
+      ).to_return(status: 200, body: {"flags": []}.to_json)
       stub_request(:post, decide_endpoint)
         .to_return(status: 200, body:{"featureFlagPayloads": {"person-flag" => 300}}.to_json)
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region": "USA"})).to eq(300)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value: true, person_properties: {"region": "USA"})).to eq(300)
-      # assert_requested :post, decide_endpoint, times: 2
+      assert_requested :post, decide_endpoint, times: 2
     end
 
     it 'with multivariate feature flag payloads' do
@@ -3655,7 +3632,7 @@ class PostHog
           'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: {"flags": [multivariate_flag]}.to_json)
         stub_request(:post, decide_endpoint)
-        .to_return(status: 200, body:{}.to_json)
+        .to_return(status: 200, body:{"featureFlagPayloads": {"first-variant": {"b": "json"}}}.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
