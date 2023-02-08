@@ -1,3 +1,7 @@
+# 2.2.0 - 2023-02-08
+
+1. Remove concurrent gem dependency version limitation
+
 # 2.1.0 - 2022-11-14
 
 1. Add support for datetime operators for local feature flag evaluation
