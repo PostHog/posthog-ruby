@@ -3643,4 +3643,56 @@ class PostHog
         assert_not_requested :post, decide_endpoint
     end
   end
+
+  describe 'resiliency' do
+    it 'does not override existing feature flags on local evaluation error' do
+      api_feature_flag_res = {
+        "flags": [
+          {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "person-flag",
+            "is_simple_flag": true,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [
+                            {
+                                "key": "region",
+                                "operator": "exact",
+                                "value": ["USA"],
+                                "type": "person",
+                            }
+                        ],
+                        "rollout_percentage": 100,
+                    }
+                ],
+            },
+          },]
+      }
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, decide_endpoint)
+      .to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(true)
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 400, body: {"error": "went_wrong!"}.to_json)
+
+      # force reload to simulate poll interval
+      c.reload_feature_flags
+
+      expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(true)
+    end
+  end
 end
