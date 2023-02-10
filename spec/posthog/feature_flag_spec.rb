@@ -3693,6 +3693,7 @@ class PostHog
       c.reload_feature_flags
 
       expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(true)
+      assert_not_requested :post, decide_endpoint
     end
   end
 end
