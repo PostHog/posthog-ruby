@@ -2,6 +2,8 @@ require 'spec_helper'
 
 class PostHog
 
+  decide_endpoint = 'https://app.posthog.com/decide/?v=3'
+
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
   describe Client do
@@ -120,7 +122,7 @@ class PostHog
           :get,
           'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        stub_request(:post, decide_endpoint)
           .to_return(status: 200, body: decide_res.to_json)
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
@@ -144,7 +146,7 @@ class PostHog
           :get,
           'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 401, body: {"error": "not authorized"}.to_json)
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        stub_request(:post, decide_endpoint)
           .to_return(status: 200, body: decide_res.to_json)
         c = Client.new(api_key: API_KEY, test_mode: true)
 
@@ -232,7 +234,7 @@ class PostHog
           ]
         }
 
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        stub_request(:post, decide_endpoint)
         .to_return(status: 200, body:{"featureFlags": {"decide-flag": "decide-value"}}.to_json)  
         
         stub_request(
@@ -511,7 +513,7 @@ class PostHog
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # Mock response for decide
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        stub_request(:post, decide_endpoint)
           .to_return(status: 200, body: decide_res.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -524,7 +526,7 @@ class PostHog
       it 'doesnt fail without a personal api key' do
         client = Client.new(api_key: API_KEY, test_mode: true)
 
-        stub_request(:post, 'https://app.posthog.com/decide/?v=2')
+        stub_request(:post, decide_endpoint)
         .to_return(status: 200, body: {"featureFlags": {'some_key': true}}.to_json)
 
         expect(client.is_feature_enabled('some_key', 'some id')).to eq(true)

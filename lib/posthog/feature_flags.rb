@@ -10,9 +10,6 @@ class PostHog
   class InconclusiveMatchError < StandardError
   end
 
-  class DecideAPIError < StandardError
-  end
-
   class FeatureFlagsPoller
     include PostHog::Logging
     include PostHog::Utils
@@ -25,6 +22,7 @@ class PostHog
       @feature_flags = Concurrent::Array.new
       @group_type_mapping = Concurrent::Hash.new
       @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
+      @feature_flags_by_key = nil
 
       @task =
         Concurrent::TimerTask.new(
@@ -49,7 +47,24 @@ class PostHog
     end
 
     def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
+      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
+      if !decide_data.key?(:featureFlags)
+        logger.error "Missing feature flags key: #{decide_data.to_json}"
+      else
+        stringify_keys(decide_data[:featureFlags] || {})
+      end
+    end
 
+    def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
+      if !decide_data.key?(:featureFlagPayloads)
+        logger.error "Missing feature flag payloads key: #{decide_data.to_json}"
+      else
+        stringify_keys(decide_data[:featureFlagPayloads] || {})
+      end
+    end
+
+    def get_decide(distinct_id, groups={}, person_properties={}, group_properties={})
       request_data = {
         "distinct_id": distinct_id,
         "groups": groups,
@@ -58,12 +73,6 @@ class PostHog
       }
 
       decide_data = _request_feature_flag_evaluation(request_data)
-
-      if !decide_data.key?(:featureFlags)
-        raise DecideAPIError.new(decide_data.to_json)
-      else
-        stringify_keys(decide_data[:featureFlags] || {})
-      end
     end
 
     def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -119,16 +128,25 @@ class PostHog
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       # returns a string hash of all flags
+      response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      flags = response[:featureFlags]
+    end
 
-      # make sure they're loaded on first run
+    def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       load_feature_flags
 
-      response = {}
+      flags = {}
+      payloads = {}
       fallback_to_decide = @feature_flags.empty?
 
       @feature_flags.each do |flag|
         begin
-          response[flag[:key]] = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+          match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+          flags[flag[:key]] = match_value
+          match_payload = _compute_flag_payload_locally(flag[:key], match_value)
+          if match_payload
+            payloads[flag[:key]] = match_payload
+          end
         rescue InconclusiveMatchError => e
           fallback_to_decide = true
         rescue StandardError => e
@@ -136,14 +154,36 @@ class PostHog
           fallback_to_decide = true
         end
       end
-
       if fallback_to_decide && !only_evaluate_locally
         begin
-          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
-          response = {**response, **flags}
+          flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
+          flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
+          payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
         rescue StandardError => e
           logger.error "Error computing flag remotely: #{e}"
         end
+      end
+      {"featureFlags": flags, "featureFlagPayloads": payloads}
+    end
+
+    def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      if match_value == nil
+        match_value = get_feature_flag(
+          key,
+          distinct_id,
+          groups,
+          person_properties,
+          group_properties,
+          true,
+        )[0]
+      end
+      response = nil
+      if match_value != nil
+        response = _compute_flag_payload_locally(key, match_value)
+      end
+      if response == nil and !only_evaluate_locally
+        decide_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
+        response = decide_payloads[key.downcase] || nil
       end
       response
     end
@@ -248,6 +288,17 @@ class PostHog
 
     end
 
+    def _compute_flag_payload_locally(key, match_value)
+      response = nil
+
+      if [true, false].include? match_value
+        response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_s.to_sym)
+      elsif match_value.is_a? String
+        response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_sym)
+      end
+      response
+    end
+
     def match_feature_flag_properties(flag, distinct_id, properties)
       flag_filters = flag[:filters] || {}
 
@@ -341,12 +392,17 @@ class PostHog
 
     def _load_feature_flags()
       res = _request_feature_flag_definitions
-      @feature_flags.clear
 
       if !res.key?(:flags)
         logger.error "Failed to load feature flags: #{res}"
       else
-        @feature_flags = res[:flags] || []        
+        @feature_flags = res[:flags] || []
+        @feature_flags_by_key = {}
+        @feature_flags.each do |flag|
+          if flag[:key] != nil
+            @feature_flags_by_key[flag[:key]] = flag
+          end
+        end
         @group_type_mapping = res[:group_type_mapping] || {}
 
         logger.debug "Loaded #{@feature_flags.length} feature flags"
@@ -365,7 +421,7 @@ class PostHog
     end
 
     def _request_feature_flag_evaluation(data={})
-      uri = URI("#{@host}/decide/?v=2")
+      uri = URI("#{@host}/decide/?v=3")
       req = Net::HTTP::Post.new(uri)
       req['Content-Type'] = 'application/json'
       data['token'] = @project_api_key
