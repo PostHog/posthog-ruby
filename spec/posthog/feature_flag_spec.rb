@@ -3697,17 +3697,19 @@ class PostHog
     end
   end
 
-  it 'gets active feature flags' do
-    stub_request(
-      :get,
-      'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
-    ).to_return(status: 200, body: {}.to_json)
+  describe 'methods' do
+    it 'gets active feature flags' do
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: {}.to_json)
 
-    stub_request(:post, decide_endpoint)
-    .to_return(status: 200, body: {"featureFlags": {"beta-feature": "random-variant", "off-feature": false, "alpha-feature": true}}.to_json)
+      stub_request(:post, decide_endpoint)
+      .to_return(status: 200, body: {"featureFlags": {"beta-feature": "random-variant", "off-feature": false, "alpha-feature": true}}.to_json)
 
-    c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-    expect(c._get_active_feature_variants("distinct_id")).to eq({"beta-feature": "random-variant", "alpha-feature": true})
+      expect(c._get_active_feature_variants("distinct_id")).to eq({"beta-feature": "random-variant", "alpha-feature": true})
+    end
   end
 end
