@@ -91,7 +91,7 @@ class PostHog
       symbolize_keys! attrs
 
       if attrs[:send_feature_flags]
-        all_feature_variants = @feature_flags_poller._get_active_feature_variants(attrs[:distinct_id], attrs[:groups])
+        feature_variants = @feature_flags_poller._get_active_feature_variants(attrs[:distinct_id], attrs[:groups])
 
         attrs[:feature_variants] = feature_variants
       end
