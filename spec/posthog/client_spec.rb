@@ -138,6 +138,29 @@ class PostHog
         expect(properties["$active_feature_flags"]).to eq(["beta-feature"])
       end
 
+      it 'captures active feature flags only' do
+        decide_res = {"featureFlags": {"beta-feature": "random-variant", "alpha-feature": true, "off-feature": false}}
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: {}.to_json)
+        stub_request(:post, decide_endpoint)
+          .to_return(status: 200, body: decide_res.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: "distinct_id",
+            event: "ruby test event",
+            send_feature_flags: true,
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties["$feature/beta-feature"]).to eq("random-variant")
+        expect(properties["$feature/alpha-feature"]).to eq(true)
+        expect(properties["$active_feature_flags"]).to eq(["beta-feature", "alpha-feature"])
+      end
+
       it 'captures feature flags when no personal API key is present' do
         decide_res = {"featureFlags": {"beta-feature": "random-variant"}}
         # Mock response for decide
