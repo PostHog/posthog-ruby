@@ -55,6 +55,17 @@ class PostHog
       end
     end
 
+    def _get_active_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
+      feature_variants = get_feature_variants(distinct_id, groups, person_properties, group_properties)
+      active_feature_variants = {}
+      feature_variants.each do |key, value|
+        if value != false
+          active_feature_variants[key] = value
+        end
+      end
+      active_feature_variants
+    end
+
     def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
       if !decide_data.key?(:featureFlagPayloads)
