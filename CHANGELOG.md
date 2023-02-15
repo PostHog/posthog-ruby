@@ -1,3 +1,7 @@
+# 2.3.0 - 2023-02-15
+
+1. Add support for feature flag payloads
+
 # 2.2.0 - 2023-02-08
 
 1. Remove concurrent gem dependency version limitation
