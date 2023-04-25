@@ -7,11 +7,14 @@ if !ENV['GH_ACTIONS_UNIT_TESTS']
 end
 
 require 'posthog'
+require 'active_support/isolated_execution_state'
 require 'active_support/time'
 require 'webmock/rspec'
 
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'
+
+PostHog::Logging.logger.level = Logger::FATAL
 
 API_KEY = 'testsecret'
 
@@ -95,3 +98,7 @@ module AsyncHelper
 end
 
 include AsyncHelper
+
+RSpec.configure do |config|
+  config.raise_errors_for_deprecations!
+end

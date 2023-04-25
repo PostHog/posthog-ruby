@@ -6,7 +6,15 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+        - '3.2'
+        - '3.1'
+        - '3.0'
+        - '2.7'
+        - jruby
     env:
       RAILS_ENV: test
       GH_ACTIONS_UNIT_TESTS: 1
@@ -17,8 +25,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          # Not needed with a .ruby-version file
-          ruby-version: 2.7
+          ruby-version: "${{matrix.ruby}}"
           # runs 'bundle install' and caches installed gems automatically
           bundler-cache: true
 
