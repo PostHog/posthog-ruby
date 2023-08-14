@@ -15,6 +15,7 @@ class PostHog
 
     # @param [Hash] opts
     # @option opts [String] :api_key Your project's api_key
+    # @option opts [String] :personal_api_key Your personal API key
     # @option opts [FixNum] :max_queue_size Maximum number of calls to be
     #   remain queued. Defaults to 10_000.
     # @option opts [Bool] :test_mode +true+ if messages should remain
