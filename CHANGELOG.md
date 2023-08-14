@@ -1,3 +1,7 @@
+# 2.3.1 - 2023-08-14
+
+1. Update option doc string to show personal API Key as an option
+
 # 2.3.0 - 2023-02-15
 
 1. Add support for feature flag payloads
