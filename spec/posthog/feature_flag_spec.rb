@@ -1,5 +1,5 @@
 require 'spec_helper'
-
+require 'timecop'
 
 class PostHog
 
@@ -1153,7 +1153,7 @@ class PostHog
 
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 0 })).to be false
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => -1 })).to be false
-      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => "23" })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => "23" })).to be true
 
       property_b = { 'key' => 'key', 'value' => 1, 'operator' => 'lt' }
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 0 })).to be true
@@ -1171,7 +1171,7 @@ class PostHog
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 0 })).to be false
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => -1 })).to be false
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => -3 })).to be false
-      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => "3" })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => "3" })).to be true
 
       property_d = { 'key' => 'key', 'value' => '43', 'operator' => 'lte' }
       expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '43' })).to be true
@@ -1179,7 +1179,21 @@ class PostHog
       
       expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '44' })).to be false
       expect(FeatureFlagsPoller.match_property(property_d, { 'key' => 44 })).to be false
+      expect(FeatureFlagsPoller.match_property(property_d, { 'key' => 42 })).to be true
 
+      property_e = { 'key' => 'key', 'value' => "30", 'operator' => 'lt' }
+      expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '29' })).to be true
+
+      # depending on the type of override, we adjust type comparison
+      expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '100' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_e, { 'key' => 100 })).to be false
+
+      property_f = { 'key' => 'key', 'value' => "123aloha", 'operator' => 'gt' }
+      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => '123' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => 122 })).to be false
+
+      # this turns into a string comparison
+      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => 129 })).to be true
     end
 
     it 'with date operators' do
@@ -1219,6 +1233,106 @@ class PostHog
       expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-05 11:34:11 +00:00' })).to be true
       expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-05 11:34:13 +00:00' })).to be false
 
+    end
+
+    it 'with relative date operators - is_relative_date_before' do
+      Timecop.travel(Time.zone.local(2022, 5, 1)) do
+        property_a = { 'key' => 'key', 'value' => '6h', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-03-01' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-04-30' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3) })).to be true
+        # false because date comparison, instead of datetime, so reduces to same date
+        # expect(FeatureFlagsPoller.match_property(property_a, { 'key' => Time.new(2022, 4, 30) })).to be false
+
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 19, 2, 3) })).to be false
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3, '+2') })).to be true
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.parse('2022-04-30') })).to be true
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-05-30' })).to be false
+
+        # can't be a number
+        expect{ FeatureFlagsPoller.match_property(property_a, { 'key' => 1}) }.to raise_error(InconclusiveMatchError)
+
+        # can't be invalid string
+        expect{ FeatureFlagsPoller.match_property(property_a, { 'key' => 'abcdef'}) }.to raise_error(InconclusiveMatchError)
+      end
+    end
+
+    it 'with relative date operators - is_relative_date_after' do
+      Timecop.travel(Time.zone.local(2022, 5, 1)) do
+        property_b = { 'key' => 'key', 'value' => '1h', 'operator' => 'is_relative_date_after'}
+        expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-05-02' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-05-30' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_b, { 'key' => DateTime.new(2022, 5, 30) })).to be true
+        expect(FeatureFlagsPoller.match_property(property_b, { 'key' => DateTime.parse('2022-05-30') })).to be true
+        expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-04-30' })).to be false
+
+        # can't be invalid string
+        expect{ FeatureFlagsPoller.match_property(property_b, { 'key' => 'abcdef'}) }.to raise_error(InconclusiveMatchError)
+        # invalid flag property
+        property_c = { 'key' => 'key', 'value' => 1234, 'operator' => 'is_relative_date_after'}
+        expect{ FeatureFlagsPoller.match_property(property_c, { 'key' => 1}) }.to raise_error(InconclusiveMatchError)
+        expect{ FeatureFlagsPoller.match_property(property_c, { 'key' => '2022-05-30'}) }.to raise_error(InconclusiveMatchError)
+      end
+    end
+
+    it 'with relative date operators - all possible relative dates' do
+      Timecop.travel(Time.zone.local(2022, 5, 1)) do
+        property_d = { 'key' => 'key', 'value' => '12d', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-05-30' })).to be false
+
+        expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-03-30' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-05 12:34:11+01:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-19 01:34:11+02:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-04-19 02:00:01+02:00' })).to be false
+
+        # Try all possible relative dates
+        property_e = { 'key' => 'key', 'value' => '1h', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '2022-05-01 00:00:00' })).to be false
+        expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '2022-04-30 22:00:00' })).to be true
+
+        property_f = { 'key' => 'key', 'value' => '1d', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_f, { 'key' => '2022-04-29 23:59:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_f, { 'key' => '2022-04-30 00:00:01' })).to be false
+
+        property_g = { 'key' => 'key', 'value' => '1w', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-23 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-24 00:00:00' })).to be true
+        # true because in ruby two equivalent datetimes return true even in a < comparison
+        expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-24 00:00:01' })).to be false
+
+        property_h = { 'key' => 'key', 'value' => '1m', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_h, { 'key' => '2022-03-01 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_h, { 'key' => '2022-04-05 00:00:00' })).to be false
+
+        property_i = { 'key' => 'key', 'value' => '1y', 'operator' => 'is_relative_date_before'}
+        expect(FeatureFlagsPoller.match_property(property_i, { 'key' => '2021-04-28 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_i, { 'key' => '2021-05-01 00:00:01' })).to be false
+
+        property_j = { 'key' => 'key', 'value' => '122h', 'operator' => 'is_relative_date_after'}
+        expect(FeatureFlagsPoller.match_property(property_j, { 'key' => '2022-05-01 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_j, { 'key' => '2022-04-23 01:00:00' })).to be false
+
+        property_k = { 'key' => 'key', 'value' => '2d', 'operator' => 'is_relative_date_after'}
+        expect(FeatureFlagsPoller.match_property(property_k, { 'key' => '2022-05-01 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_k, { 'key' => '2022-04-29 00:00:01' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_k, { 'key' => '2022-04-29 00:00:00' })).to be false
+
+        property_l = { 'key' => 'key', 'value' => '02w', 'operator' => 'is_relative_date_after'}
+        expect(FeatureFlagsPoller.match_property(property_l, { 'key' => '2022-05-01 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_l, { 'key' => '2022-04-16 00:00:00' })).to be false
+
+        property_m = { 'key' => 'key', 'value' => '1m', 'operator' => 'is_relative_date_after'}
+        expect(FeatureFlagsPoller.match_property(property_m, { 'key' => '2022-04-01 00:00:01' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_m, { 'key' => '2022-04-01 00:00:00' })).to be false
+
+        property_n = { 'key' => 'key', 'value' => '1y', 'operator' => 'is_relative_date_after'}
+        expect(FeatureFlagsPoller.match_property(property_n, { 'key' => '2022-05-01 00:00:00' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_n, { 'key' => '2021-05-01 00:00:01' })).to be true
+        expect(FeatureFlagsPoller.match_property(property_n, { 'key' => '2021-05-01 00:00:00' })).to be false
+        expect(FeatureFlagsPoller.match_property(property_n, { 'key' => '2021-04-30 00:00:00' })).to be false
+        expect(FeatureFlagsPoller.match_property(property_n, { 'key' => '2021-03-01 12:13:00' })).to be false
+
+      end
     end
   end
 
