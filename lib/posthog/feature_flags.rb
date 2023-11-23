@@ -266,19 +266,19 @@ class PostHog
 
       case operator
       when 'exact', 'is_not'
-          if value.is_a?(Array)
-            values_stringified = value.map { |val| val.to_s.downcase }
-            if operator == 'exact'
-              return values_stringified.any?(override_value.to_s.downcase)
-            else
-              return !values_stringified.any?(override_value.to_s.downcase)
-            end
-          end
+        if value.is_a?(Array)
+          values_stringified = value.map { |val| val.to_s.downcase }
           if operator == 'exact'
-            value.to_s.downcase == override_value.to_s.downcase
+            return values_stringified.any?(override_value.to_s.downcase)
           else
-            value.to_s.downcase != override_value.to_s.downcase
+            return !values_stringified.any?(override_value.to_s.downcase)
           end
+        end
+        if operator == 'exact'
+          value.to_s.downcase == override_value.to_s.downcase
+        else
+          value.to_s.downcase != override_value.to_s.downcase
+        end
       when'is_set'
         property_values.key?(key)
       when 'icontains'

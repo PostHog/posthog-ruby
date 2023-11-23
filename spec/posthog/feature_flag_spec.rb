@@ -1242,7 +1242,8 @@ class PostHog
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-04-30' })).to be true
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3) })).to be true
         # false because date comparison, instead of datetime, so reduces to same date
-        # expect(FeatureFlagsPoller.match_property(property_a, { 'key' => Time.new(2022, 4, 30) })).to be false
+        # we converts this to datetime for appropriate comparison anyway
+        # expect(FeatureFlagsPoller.match_property(property_a, { 'key' => Time.new(2022, 4, 30) })).to be true
 
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 19, 2, 3) })).to be false
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3, '+2') })).to be true
@@ -1333,6 +1334,20 @@ class PostHog
         expect(FeatureFlagsPoller.match_property(property_n, { 'key' => '2021-03-01 12:13:00' })).to be false
 
       end
+    end
+
+    it 'nil property value with all operators' do
+      property_a = { 'key' => 'key', 'value' => 'nil', 'operator' => 'is_not' }
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be true # nil to string here is an empty string, not "nil" so it's true because it doesn't match
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'non' })).to be true
+
+      property_b = { 'key' => 'key', 'value' => nil, 'operator' => 'is_set' }
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => nil })).to be true
+
+      # i don't think these none test cases make sense for ruby's nil equivalent?
+      property_c = { 'key' => 'key', 'value' => 'no', 'operator' => 'icontains' }
+      # expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'smh' })).to be false
     end
   end
 
