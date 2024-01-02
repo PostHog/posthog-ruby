@@ -1236,17 +1236,18 @@ class PostHog
     end
 
     it 'with relative date operators - is_relative_date_before' do
-      Timecop.travel(Time.zone.local(2022, 5, 1)) do
+      Timecop.freeze(Time.gm(2022, 5, 1)) do
         property_a = { 'key' => 'key', 'value' => '6h', 'operator' => 'is_relative_date_before'}
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-03-01' })).to be true
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-04-30' })).to be true
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3) })).to be true
         # false because date comparison, instead of datetime, so reduces to same date
         # we converts this to datetime for appropriate comparison anyway
-        # expect(FeatureFlagsPoller.match_property(property_a, { 'key' => Time.new(2022, 4, 30) })).to be true
-
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 19, 2, 3) })).to be false
+
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 1, 2, 3, '+2') })).to be true
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 20, 2, 3, '+2') })).to be false
+        expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.new(2022, 4, 30, 19, 59, 3, '+2') })).to be true
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => DateTime.parse('2022-04-30') })).to be true
         expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '2022-05-30' })).to be false
 
@@ -1259,7 +1260,7 @@ class PostHog
     end
 
     it 'with relative date operators - is_relative_date_after' do
-      Timecop.travel(Time.zone.local(2022, 5, 1)) do
+      Timecop.freeze(Time.gm(2022, 5, 1)) do
         property_b = { 'key' => 'key', 'value' => '1h', 'operator' => 'is_relative_date_after'}
         expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-05-02' })).to be true
         expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '2022-05-30' })).to be true
@@ -1277,7 +1278,7 @@ class PostHog
     end
 
     it 'with relative date operators - all possible relative dates' do
-      Timecop.travel(Time.zone.local(2022, 5, 1)) do
+      Timecop.freeze(Time.gm(2022, 5, 1)) do
         property_d = { 'key' => 'key', 'value' => '12d', 'operator' => 'is_relative_date_before'}
         expect(FeatureFlagsPoller.match_property(property_d, { 'key' => '2022-05-30' })).to be false
 
@@ -1297,8 +1298,7 @@ class PostHog
 
         property_g = { 'key' => 'key', 'value' => '1w', 'operator' => 'is_relative_date_before'}
         expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-23 00:00:00' })).to be true
-        expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-24 00:00:00' })).to be true
-        # true because in ruby two equivalent datetimes return true even in a < comparison
+        expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-24 00:00:00' })).to be false
         expect(FeatureFlagsPoller.match_property(property_g, { 'key' => '2022-04-24 00:00:01' })).to be false
 
         property_h = { 'key' => 'key', 'value' => '1m', 'operator' => 'is_relative_date_before'}
@@ -1336,19 +1336,169 @@ class PostHog
       end
     end
 
-    it 'nil property value with all operators' do
+    # def test_none_property_value_with_all_operators(self):
+    #   property_a = self.property(key="key", value="none", operator="is_not")
+    #   self.assertFalse(match_property(property_a, {"key": None}))
+    #   self.assertTrue(match_property(property_a, {"key": "non"}))
+
+    #   property_b = self.property(key="key", value=None, operator="is_set")
+    #   self.assertTrue(match_property(property_b, {"key": None}))
+
+    #   property_c = self.property(key="key", value="no", operator="icontains")
+    #   self.assertTrue(match_property(property_c, {"key": None}))
+    #   self.assertFalse(match_property(property_c, {"key": "smh"}))
+
+    #   property_d = self.property(key="key", value="No", operator="regex")
+    #   self.assertTrue(match_property(property_d, {"key": None}))
+
+    #   property_d_lower_case = self.property(key="key", value="no", operator="regex")
+    #   self.assertFalse(match_property(property_d_lower_case, {"key": None}))
+
+    #   property_e = self.property(key="key", value=1, operator="gt")
+    #   self.assertTrue(match_property(property_e, {"key": None}))
+
+    #   property_f = self.property(key="key", value=1, operator="lt")
+    #   self.assertFalse(match_property(property_f, {"key": None}))
+
+    #   property_g = self.property(key="key", value="xyz", operator="gte")
+    #   self.assertFalse(match_property(property_g, {"key": None}))
+
+    #   property_h = self.property(key="key", value="Oo", operator="lte")
+    #   self.assertTrue(match_property(property_h, {"key": None}))
+
+    #   property_i = self.property(key="key", value="2022-05-01", operator="is_date_before")
+    #   with self.assertRaises(InconclusiveMatchError):
+    #       self.assertFalse(match_property(property_i, {"key": None}))
+
+
+    it 'with none property value with all operators' do
       property_a = { 'key' => 'key', 'value' => 'nil', 'operator' => 'is_not' }
-      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be true # nil to string here is an empty string, not "nil" so it's true because it doesn't match
-      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'non' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be true 
+      # nil to string here is an empty string, not "nil" so it's true because it doesn't match
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'ni' })).to be true
 
       property_b = { 'key' => 'key', 'value' => nil, 'operator' => 'is_set' }
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => nil })).to be true
+      expect{ FeatureFlagsPoller.match_property(property_b, {  })}.to raise_error(InconclusiveMatchError)
 
-      # i don't think these none test cases make sense for ruby's nil equivalent?
-      property_c = { 'key' => 'key', 'value' => 'no', 'operator' => 'icontains' }
-      # expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+      property_c = { 'key' => 'key', 'value' => 'ni', 'operator' => 'icontains' }
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be false
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'smh' })).to be false
+
+      property_d = { 'key' => 'key', 'value' => 'Ni', 'operator' => 'regex' }
+      expect(FeatureFlagsPoller.match_property(property_d, { 'key' => nil })).to be false
+
+      property_d_lower_case = { 'key' => 'key', 'value' => 'ni', 'operator' => 'regex' }
+      expect(FeatureFlagsPoller.match_property(property_d_lower_case, { 'key' => nil })).to be false
+
+      property_e = { 'key' => 'key', 'value' => 1, 'operator' => 'gt' }
+      expect(FeatureFlagsPoller.match_property(property_e, { 'key' => nil })).to be false
+
+      property_f = { 'key' => 'key', 'value' => 1, 'operator' => 'lt' }
+      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => nil })).to be true
+
+      property_g = { 'key' => 'key', 'value' => 'xyz', 'operator' => 'gte' }
+      expect(FeatureFlagsPoller.match_property(property_g, { 'key' => nil })).to be false
+
+      property_j = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_after' }
+      expect{ FeatureFlagsPoller.match_property(property_j, { 'key' => nil }) }.to raise_error(InconclusiveMatchError)
+      
+      property_k = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_before' }
+      expect{ FeatureFlagsPoller.match_property(property_k, { 'key' => 'random' }) }.to raise_error(InconclusiveMatchError)
     end
+  end
+
+  describe 'relative date parsing' do
+    it 'invalid input' do
+      Timecop.freeze(Time.gm(2022, 5, 1)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1x")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1.2y")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1z")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1s")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("123344000.134m")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("bazinga")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("000bello")).to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("000hello")).to be_nil
+
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("000h")).not_to be_nil
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1000h")).not_to be_nil
+      end
+    end
+
+    it 'test overflow' do
+      expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1000000h")).to be_nil
+      expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("100000000000000000y")).to be_nil
+    end
+
+    it 'test hour parsing' do
+      Timecop.freeze(Time.gm(2020, 1, 1, 12, 1, 20, 134000, 0)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1h")).to eq(DateTime.new(2020, 1, 1, 11, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2h")).to eq(DateTime.new(2020, 1, 1, 10, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("24h")).to eq(DateTime.new(2019, 12, 31, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("30h")).to eq(DateTime.new(2019, 12, 31, 6, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("48h")).to eq(DateTime.new(2019, 12, 30, 12, 1, 20, Rational(0, 24)))
+
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("24h")).to eq(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1d"))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("48h")).to eq(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2d"))
+      end
+    end
+
+    it 'test day parsing' do
+      Timecop.freeze(Time.gm(2020, 1, 1, 12, 1, 20, 134000, 0)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1d")).to eq(DateTime.new(2019, 12, 31, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2d")).to eq(DateTime.new(2019, 12, 30, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("7d")).to eq(DateTime.new(2019, 12, 25, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("14d")).to eq(DateTime.new(2019, 12, 18, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("30d")).to eq(DateTime.new(2019, 12, 2, 12, 1, 20, Rational(0, 24)))
+
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("7d")).to eq(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1w"))
+      end
+    end
+
+    it 'test week parsing' do
+      Timecop.freeze(Time.gm(2020, 1, 1, 12, 1, 20, 134000, 0)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1w")).to eq(DateTime.new(2019, 12, 25, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2w")).to eq(DateTime.new(2019, 12, 18, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("4w")).to eq(DateTime.new(2019, 12, 4, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("8w")).to eq(DateTime.new(2019, 11, 6, 12, 1, 20, Rational(0, 24)))
+
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1m")).to eq(DateTime.new(2019, 12, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("4w")).not_to eq(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1m"))
+      end
+    end
+
+    it 'test month parsing' do
+      Timecop.freeze(Time.gm(2020, 1, 1, 12, 1, 20, 134000, 0)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1m")).to eq(DateTime.new(2019, 12, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2m")).to eq(DateTime.new(2019, 11, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("4m")).to eq(DateTime.new(2019, 9, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("8m")).to eq(DateTime.new(2019, 5, 1, 12, 1, 20, Rational(0, 24)))
+
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1y")).to eq(DateTime.new(2019, 1, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("12m")).to eq(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1y"))
+      end
+
+      Timecop.freeze(Time.gm(2020, 4, 3, 0, 0, 0, 0, 0)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1m")).to eq(DateTime.new(2020, 3, 3, 0, 0, 0, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2m")).to eq(DateTime.new(2020, 2, 3, 0, 0, 0, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("4m")).to eq(DateTime.new(2019, 12, 3, 0, 0, 0, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("8m")).to eq(DateTime.new(2019, 8, 3, 0, 0, 0, Rational(0, 24)))
+
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1y")).to eq(DateTime.new(2019, 4, 3, 0, 0, 0, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("12m")).to eq(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1y"))
+      end
+    end
+
+    it 'test year parsing' do
+      Timecop.freeze(Time.gm(2020, 1, 1, 12, 1, 20, 134000, 0)) do
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("1y")).to eq(DateTime.new(2019, 1, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("2y")).to eq(DateTime.new(2018, 1, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("4y")).to eq(DateTime.new(2016, 1, 1, 12, 1, 20, Rational(0, 24)))
+        expect(FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching("8y")).to eq(DateTime.new(2012, 1, 1, 12, 1, 20, Rational(0, 24)))
+      end
+    end
+
   end
 
 

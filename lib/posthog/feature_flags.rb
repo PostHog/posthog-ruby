@@ -220,10 +220,16 @@ class PostHog
     end
 
     def self.relative_date_parse_for_feature_flag_matching(value)
-      match = /([0-9]+)([a-z])/.match(value)
+      match = /^([0-9]+)([a-z])$/.match(value)
       parsed_dt = DateTime.now.new_offset(0)
       if match
         number = match[1].to_i
+
+        if number >= 10000
+          # Guard against overflow, disallow numbers greater than 10_000
+          return nil
+        end
+        
         interval = match[2]
         if interval == "h"
           parsed_dt = parsed_dt - (number/24r)
@@ -236,9 +242,9 @@ class PostHog
         elsif interval == "y"
           parsed_dt = parsed_dt.prev_year(number)
         else
-          nil
+          return nil
         end
-        return parsed_dt
+        parsed_dt
       else
         nil
       end
@@ -279,7 +285,7 @@ class PostHog
         else
           value.to_s.downcase != override_value.to_s.downcase
         end
-      when'is_set'
+      when 'is_set'
         property_values.key?(key)
       when 'icontains'
         override_value.to_s.downcase.include?(value.to_s.downcase)
@@ -292,7 +298,7 @@ class PostHog
       when 'gt', 'gte', 'lt', 'lte'
         parsed_value = nil
         begin
-          parsed_value = value.to_f
+          parsed_value = Float(value)
         rescue StandardError => e
         end
         if !parsed_value.nil? && !override_value.nil?
