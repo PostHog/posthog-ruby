@@ -1336,41 +1336,6 @@ class PostHog
       end
     end
 
-    # def test_none_property_value_with_all_operators(self):
-    #   property_a = self.property(key="key", value="none", operator="is_not")
-    #   self.assertFalse(match_property(property_a, {"key": None}))
-    #   self.assertTrue(match_property(property_a, {"key": "non"}))
-
-    #   property_b = self.property(key="key", value=None, operator="is_set")
-    #   self.assertTrue(match_property(property_b, {"key": None}))
-
-    #   property_c = self.property(key="key", value="no", operator="icontains")
-    #   self.assertTrue(match_property(property_c, {"key": None}))
-    #   self.assertFalse(match_property(property_c, {"key": "smh"}))
-
-    #   property_d = self.property(key="key", value="No", operator="regex")
-    #   self.assertTrue(match_property(property_d, {"key": None}))
-
-    #   property_d_lower_case = self.property(key="key", value="no", operator="regex")
-    #   self.assertFalse(match_property(property_d_lower_case, {"key": None}))
-
-    #   property_e = self.property(key="key", value=1, operator="gt")
-    #   self.assertTrue(match_property(property_e, {"key": None}))
-
-    #   property_f = self.property(key="key", value=1, operator="lt")
-    #   self.assertFalse(match_property(property_f, {"key": None}))
-
-    #   property_g = self.property(key="key", value="xyz", operator="gte")
-    #   self.assertFalse(match_property(property_g, {"key": None}))
-
-    #   property_h = self.property(key="key", value="Oo", operator="lte")
-    #   self.assertTrue(match_property(property_h, {"key": None}))
-
-    #   property_i = self.property(key="key", value="2022-05-01", operator="is_date_before")
-    #   with self.assertRaises(InconclusiveMatchError):
-    #       self.assertFalse(match_property(property_i, {"key": None}))
-
-
     it 'with none property value with all operators' do
       property_a = { 'key' => 'key', 'value' => 'nil', 'operator' => 'is_not' }
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be true 
