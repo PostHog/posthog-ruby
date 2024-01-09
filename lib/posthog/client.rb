@@ -174,6 +174,7 @@ class PostHog
     #     group_properties: {"organization": {"name": "PostHog", "employees": 11}}
     # ```
     def get_feature_flag(key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
+      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
       feature_flag_response, flag_was_locally_evaluated = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
 
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
@@ -204,6 +205,7 @@ class PostHog
     # 
     # @return [Hash] String (not symbol) key value pairs of flag and their values
     def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
+      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
       return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
     end
 
@@ -218,6 +220,7 @@ class PostHog
     # @option [Boolean] only_evaluate_locally
     #
     def get_feature_flag_payload(key, distinct_id, match_value: nil, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
+      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties, group_properties, only_evaluate_locally)
     end
 
@@ -230,6 +233,7 @@ class PostHog
     # @option [Boolean] only_evaluate_locally
     #
     def get_all_flags_and_payloads(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
+      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
       @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
     end
 
@@ -287,6 +291,33 @@ class PostHog
 
     def worker_running?
       @worker_thread && @worker_thread.alive?
+    end
+
+    def add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
+
+      groups ||= {}
+      person_properties ||= {}
+      group_properties ||= {}
+
+      symbolize_keys! groups
+      symbolize_keys! person_properties
+      symbolize_keys! group_properties
+
+      group_properties.each do |key, value|
+        symbolize_keys! value
+      end
+
+      all_person_properties = { "$current_distinct_id" => distinct_id }.merge(person_properties)
+
+      all_group_properties = {}
+      if groups
+        groups.each do |group_name, group_key|
+          all_group_properties[group_name] = {
+            "$group_key" => group_key}.merge(group_properties&.dig(group_name) || {})
+        end
+      end
+
+      return all_person_properties, all_group_properties
     end
   end
 end

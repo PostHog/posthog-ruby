@@ -234,7 +234,7 @@ class PostHog
       expect(c.get_feature_flag("complex-flag", "some-distinct-id_outside_rollout?", person_properties: {"region" => "USA", "email" => "a@b.com"})).to eq("decide-fallback-value")
       assert_requested :post, decide_endpoint, times: 1
       expect(WebMock).to have_requested(:post, decide_endpoint).with(
-        body: {"distinct_id": "some-distinct-id_outside_rollout?", "groups": {}, "group_properties": {}, "person_properties": {"region" => "USA", "email" => "a@b.com"}, "token": "testsecret"})
+        body: {"distinct_id": "some-distinct-id_outside_rollout?", "groups": {}, "group_properties": {}, "person_properties": {"$current_distinct_id": "some-distinct-id_outside_rollout?", "region" => "USA", "email" => "a@b.com"}, "token": "testsecret"})
       
       WebMock.reset_executed_requests!
       
@@ -243,7 +243,7 @@ class PostHog
       assert_requested :post, decide_endpoint, times: 1
       
       expect(WebMock).to have_requested(:post, decide_endpoint).with(
-        body: {"distinct_id": "some-distinct-id", "groups": {}, "group_properties": {}, "person_properties": {"doesnt_matter" => "1"}, "token": "testsecret"})
+        body: {"distinct_id": "some-distinct-id", "groups": {}, "group_properties": {}, "person_properties": {"$current_distinct_id": "some-distinct-id", "doesnt_matter" => "1"}, "token": "testsecret"})
         
       WebMock.reset_executed_requests!
       
