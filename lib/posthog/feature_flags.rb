@@ -205,6 +205,52 @@ class PostHog
 
     # Class methods
 
+    def self.compare(lhs, rhs, operator)
+      if operator == "gt"
+        return lhs > rhs
+      elsif operator == "gte"
+        return lhs >= rhs
+      elsif operator == "lt"
+        return lhs < rhs
+      elsif operator == "lte"
+        return lhs <= rhs
+      else
+        raise "Invalid operator: #{operator}"
+      end
+    end
+
+    def self.relative_date_parse_for_feature_flag_matching(value)
+      match = /^([0-9]+)([a-z])$/.match(value)
+      parsed_dt = DateTime.now.new_offset(0)
+      if match
+        number = match[1].to_i
+
+        if number >= 10000
+          # Guard against overflow, disallow numbers greater than 10_000
+          return nil
+        end
+        
+        interval = match[2]
+        if interval == "h"
+          parsed_dt = parsed_dt - (number/24r)
+        elsif interval == "d"
+          parsed_dt = parsed_dt.prev_day(number)
+        elsif interval == "w"
+          parsed_dt = parsed_dt.prev_day(number*7)
+        elsif interval == "m"
+          parsed_dt = parsed_dt.prev_month(number)
+        elsif interval == "y"
+          parsed_dt = parsed_dt.prev_year(number)
+        else
+          return nil
+        end
+        parsed_dt
+      else
+        nil
+      end
+    end
+
+
     def self.match_property(property, property_values)
       # only looks for matches where key exists in property_values
       # doesn't support operator is_not_set
@@ -225,11 +271,21 @@ class PostHog
       override_value = property_values[key]
 
       case operator
-      when 'exact'
-        value.is_a?(Array) ? value.include?(override_value) : value == override_value
-      when 'is_not'
-        value.is_a?(Array) ? !value.include?(override_value) : value != override_value
-      when'is_set'
+      when 'exact', 'is_not'
+        if value.is_a?(Array)
+          values_stringified = value.map { |val| val.to_s.downcase }
+          if operator == 'exact'
+            return values_stringified.any?(override_value.to_s.downcase)
+          else
+            return !values_stringified.any?(override_value.to_s.downcase)
+          end
+        end
+        if operator == 'exact'
+          value.to_s.downcase == override_value.to_s.downcase
+        else
+          value.to_s.downcase != override_value.to_s.downcase
+        end
+      when 'is_set'
         property_values.key?(key)
       when 'icontains'
         override_value.to_s.downcase.include?(value.to_s.downcase)
@@ -239,25 +295,39 @@ class PostHog
         PostHog::Utils.is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(override_value.to_s).nil?
       when 'not_regex'
         PostHog::Utils.is_valid_regex(value.to_s) && Regexp.new(value.to_s).match(override_value.to_s).nil?
-      when 'gt'
-        override_value.class == value.class && override_value > value
-      when 'gte'
-        override_value.class == value.class && override_value >= value
-      when 'lt'
-        override_value.class == value.class && override_value < value
-      when 'lte'
-        override_value.class == value.class && override_value <= value
-      when 'is_date_before', 'is_date_after'
-        parsed_date = PostHog::Utils::convert_to_datetime(value)
-        override_date = PostHog::Utils::convert_to_datetime(override_value)
-        if operator == 'is_date_before'
-          return override_date < parsed_date
+      when 'gt', 'gte', 'lt', 'lte'
+        parsed_value = nil
+        begin
+          parsed_value = Float(value)
+        rescue StandardError => e
+        end
+        if !parsed_value.nil? && !override_value.nil?
+          if override_value.is_a?(String)
+            self.compare(override_value, value.to_s, operator)
+          else
+            self.compare(override_value, parsed_value, operator)
+          end
         else
+          self.compare(override_value.to_s, value.to_s, operator)
+        end
+      when 'is_date_before', 'is_date_after', 'is_relative_date_before', 'is_relative_date_after'
+        if operator == 'is_relative_date_before' || operator == 'is_relative_date_after'
+          parsed_date = self.relative_date_parse_for_feature_flag_matching(value.to_s)
+          override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
+        else
+          parsed_date = PostHog::Utils.convert_to_datetime(value.to_s)
+          override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
+        end
+        if !parsed_date
+          raise InconclusiveMatchError.new("Invalid date format")
+        end
+        if operator == 'is_date_before' or operator == 'is_relative_date_before'
+          return override_date < parsed_date
+        elsif operator == 'is_date_after' or operator == 'is_relative_date_after'
           return override_date > parsed_date
         end
       else
-        logger.error "Unknown operator: #{operator}"
-        false
+        raise InconclusiveMatchError.new("Unknown operator: #{operator}")
       end
     end
 
