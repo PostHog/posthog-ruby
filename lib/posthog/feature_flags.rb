@@ -327,8 +327,7 @@ class PostHog
           return override_date > parsed_date
         end
       else
-        logger.error "Unknown operator: #{operator}"
-        false
+        raise InconclusiveMatchError.new("Unknown operator: #{operator}")
       end
     end
 

@@ -1371,6 +1371,17 @@ class PostHog
       property_k = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_before' }
       expect{ FeatureFlagsPoller.match_property(property_k, { 'key' => 'random' }) }.to raise_error(InconclusiveMatchError)
     end
+
+    it 'with invalid operator' do
+      property_a = { 'key' => 'key', 'value'=>'2022-05-01', 'operator' => 'is_unknown'}
+      begin
+        expect { FeatureFlagsPoller.match_property(property_a, {"key" => "random"})}.to raise_error(InconclusiveMatchError)
+        FeatureFlagsPoller.match_property(property_a, {"key" => "random"})
+      rescue InconclusiveMatchError => e
+        expect(e.message).to eq("Unknown operator: is_unknown")
+      end
+
+    end
   end
 
   describe 'relative date parsing' do
