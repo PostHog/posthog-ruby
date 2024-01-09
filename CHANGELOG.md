@@ -1,3 +1,7 @@
+# 2.4.1 - 2024-01-09
+
+1. Add default properties for feature flags local evaluation, to target flags by distinct id & group keys.
+
 # 2.4.0 - 2024-01-09
 
 1. Numeric property handling for feature flags now does the expected: When passed in a number, we do a numeric comparison. When passed in a string, we do a string comparison. Previously, we always did a string comparison.
