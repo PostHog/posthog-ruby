@@ -220,7 +220,7 @@ class PostHog
     end
 
     def self.relative_date_parse_for_feature_flag_matching(value)
-      match = /^([0-9]+)([a-z])$/.match(value)
+      match = /^-?([0-9]+)([a-z])$/.match(value)
       parsed_dt = DateTime.now.new_offset(0)
       if match
         number = match[1].to_i
@@ -310,20 +310,20 @@ class PostHog
         else
           self.compare(override_value.to_s, value.to_s, operator)
         end
-      when 'is_date_before', 'is_date_after', 'is_relative_date_before', 'is_relative_date_after'
-        if operator == 'is_relative_date_before' || operator == 'is_relative_date_after'
-          parsed_date = self.relative_date_parse_for_feature_flag_matching(value.to_s)
-          override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
-        else
+      when 'is_date_before', 'is_date_after'
+        override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
+        parsed_date = self.relative_date_parse_for_feature_flag_matching(value.to_s)
+
+        if parsed_date.nil?
           parsed_date = PostHog::Utils.convert_to_datetime(value.to_s)
-          override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
         end
+
         if !parsed_date
           raise InconclusiveMatchError.new("Invalid date format")
         end
-        if operator == 'is_date_before' or operator == 'is_relative_date_before'
+        if operator == 'is_date_before'
           return override_date < parsed_date
-        elsif operator == 'is_date_after' or operator == 'is_relative_date_after'
+        elsif operator == 'is_date_after'
           return override_date > parsed_date
         end
       else

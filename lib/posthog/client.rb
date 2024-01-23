@@ -307,7 +307,7 @@ class PostHog
         symbolize_keys! value
       end
 
-      all_person_properties = { "$current_distinct_id" => distinct_id }.merge(person_properties)
+      all_person_properties = { "distinct_id" => distinct_id }.merge(person_properties)
 
       all_group_properties = {}
       if groups
