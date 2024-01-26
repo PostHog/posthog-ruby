@@ -567,42 +567,42 @@ class PostHog
           body: {"distinct_id": "some_id", "groups": {"company": "id:5", "instance": "app.posthog.com"}, "group_properties": {
             "company": {"$group_key": "id:5", "x": "y"},
             "instance": {"$group_key": "app.posthog.com"}
-          }, "person_properties": {"$current_distinct_id": "some_id", "x1": "y1"}, "token": "testsecret"})
+          }, "person_properties": {"distinct_id": "some_id", "x1": "y1"}, "token": "testsecret"})
         
         WebMock.reset_executed_requests!
 
-        client.get_feature_flag('random_key', 'some_id', groups: {"company" => "id:5", "instance" => "app.posthog.com"}, person_properties: {"$current_distinct_id" => "override" }, group_properties: {"company" => {"$group_key" => "group_override"}})
+        client.get_feature_flag('random_key', 'some_id', groups: {"company" => "id:5", "instance" => "app.posthog.com"}, person_properties: {"distinct_id" => "override" }, group_properties: {"company" => {"$group_key" => "group_override"}})
         assert_requested :post, decide_endpoint, times: 1
         expect(WebMock).to have_requested(:post, decide_endpoint).with(
           body: {"distinct_id": "some_id", "groups": {"company": "id:5", "instance": "app.posthog.com"}, "group_properties": {
             "company": {"$group_key": "group_override"},
             "instance": {"$group_key": "app.posthog.com"}
-          }, "person_properties": {"$current_distinct_id": "override"}, "token": "testsecret"})
+          }, "person_properties": {"distinct_id": "override"}, "token": "testsecret"})
         WebMock.reset_executed_requests!
 
         # test nones
         client.get_all_flags_and_payloads('some_id', groups: {}, person_properties: nil, group_properties: nil)
         assert_requested :post, decide_endpoint, times: 1
         expect(WebMock).to have_requested(:post, decide_endpoint).with(
-          body: {"distinct_id": "some_id", "groups": {}, "group_properties": {}, "person_properties": {"$current_distinct_id": "some_id"}, "token": "testsecret"})
+          body: {"distinct_id": "some_id", "groups": {}, "group_properties": {}, "person_properties": {"distinct_id": "some_id"}, "token": "testsecret"})
         WebMock.reset_executed_requests!
 
         client.get_all_flags('some_id', groups: {"company" => "id:5"}, person_properties: nil, group_properties: nil)
         assert_requested :post, decide_endpoint, times: 1
         expect(WebMock).to have_requested(:post, decide_endpoint).with(
-          body: {"distinct_id": "some_id", "groups": {"company": "id:5"}, "group_properties": {"company": {"$group_key": "id:5"}}, "person_properties": {"$current_distinct_id": "some_id"}, "token": "testsecret"})
+          body: {"distinct_id": "some_id", "groups": {"company": "id:5"}, "group_properties": {"company": {"$group_key": "id:5"}}, "person_properties": {"distinct_id": "some_id"}, "token": "testsecret"})
         WebMock.reset_executed_requests!
 
         client.get_feature_flag_payload('random_key', 'some_id', groups: {}, person_properties: nil, group_properties: nil)
         assert_requested :post, decide_endpoint, times: 1
         expect(WebMock).to have_requested(:post, decide_endpoint).with(
-          body: {"distinct_id": "some_id", "groups": {}, "group_properties": {}, "person_properties": {"$current_distinct_id": "some_id"}, "token": "testsecret"})
+          body: {"distinct_id": "some_id", "groups": {}, "group_properties": {}, "person_properties": {"distinct_id": "some_id"}, "token": "testsecret"})
         WebMock.reset_executed_requests!
 
         client.is_feature_enabled('random_key', 'some_id', groups: {}, person_properties: nil, group_properties: nil)
         assert_requested :post, decide_endpoint, times: 1
         expect(WebMock).to have_requested(:post, decide_endpoint).with(
-          body: {"distinct_id": "some_id", "groups": {}, "group_properties": {}, "person_properties": {"$current_distinct_id": "some_id"}, "token": "testsecret"})
+          body: {"distinct_id": "some_id", "groups": {}, "group_properties": {}, "person_properties": {"distinct_id": "some_id"}, "token": "testsecret"})
         WebMock.reset_executed_requests!
       end
 
