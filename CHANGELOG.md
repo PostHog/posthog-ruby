@@ -1,3 +1,7 @@
+## 2.4.2 - 2024-01-26
+
+1. Remove new relative date operators, combine into regular date operators
+
 # 2.4.1 - 2024-01-09
 
 1. Add default properties for feature flags local evaluation, to target flags by distinct id & group keys.
