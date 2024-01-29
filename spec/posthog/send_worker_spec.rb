@@ -2,12 +2,6 @@ require 'spec_helper'
 
 class PostHog
   describe SendWorker do
-    around do |example|
-      PostHog::Transport.stub = true
-      example.call
-      PostHog::Transport.stub = false
-    end
-
     describe '#init' do
       it 'accepts string keys' do
         queue = Queue.new
@@ -18,124 +12,134 @@ class PostHog
     end
 
     describe '#run' do
-      before :all do
-        PostHog::Defaults::Request::BACKOFF = 0.1
+      before do
+        allow_any_instance_of(PostHog::Transport).to receive(:send).and_return(
+          posthog_response
+        )
       end
 
-      after :all do
-        PostHog::Defaults::Request::BACKOFF = 30.0
+      context 'when the request fails' do
+        let(:posthog_response) do
+          PostHog::Response.new(-1, 'Unknown error')
+        end
+
+        it 'does not error' do
+          expect do
+            queue = Queue.new
+            queue << {}
+            worker = described_class.new(queue, 'secret')
+            worker.run
+
+            expect(queue).to be_empty
+          end.to_not raise_error
+        end
       end
 
-      it 'does not error if the request fails' do
-        expect do
-          PostHog::Transport
-            .any_instance
-            .stub(:send)
-            .and_return(PostHog::Response.new(-1, 'Unknown error'))
+      context 'when the request is invalid' do
+        let(:posthog_response) do
+          PostHog::Response.new(400, 'Some error')
+        end
+
+        it 'executes the error handler' do
+          status = error = nil
+          on_error =
+            proc do |yielded_status, yielded_error|
+              sleep 0.2 # Make this take longer than thread spin-up (below)
+              status, error = yielded_status, yielded_error
+            end
 
           queue = Queue.new
           queue << {}
-          worker = described_class.new(queue, 'secret')
+          worker = described_class.new(queue, 'secret', on_error: on_error)
+
+          # This is to ensure that Client#flush doesn't finish before calling
+          # the error handler.
+          Thread.new { worker.run }
+          sleep 0.1 # First give thread time to spin-up.
+          sleep 0.01 while worker.is_requesting?
+
+          expect(queue).to be_empty
+          expect(status).to eq(400)
+          expect(error).to eq('Some error')
+        end
+      end
+
+      context 'when the request is OK' do
+        let(:posthog_response) do
+          PostHog::Response.new(200, '{}')
+        end
+
+        it 'does not call on_error' do
+          on_error = proc { |status, error| puts "#{status}, #{error}" }
+
+          expect(on_error).to_not receive(:call)
+
+          queue = Queue.new
+          queue << Requested::CAPTURE
+          worker = described_class.new(queue, 'testsecret', on_error: on_error)
           worker.run
 
           expect(queue).to be_empty
-
-          PostHog::Transport.any_instance.unstub(:send)
-        end.to_not raise_error
+        end
       end
 
-      it 'executes the error handler if the request is invalid' do
-        PostHog::Transport
-          .any_instance
-          .stub(:send)
-          .and_return(PostHog::Response.new(400, 'Some error'))
-
-        status = error = nil
-        on_error =
-          proc do |yielded_status, yielded_error|
-            sleep 0.2 # Make this take longer than thread spin-up (below)
-            status, error = yielded_status, yielded_error
-          end
-
-        queue = Queue.new
-        queue << {}
-        worker = described_class.new(queue, 'secret', on_error: on_error)
-
-        # This is to ensure that Client#flush doesn't finish before calling
-        # the error handler.
-        Thread.new { worker.run }
-        sleep 0.1 # First give thread time to spin-up.
-        sleep 0.01 while worker.is_requesting?
-
-        PostHog::Transport.any_instance.unstub(:send)
-
-        expect(queue).to be_empty
-        expect(status).to eq(400)
-        expect(error).to eq('Some error')
-      end
-
-      it 'does not call on_error if the request is good' do
-        on_error = proc { |status, error| puts "#{status}, #{error}" }
-
-        expect(on_error).to_not receive(:call)
-
-        queue = Queue.new
-        queue << Requested::CAPTURE
-        worker = described_class.new(queue, 'testsecret', on_error: on_error)
-        worker.run
-
-        expect(queue).to be_empty
-      end
-
-      it 'calls on_error for bad json' do
-        bad_obj = Object.new
-        def bad_obj.to_json(*_args)
-          raise "can't serialize to json"
+      context 'when the response JSON is bad' do
+        let(:posthog_response) do
+          PostHog::Response.new(200, '{}')
         end
 
-        on_error = proc {}
-        expect(on_error).to receive(:call).once.with(-1, /serialize to json/)
+        it 'calls on_error' do
+          bad_obj = Object.new
+          def bad_obj.to_json(*_args)
+            raise "can't serialize to json"
+          end
 
-        good_message = Requested::CAPTURE
-        bad_message = Requested::CAPTURE.merge({ 'bad_obj' => bad_obj })
+          on_error = proc {}
+          expect(on_error).to receive(:call).once.with(-1, /serialize to json/)
 
-        queue = Queue.new
-        queue << good_message
-        queue << bad_message
+          good_message = Requested::CAPTURE
+          bad_message = Requested::CAPTURE.merge({ 'bad_obj' => bad_obj })
 
-        worker = described_class.new(queue, 'testsecret', on_error: on_error)
-        worker.run
-        expect(queue).to be_empty
+          queue = Queue.new
+          queue << good_message
+          queue << bad_message
+
+          worker = described_class.new(queue, 'testsecret', on_error: on_error)
+          worker.run
+          expect(queue).to be_empty
+        end
       end
     end
 
     describe '#is_requesting?' do
-      it 'does not return true if there isn\'t a current batch' do
-        queue = Queue.new
-        worker = described_class.new(queue, 'testsecret')
+      context 'when there isn\'t a current batch' do
+        it 'does not return true' do
+          queue = Queue.new
+          worker = described_class.new(queue, 'testsecret')
 
-        expect(worker.is_requesting?).to eq(false)
+          expect(worker.is_requesting?).to eq(false)
+        end
       end
 
-      it 'returns true if there is a current batch' do
-        PostHog::Transport
-          .any_instance
-          .stub(:send) do
+      context 'when there is a current batch' do
+        before do
+          allow_any_instance_of(PostHog::Transport).to receive(:send) do
             sleep(0.2)
-            PostHog::Response.new(200, 'Success')
+            PostHog::Response.new(200, '{}')
           end
+        end
 
-        queue = Queue.new
-        queue << Requested::CAPTURE
-        worker = described_class.new(queue, 'testsecret')
+        it 'returns true' do
+          queue = Queue.new
+          queue << Requested::CAPTURE
+          worker = described_class.new(queue, 'testsecret')
 
-        worker_thread = Thread.new { worker.run }
-        eventually { expect(worker.is_requesting?).to eq(true) }
+          worker_thread = Thread.new { worker.run }
+          eventually { expect(worker.is_requesting?).to eq(true) }
 
-        worker_thread.join
-        expect(worker.is_requesting?).to eq(false)
-
-        PostHog::Transport.any_instance.unstub(:send)
+          worker_thread.join
+          expect(worker.is_requesting?).to eq(false)
+        end
       end
     end
   end
