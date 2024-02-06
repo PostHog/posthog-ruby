@@ -8,12 +8,14 @@ class PostHog
       # - "event"
       # - "properties"
       # - "groups"
+      # - "uuid"
       def parse_for_capture(fields)
         common = parse_common_fields(fields)
 
         event = fields[:event]
         properties = fields[:properties] || {}
         groups = fields[:groups]
+        uuid = fields[:uuid]
 
         check_presence!(event, 'event')
         check_is_hash!(properties, 'properties')
@@ -21,6 +23,11 @@ class PostHog
         if groups
           check_is_hash!(groups, 'groups')
           properties["$groups"] = groups
+        end
+
+        if uuid
+          check_is_uuid!(uuid)
+          common[:uuid] = uuid
         end
 
         isoify_dates! properties
@@ -163,6 +170,12 @@ class PostHog
 
       def check_is_hash!(obj, name)
         raise ArgumentError, "#{name} must be a Hash" unless obj.is_a? Hash
+      end
+
+      def check_is_uuid!(uuid)
+        unless uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+          raise ArgumentError, "uuid is not formated like a uuid"
+        end
       end
     end
   end
