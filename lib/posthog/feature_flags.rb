@@ -229,7 +229,7 @@ class PostHog
           # Guard against overflow, disallow numbers greater than 10_000
           return nil
         end
-        
+
         interval = match[2]
         if interval == "h"
           parsed_dt = parsed_dt - (number/24r)
@@ -254,7 +254,7 @@ class PostHog
     def self.match_property(property, property_values)
       # only looks for matches where key exists in property_values
       # doesn't support operator is_not_set
-      
+
       PostHog::Utils.symbolize_keys! property
       PostHog::Utils.symbolize_keys! property_values
 
@@ -436,7 +436,7 @@ class PostHog
       if !rollout_percentage.nil? and _hash(flag[:key], distinct_id) > (rollout_percentage.to_f/100)
         return false
       end
-      
+
       return true
     end
 
@@ -531,6 +531,6 @@ class PostHog
         logger.debug("Unable to complete request to #{uri}")
         throw e
       end
-    end  
+    end
   end
 end
