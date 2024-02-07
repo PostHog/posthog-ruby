@@ -7,7 +7,7 @@ if !ENV['GH_ACTIONS_UNIT_TESTS']
 end
 
 require 'posthog'
-require 'active_support/time'
+require 'active_support/all'
 require 'webmock/rspec'
 
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
