@@ -23,15 +23,15 @@ class PostHog
       end
 
       after :all do
+        PostHog::Defaults::Request.send(:remove_const, :BACKOFF)
         PostHog::Defaults::Request::BACKOFF = 30.0
       end
 
       it 'does not error if the request fails' do
         expect do
-          PostHog::Transport
-            .any_instance
-            .stub(:send)
-            .and_return(PostHog::Response.new(-1, 'Unknown error'))
+          allow_any_instance_of(PostHog::Transport).to(
+            receive(:send).and_return(PostHog::Response.new(-1, 'Unknown error'))
+          )
 
           queue = Queue.new
           queue << {}
@@ -39,16 +39,13 @@ class PostHog
           worker.run
 
           expect(queue).to be_empty
-
-          PostHog::Transport.any_instance.unstub(:send)
         end.to_not raise_error
       end
 
       it 'executes the error handler if the request is invalid' do
-        PostHog::Transport
-          .any_instance
-          .stub(:send)
-          .and_return(PostHog::Response.new(400, 'Some error'))
+        allow_any_instance_of(PostHog::Transport).to(
+          receive(:send).and_return(PostHog::Response.new(400, 'Some error'))
+        )
 
         status = error = nil
         on_error =
@@ -66,8 +63,6 @@ class PostHog
         Thread.new { worker.run }
         sleep 0.1 # First give thread time to spin-up.
         sleep 0.01 while worker.is_requesting?
-
-        PostHog::Transport.any_instance.unstub(:send)
 
         expect(queue).to be_empty
         expect(status).to eq(400)
@@ -118,12 +113,10 @@ class PostHog
       end
 
       it 'returns true if there is a current batch' do
-        PostHog::Transport
-          .any_instance
-          .stub(:send) do
-            sleep(0.2)
-            PostHog::Response.new(200, 'Success')
-          end
+        allow_any_instance_of(PostHog::Transport).to receive(:send) do
+          sleep(0.2)
+          PostHog::Response.new(200, 'Success')
+        end
 
         queue = Queue.new
         queue << Requested::CAPTURE
@@ -134,8 +127,6 @@ class PostHog
 
         worker_thread.join
         expect(worker.is_requesting?).to eq(false)
-
-        PostHog::Transport.any_instance.unstub(:send)
       end
     end
   end
