@@ -52,8 +52,6 @@ class PostHog
         )
       
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) { |hash, key| hash[key] = Array.new }
-
-      at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
 
     # Synchronously waits until the worker has cleared the queue.
