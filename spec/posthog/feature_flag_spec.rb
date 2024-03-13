@@ -400,6 +400,21 @@ class PostHog
                 ],
             },
           },
+          {
+            "id": 2,
+            "name": "Beta Feature2",
+            "key": "beta-feature2",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [{"key": "region", "value": "US", "operator": "exact", "type": "person"}],
+                        "rollout_percentage": 100,
+                    }
+                ],
+            },
+          },
         ]
       }
       stub_request(
@@ -442,8 +457,24 @@ class PostHog
                 ],
             },
           },
+          {
+            "id": 2,
+            "name": "Beta Feature2",
+            "key": "beta-feature2",
+            "is_simple_flag": false,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [{"key": "region", "value": "US", "operator": "exact", "type": "person"}],
+                        "rollout_percentage": 100,
+                    }
+                ],
+            },
+          },
         ]
       }
+      # We don't go to decide if local eval is enabled and the flag is not in list of all flag definitions
       stub_request(
         :get,
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
@@ -3845,7 +3876,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": []}.to_json)
       stub_request(:post, decide_endpoint)
-        .to_return(status: 200, body:{"featureFlagPayloads": {"person-flag" => 300}}.to_json)
+        .to_return(status: 200, body:{"featureFlags": {}, "featureFlagPayloads": {"person-flag" => 300}}.to_json)
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region": "USA"})).to eq(300)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value: true, person_properties: {"region": "USA"})).to eq(300)

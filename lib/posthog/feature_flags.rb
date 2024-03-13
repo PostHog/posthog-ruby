@@ -162,6 +162,10 @@ class PostHog
       if fallback_to_decide && !only_evaluate_locally
         begin
           flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
+
+          if !flags_and_payloads.key?(:featureFlags)
+            raise StandardError.new("Error flags response: #{flags_and_payloads}")
+          end
           flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
           payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
         rescue StandardError => e
