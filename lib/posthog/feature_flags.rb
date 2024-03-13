@@ -14,7 +14,7 @@ class PostHog
     include PostHog::Logging
     include PostHog::Utils
 
-    def initialize(polling_interval, personal_api_key, project_api_key, host)
+    def initialize(polling_interval, personal_api_key, project_api_key, host, feature_flag_request_timeout_seconds, on_error = nil)
       @polling_interval = polling_interval || 30
       @personal_api_key = personal_api_key
       @project_api_key = project_api_key
@@ -23,6 +23,8 @@ class PostHog
       @group_type_mapping = Concurrent::Hash.new
       @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
       @feature_flags_by_key = nil
+      @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
+      @on_error = on_error || proc { |status, error| }
 
       @task =
         Concurrent::TimerTask.new(
@@ -46,30 +48,22 @@ class PostHog
       end
     end
 
-    def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
-      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
+    def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={}, raise_on_error=false)
+      # TODO: Convert to options hash for easier argument passing
+      decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, raise_on_error)
       if !decide_data.key?(:featureFlags)
-        logger.error "Missing feature flags key: #{decide_data.to_json}"
+        logger.debug "Missing feature flags key: #{decide_data.to_json}"
+        return {}
       else
         stringify_keys(decide_data[:featureFlags] || {})
       end
     end
 
-    def _get_active_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={})
-      feature_variants = get_feature_variants(distinct_id, groups, person_properties, group_properties)
-      active_feature_variants = {}
-      feature_variants.each do |key, value|
-        if value != false
-          active_feature_variants[key] = value
-        end
-      end
-      active_feature_variants
-    end
-
     def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      decide_data = get_decide(distinct_id, groups, person_properties, group_properties)
+      decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties)
       if !decide_data.key?(:featureFlagPayloads)
-        logger.error "Missing feature flag payloads key: #{decide_data.to_json}"
+        logger.debug "Missing feature flag payloads key: #{decide_data.to_json}"
+        return {}
       else
         stringify_keys(decide_data[:featureFlagPayloads] || {})
       end
@@ -115,7 +109,7 @@ class PostHog
         rescue InconclusiveMatchError => e
           logger.debug "Failed to compute flag #{key} locally: #{e}"
         rescue StandardError => e
-          logger.error "Error computing flag locally: #{e}. #{e.backtrace.join("\n")}"
+          @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")}")
         end
       end
 
@@ -123,14 +117,14 @@ class PostHog
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
-          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties)
+          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties, true)
           response = flags[key]
           if response.nil?
             response = false
           end
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue StandardError => e
-          logger.error "Error computing flag remotely: #{e}. #{e.backtrace.join("\n")}"
+          @on_error.call(-1, "Error computing flag remotely: #{e}. #{e.backtrace.join("\n")}")
         end
       end
 
@@ -143,7 +137,7 @@ class PostHog
       flags = response[:featureFlags]
     end
 
-    def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+    def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false, raise_on_error = false)
       load_feature_flags
 
       flags = {}
@@ -161,7 +155,7 @@ class PostHog
         rescue InconclusiveMatchError => e
           fallback_to_decide = true
         rescue StandardError => e
-          logger.error "Error computing flag locally: #{e}."
+          @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")} ")
           fallback_to_decide = true
         end
       end
@@ -171,7 +165,10 @@ class PostHog
           flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
           payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
         rescue StandardError => e
-          logger.error "Error computing flag remotely: #{e}"
+          @on_error.call(-1, "Error computing flag remotely: #{e}")
+          if raise_on_error
+            raise e
+          end
         end
       end
       {"featureFlags": flags, "featureFlagPayloads": payloads}
@@ -372,6 +369,10 @@ class PostHog
     def _compute_flag_payload_locally(key, match_value)
       response = nil
 
+      if @feature_flags_by_key.nil?
+        return response
+      end
+
       if [true, false].include? match_value
         response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_s.to_sym)
       elsif match_value.is_a? String
@@ -472,10 +473,15 @@ class PostHog
     end
 
     def _load_feature_flags()
-      res = _request_feature_flag_definitions
+      begin
+        res = _request_feature_flag_definitions
+      rescue StandardError => e
+        @on_error.call(-1, e.to_s)
+        return
+      end
 
       if !res.key?(:flags)
-        logger.error "Failed to load feature flags: #{res}"
+        logger.debug "Failed to load feature flags: #{res}"
       else
         @feature_flags = res[:flags] || []
         @feature_flags_by_key = {}
@@ -508,16 +514,18 @@ class PostHog
       data['token'] = @project_api_key
       req.body = data.to_json
 
-      _request(uri, req)
+      _request(uri, req, @feature_flag_request_timeout_seconds)
     end
 
-    def _request(uri, request_object)
+    def _request(uri, request_object, timeout = nil)
 
       request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
 
+      request_timeout = timeout || 10
+
       begin
         res_body = nil
-        Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https') do |http|
+        Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https', :read_timeout => request_timeout) do |http|
           res = http.request(request_object)
           JSON.parse(res.body, {symbolize_names: true})
         end
@@ -527,9 +535,11 @@ class PostHog
              EOFError,
              Net::HTTPBadResponse,
              Net::HTTPHeaderSyntaxError,
+             Net::ReadTimeout,
+             Net::WriteTimeout,
              Net::ProtocolError => e
         logger.debug("Unable to complete request to #{uri}")
-        throw e
+        raise e
       end
     end
   end

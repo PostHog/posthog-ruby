@@ -137,10 +137,14 @@ class PostHog
 
         if send_feature_flags
           feature_variants = fields[:feature_variants]
+          active_feature_variants = {}
           feature_variants.each do |key, value|
             parsed[:properties]["$feature/#{key}"] = value
+            if value != false
+              active_feature_variants[key] = value
+            end
           end
-          parsed[:properties]["$active_feature_flags"] = feature_variants.keys
+          parsed[:properties]["$active_feature_flags"] = active_feature_variants.keys
         end
         parsed
       end

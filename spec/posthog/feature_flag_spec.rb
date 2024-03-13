@@ -452,7 +452,7 @@ class PostHog
       stub_request(:post, decide_endpoint)
       .to_return(status: 400, body: {"error": "went wrong!"}.to_json)
 
-      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true, on_error: Proc.new { |status, body| print "error: #{status}, #{body}" })
 
       # beta-feature2 falls back to decide, which on error returns default
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(nil)

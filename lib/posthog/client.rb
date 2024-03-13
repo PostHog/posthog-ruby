@@ -23,6 +23,7 @@ class PostHog
     # @option opts [Proc] :on_error Handles error calls from the API.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
     # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes. Measured in seconds, defaults to 30.
+    # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation. Measured in seconds, defaults to 3.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -48,7 +49,9 @@ class PostHog
           opts[:feature_flags_polling_interval],
           opts[:personal_api_key],
           @api_key,
-          opts[:host]
+          opts[:host],
+          opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
+          opts[:on_error]
         )
       
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) { |hash, key| hash[key] = Array.new }
@@ -90,7 +93,7 @@ class PostHog
       symbolize_keys! attrs
 
       if attrs[:send_feature_flags]
-        feature_variants = @feature_flags_poller._get_active_feature_variants(attrs[:distinct_id], attrs[:groups])
+        feature_variants = @feature_flags_poller.get_feature_variants(attrs[:distinct_id], attrs[:groups] || {})
 
         attrs[:feature_variants] = feature_variants
       end
