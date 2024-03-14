@@ -53,7 +53,7 @@ class PostHog
       decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, raise_on_error)
       if !decide_data.key?(:featureFlags)
         logger.debug "Missing feature flags key: #{decide_data.to_json}"
-        return {}
+        {}
       else
         stringify_keys(decide_data[:featureFlags] || {})
       end
@@ -163,16 +163,14 @@ class PostHog
         begin
           flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
 
-          if !flags_and_payloads.key?(:featureFlags)
+          unless flags_and_payloads.key?(:featureFlags)
             raise StandardError.new("Error flags response: #{flags_and_payloads}")
           end
           flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
           payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
-          if raise_on_error
-            raise e
-          end
+          raise if raise_on_error
         end
       end
       {"featureFlags": flags, "featureFlagPayloads": payloads}
@@ -371,12 +369,9 @@ class PostHog
     end
 
     def _compute_flag_payload_locally(key, match_value)
+      return nil if @feature_flags_by_key.nil?
+
       response = nil
-
-      if @feature_flags_by_key.nil?
-        return response
-      end
-
       if [true, false].include? match_value
         response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_s.to_sym)
       elsif match_value.is_a? String
@@ -543,7 +538,7 @@ class PostHog
              Net::WriteTimeout,
              Net::ProtocolError => e
         logger.debug("Unable to complete request to #{uri}")
-        raise e
+        raise
       end
     end
   end
