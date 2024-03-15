@@ -16,6 +16,10 @@ class PostHog
       RETRIES = 10
     end
 
+    module FeatureFlags
+      FLAG_REQUEST_TIMEOUT_SECONDS = 3
+    end
+    
     module Queue
       MAX_SIZE = 10_000
     end

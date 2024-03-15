@@ -134,8 +134,53 @@ class PostHog
           }
         )
         properties = c.dequeue_last_message[:properties]
+        expect(properties["$feature/beta-feature"]).to eq(false)
+        expect(properties["$active_feature_flags"]).to eq([])
+      end
+
+      it 'captures feature flags with fallback to decide when needed' do
+        decide_res = {"featureFlags": {"beta-feature": "random-variant", "alpha-feature": true, "off-feature": false}}
+        # Mock response for decide
+        api_feature_flag_res = {
+          "flags": [
+            {
+              "id": 1,
+              "name": '',
+              "key": 'beta-feature',
+              "active": true,
+              "is_simple_flag": false,
+              "rollout_percentage": 100,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [{"key": "regionXXX", "value": "USA", "type": "person"}],
+                          "rollout_percentage": 100,
+                      }
+                  ],
+              },
+            },]
+          }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+        stub_request(:post, decide_endpoint)
+          .to_return(status: 200, body: decide_res.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: "distinct_id",
+            event: "ruby test event",
+            send_feature_flags: true,
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
         expect(properties["$feature/beta-feature"]).to eq("random-variant")
-        expect(properties["$active_feature_flags"]).to eq(["beta-feature"])
+        expect(properties["$feature/alpha-feature"]).to eq(true)
+        expect(properties["$feature/off-feature"]).to eq(false)
+        expect(properties["$active_feature_flags"]).to eq(["beta-feature", "alpha-feature"])
       end
 
       it 'captures active feature flags only' do
@@ -254,6 +299,20 @@ class PostHog
                   ],
               },
             },
+            {
+              "id": 2,
+              "name": "Beta Feature",
+              "key": "decide-flag",
+              "active": true,
+              "filters": {
+                  "groups": [
+                      {
+                          "properties": [{"key": "region?????", "value": "USA"}],
+                          "rollout_percentage": 100,
+                      }
+                  ],
+              },
+            },
           ]
         }
 
@@ -282,11 +341,15 @@ class PostHog
         }).exactly(1).times
         expect(c.get_feature_flag('beta-feature', 'some-distinct-id', person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
 
-
+        # reset capture mock
+        RSpec::Mocks.space.proxy_for(c).reset
+        allow(c).to receive(:capture)
         # called again for same user, shouldn't call capture again
-        # expect(c).not_to receive(:capture)
+        expect(c).not_to receive(:capture)
         expect(c.get_feature_flag('beta-feature', 'some-distinct-id', person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
 
+        RSpec::Mocks.space.proxy_for(c).reset
+        allow(c).to receive(:capture)
         # called for different user, should call capture again
         expect(c).to receive(:capture).with({
           distinct_id: "some-distinct-id2",
