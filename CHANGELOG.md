@@ -1,3 +1,7 @@
+## 2.5.0 - 2024-03-15
+
+1. Adds a new `feature_flag_request_timeout_seconds` timeout parameter for feature flags which defaults to 3 seconds, updated from the default 10s for all other API calls.
+
 ## 2.4.3 - 2024-02-29
 
 1. Fix memory leak in PostHog::Client.new
