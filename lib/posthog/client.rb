@@ -119,6 +119,7 @@ class PostHog
     # @option attrs [String] :group_type Group type
     # @option attrs [String] :group_key Group key
     # @option attrs [Hash] :properties Group properties (optional)
+    # @option attrs [String] :distinct_id Distinct ID (optional)
     # @macro common_attrs
     def group_identify(attrs)
       symbolize_keys! attrs
