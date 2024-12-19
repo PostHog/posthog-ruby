@@ -64,8 +64,7 @@ class PostHog
         check_presence!(group_key, 'group_key')
         check_is_hash!(properties, 'properties')
 
-        distinct_id = "$#{group_type}_#{group_key}"
-        fields[:distinct_id] = distinct_id
+        fields[:distinct_id] ||= "$#{group_type}_#{group_key}"
         common = parse_common_fields(fields)
 
         isoify_dates! properties

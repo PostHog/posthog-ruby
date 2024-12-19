@@ -1,3 +1,7 @@
+## 2.5.1 - 2024-12-19
+
+1. Adds a new, optional `distinct_id` parameter to group identify calls which allows specifying the Distinct ID for the event.
+
 ## 2.5.0 - 2024-03-15
 
 1. Adds a new `feature_flag_request_timeout_seconds` timeout parameter for feature flags which defaults to 3 seconds, updated from the default 10s for all other API calls.

@@ -451,8 +451,7 @@ class PostHog
         expect { client.group_identify({}) }.to raise_error(ArgumentError)
       end
 
-      it 'group identifies' do
-        properties =
+      it 'identifies group with unique id' do
         client.group_identify(
           {
             group_type: "organization",
@@ -465,6 +464,25 @@ class PostHog
         msg = client.dequeue_last_message
 
         expect(msg[:distinct_id]).to eq("$organization_id:5")
+        expect(msg[:event]).to eq("$groupidentify")
+        expect(msg[:properties][:$group_type]).to eq("organization")
+        expect(msg[:properties][:$group_set][:trait]).to eq("value")
+      end
+
+      it 'allows passing optional distinct_id to identify group' do
+        client.group_identify(
+          {
+            group_type: "organization",
+            group_key: "id:5",
+            properties: {
+              trait: "value"
+            },
+            distinct_id: '123'
+          }
+        )
+        msg = client.dequeue_last_message
+
+        expect(msg[:distinct_id]).to eq("123")
         expect(msg[:event]).to eq("$groupidentify")
         expect(msg[:properties][:$group_type]).to eq("organization")
         expect(msg[:properties][:$group_set][:trait]).to eq("value")
