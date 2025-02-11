@@ -155,6 +155,12 @@ class PostHog
       !!response
     end
 
+    # @param [Integer] flag_id The numerical ID of the feature flag
+    # @return [String] The decrypted value of the feature flag payload
+    def get_decrypted_feature_flag_payload(flag_id)
+      return @feature_flags_poller.get_decrypted_feature_flag_payload(flag_id)
+    end
+
     # Returns whether the given feature flag is enabled for the given user or not
     #
     # @param [String] key The key of the feature flag

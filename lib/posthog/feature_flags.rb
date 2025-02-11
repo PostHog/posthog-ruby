@@ -80,6 +80,10 @@ class PostHog
       decide_data = _request_feature_flag_evaluation(request_data)
     end
 
+    def get_decrypted_feature_flag_payload(flag_id)
+      return _request_feature_flag_decrypted_payload(flag_id)
+    end
+
     def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       # make sure they're loaded on first run
       load_feature_flags
@@ -516,9 +520,18 @@ class PostHog
       _request(uri, req, @feature_flag_request_timeout_seconds)
     end
 
+    def _request_feature_flag_decrypted_payload(flag_id)
+      uri = URI("#{@host}/api/projects/@current/feature_flags/#{flag_id}/remote_config/")
+      req = Net::HTTP::Get.new(uri)
+      req['Content-Type'] = 'application/json'
+      req['Authorization'] = "Bearer #{@personal_api_key}"
+
+      _request(uri, req, @feature_flag_request_timeout_seconds)
+    end
+
     def _request(uri, request_object, timeout = nil)
 
-      request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
+      request_object['User-Agent'] = `"posthog-ruby#{PostHog::VERSION}"`
 
       request_timeout = timeout || 10
 
