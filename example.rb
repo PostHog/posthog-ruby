@@ -5,7 +5,7 @@ require 'posthog-ruby'
 
 posthog = PostHog::Client.new({
    api_key: "", # You can find this key on the /setup page in PostHog
-   personal_api_key: "phx_DvugINPCOSM3Ko929TaeywnUlRC5FeF4X7KV60IgyXWGTLw", # Required for local feature flag evaluation
+   personal_api_key: "", # Required for local feature flag evaluation
    host: "http://localhost:8000", # Where you host PostHog. You can remove this line if using app.posthog.com
    on_error: Proc.new { |status, msg| print msg },
    feature_flags_polling_interval: 10, # How often to poll for feature flags
