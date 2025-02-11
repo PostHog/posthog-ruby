@@ -62,9 +62,9 @@ puts posthog.get_all_flags("distinct_id_random_22", only_evaluate_locally: true)
 puts posthog.get_all_flags("distinct_id_random_22", person_properties: {"$geoip_city_name": "Sydney"}, only_evaluate_locally: true)
 
 
-# #############################################################################################
-# # Feature flag payload examples
-# #############################################################################################
+#############################################################################################
+# Feature flag payload examples
+#############################################################################################
 
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id")
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id", match_value: true)
