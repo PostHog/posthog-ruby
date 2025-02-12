@@ -69,6 +69,6 @@ puts posthog.get_all_flags("distinct_id_random_22", person_properties: {"$geoip_
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id")
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id", match_value: true)
 puts posthog.get_all_flags_and_payloads("distinct_id")
-puts posthog.get_decrypted_feature_flag_payload(257)
+puts posthog.get_decrypted_feature_flag_payload("secret-encrypted-flag")
 
 posthog.shutdown()

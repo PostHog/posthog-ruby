@@ -80,8 +80,8 @@ class PostHog
       decide_data = _request_feature_flag_evaluation(request_data)
     end
 
-    def get_decrypted_feature_flag_payload(flag_id)
-      return _request_feature_flag_decrypted_payload(flag_id)
+    def get_decrypted_feature_flag_payload(flag_key)
+      return _request_feature_flag_decrypted_payload(flag_key)
     end
 
     def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -520,8 +520,8 @@ class PostHog
       _request(uri, req, @feature_flag_request_timeout_seconds)
     end
 
-    def _request_feature_flag_decrypted_payload(flag_id)
-      uri = URI("#{@host}/api/projects/@current/feature_flags/#{flag_id}/remote_config/")
+    def _request_feature_flag_decrypted_payload(flag_key)
+      uri = URI("#{@host}/api/projects/@current/feature_flags/#{flag_key}/remote_config/")
       req = Net::HTTP::Get.new(uri)
       req['Content-Type'] = 'application/json'
       req['Authorization'] = "Bearer #{@personal_api_key}"

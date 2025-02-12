@@ -3990,6 +3990,20 @@ class PostHog
         expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value: "first-variant", person_properties: {"email": "test@posthog.com"})).to eq("some-payload")
         assert_not_requested :post, decide_endpoint
     end
+
+    it 'with decrypted feature flag payloads' do
+        encrypted_payload_flag_key = 'my_secret_key'
+        mock_decrypted_payload = 'super secret payload in plaintext'
+        stub_request(
+          :get,
+          "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config/"
+        ).to_return(status: 200, body: mock_decrypted_payload)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(c.get_decrypted_feature_flag_payload(encrypted_payload_flag_key)
+        assert_not_requested :post, decide_endpoint
+    end
   end
 
   describe 'resiliency' do
