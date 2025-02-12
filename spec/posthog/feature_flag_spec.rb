@@ -3998,12 +3998,10 @@ class PostHog
           :get,
           "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config/"
         ).to_return(status: 200, body: mock_decrypted_payload)
-        stub_request(:post, decide_endpoint)
-        .to_return(status: 200, body:{}.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-        expect(c.get_decrypted_feature_flag_payload(encrypted_payload_flag_key)
+        expect(c.get_decrypted_feature_flag_payload(encrypted_payload_flag_key))
         assert_not_requested :post, decide_endpoint
     end
   end
