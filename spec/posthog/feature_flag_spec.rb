@@ -4005,7 +4005,7 @@ class PostHog
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-        expect(c.get_decrypted_feature_flag_payload(encrypted_payload_flag_key))
+        expect(c.get_remote_config_payload(encrypted_payload_flag_key))
         assert_not_requested :post, decide_endpoint
     end
   end
