@@ -3993,7 +3993,7 @@ class PostHog
 
     it 'with decrypted feature flag payloads' do
         encrypted_payload_flag_key = 'my_secret_key'
-        mock_decrypted_payload = 'super secret payload in plaintext'
+        mock_decrypted_payload = '"super secret payload in plaintext"'
         stub_request(
           :get,
           "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config/"
