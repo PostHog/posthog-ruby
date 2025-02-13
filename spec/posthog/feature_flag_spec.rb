@@ -3998,6 +3998,10 @@ class PostHog
           :get,
           "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config/"
         ).to_return(status: 200, body: mock_decrypted_payload)
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: {"flags": []}.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
