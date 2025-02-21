@@ -4008,6 +4008,49 @@ class PostHog
         expect(c.get_remote_config_payload(encrypted_payload_flag_key))
         assert_not_requested :post, decide_endpoint
     end
+
+    it 'handles quota limited response by unsetting all flags' do
+      flag_res = [
+        {
+          "id": 1,
+          "name": "Beta Feature",
+          "key": "beta-feature",
+          "is_simple_flag": false,
+          "active": true,
+          "rollout_percentage": 100,
+          "filters": {
+            "groups": [
+              {
+                "properties": [{"key": "country", "value": "US"}],
+                "rollout_percentage": 0,
+              }
+            ],
+            "payloads": {
+              "true": "payload-1",
+            },
+          },
+        }
+      ]
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: {"flags": flag_res}.to_json)
+
+      stub_request(:post, decide_endpoint)
+        .to_return(status: 200, body: {
+          "featureFlags": {"beta-feature": true, "other-flag": false},
+          "featureFlagPayloads": {"beta-feature": "some-payload"},
+          "quotaLimited": ["feature_flags"]
+        }.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      result = c.get_all_flags_and_payloads("distinct_id")
+      expect(result[:featureFlags]).to eq({})
+      expect(result[:featureFlagPayloads]).to eq({})
+      assert_requested :post, decide_endpoint, times: 1
+    end
   end
 
   describe 'resiliency' do

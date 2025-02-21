@@ -170,8 +170,15 @@ class PostHog
           unless flags_and_payloads.key?(:featureFlags)
             raise StandardError.new("Error flags response: #{flags_and_payloads}")
           end
-          flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
-          payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+
+          # Check if feature_flags are quota limited
+          if flags_and_payloads[:quotaLimited]&.include?("feature_flags")
+            flags = {}
+            payloads = {}
+          else
+            flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
+            payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+          end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
           raise if raise_on_error
