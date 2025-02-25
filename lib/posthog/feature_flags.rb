@@ -25,7 +25,7 @@ class PostHog
       @feature_flags_by_key = nil
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
       @on_error = on_error || proc { |status, error| }
-
+      @quota_limited = Concurrent::AtomicBoolean.new(false)
       @task =
         Concurrent::TimerTask.new(
           execution_interval: polling_interval,
@@ -136,6 +136,10 @@ class PostHog
     end
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+      if @quota_limited.true?
+        logger.debug "Not fetching flags from decide - quota limited"
+        return {}
+      end
       # returns a string hash of all flags
       response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
       flags = response[:featureFlags]
@@ -173,6 +177,7 @@ class PostHog
 
           # Check if feature_flags are quota limited
           if flags_and_payloads[:quotaLimited]&.include?("feature_flags")
+            logger.warn "[FEATURE FLAGS] Quota limited for feature flags"
             flags = {}
             payloads = {}
           else
@@ -490,6 +495,17 @@ class PostHog
         return
       end
 
+      # Handle quota limits with 402 status
+      if res.is_a?(Hash) && res[:status] == 402
+        logger.warn "[FEATURE FLAGS] Feature flags quota limit exceeded - unsetting all local flags. Learn more about billing limits at https://posthog.com/docs/billing/limits-alerts"
+        @feature_flags = Concurrent::Array.new
+        @feature_flags_by_key = {}
+        @group_type_mapping = Concurrent::Hash.new
+        @loaded_flags_successfully_once.make_false
+        @quota_limited.make_true
+        return
+      end
+
       if !res.key?(:flags)
         logger.debug "Failed to load feature flags: #{res}"
       else
@@ -537,16 +553,23 @@ class PostHog
     end
 
     def _request(uri, request_object, timeout = nil)
-
       request_object['User-Agent'] = `"posthog-ruby#{PostHog::VERSION}"`
-
       request_timeout = timeout || 10
 
       begin
-        res_body = nil
         Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https', :read_timeout => request_timeout) do |http|
           res = http.request(request_object)
-          JSON.parse(res.body, {symbolize_names: true})
+          
+          # Parse response body to hash
+          begin
+            response = JSON.parse(res.body, {symbolize_names: true})
+            # Only add status if response is a hash
+            response = response.is_a?(Hash) ? response.merge({status: res.code.to_i}) : response
+            return response
+          rescue JSON::ParserError
+            # Handle case when response isn't valid JSON
+            return {error: "Invalid JSON response", body: res.body, status: res.code.to_i}
+          end
         end
       rescue Timeout::Error,
              Errno::EINVAL,

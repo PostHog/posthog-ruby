@@ -3738,9 +3738,9 @@ class PostHog
       ).to_return(status: 200, body: {"flags": flag_res}.to_json)
 
       stub_request(:post, decide_endpoint)
-        .to_return(status: 200, body:{
-          "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"},
-          "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
+      .to_return(status: 200, body:{
+        "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2", "disabled-feature": false},
+        "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
       }.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -4103,6 +4103,70 @@ class PostHog
 
       expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(true)
       assert_not_requested :post, decide_endpoint
+    end
+
+    it 'clears all flags when hitting quota limits (402 response)' do
+      # First load flags successfully
+      api_feature_flag_res = {
+        "flags": [
+          {
+            "id": 1,
+            "name": "Beta Feature",
+            "key": "person-flag",
+            "is_simple_flag": true,
+            "active": true,
+            "filters": {
+                "groups": [
+                    {
+                        "properties": [
+                            {
+                                "key": "region",
+                                "operator": "exact",
+                                "value": ["USA"],
+                                "type": "person",
+                            }
+                        ],
+                        "rollout_percentage": 100,
+                    }
+                ],
+            },
+          },]
+      }
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      # Add the exact stub for the decide endpoint as recommended in the error
+      stub_request(:post, "https://app.posthog.com/decide/?v=3").
+        with(
+          body: "{\"distinct_id\":\"distinct_id\",\"groups\":{},\"person_properties\":{\"distinct_id\":\"distinct_id\",\"region\":\"USA\"},\"group_properties\":{},\"token\":\"testsecret\"}",
+          headers: {
+            'Accept'=>'*/*',
+            'Accept-Encoding'=>'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
+            'Content-Type'=>'application/json',
+            'Host'=>'app.posthog.com',
+            'User-Agent'=>''
+          }).
+        to_return(status: 200, body: "{\"featureFlags\": {}}", headers: {})
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      # Initial flag check should succeed
+      expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(true)
+
+      # Now simulate quota limit with 402 response
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 402, body: {"error": "quota_limit_exceeded"}.to_json)
+
+      # Force reload to simulate poll interval
+      c.reload_feature_flags
+
+      # After quota limit, flag should return false (cleared)
+      expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(false)
     end
   end
 end
