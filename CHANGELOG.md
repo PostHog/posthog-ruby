@@ -1,4 +1,4 @@
-## 2.7.0 – 2025-02-24
+## 2.7.0 – 2025-02-26
 
 1. Add support for quota-limited feature flags
 
