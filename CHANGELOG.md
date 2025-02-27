@@ -1,3 +1,11 @@
+## 2.7.0 – 2025-02-26
+
+1. Add support for quota-limited feature flags
+
+## 2.6.0 - 2025-02-13
+
+1. Add method for fetching decrypted remote config flag payload
+
 ## 2.5.1 - 2024-12-19
 
 1. Adds a new, optional `distinct_id` parameter to group identify calls which allows specifying the Distinct ID for the event.
