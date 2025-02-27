@@ -27,7 +27,7 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 
 ## How to release
 
-1. Get access to RubyGems from @yakkomajuri or @mariusandra
+1. Get access to RubyGems from @dmarticus or @mariusandra
 2. Update `lib/posthog/version.rb` with the new version & add to `CHANGELOG.md`. Commit the changes:
 
 ```shell
