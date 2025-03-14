@@ -1,3 +1,7 @@
+## 2.7.2 – 2025-03-14
+
+1. Fix invocation of shell by ` character
+
 ## 2.7.0 – 2025-02-26
 
 1. Add support for quota-limited feature flags
@@ -63,7 +67,6 @@ New Changes:
 
 1. You can now evaluate feature flags locally (i.e. without sending a request to your PostHog servers) by setting a personal API key, and passing in groups and person properties to `is_feature_enabled` and `get_feature_flag` calls.
 2. Introduces a `get_all_flags` method that returns all feature flags. This is useful for when you want to seed your frontend with some initial flags, given a user ID.
-
 
 # 1.3.0 - 2022-06-24
 
