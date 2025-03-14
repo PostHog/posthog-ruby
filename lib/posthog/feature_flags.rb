@@ -553,7 +553,7 @@ class PostHog
     end
 
     def _request(uri, request_object, timeout = nil)
-      request_object['User-Agent'] = `"posthog-ruby#{PostHog::VERSION}"`
+      request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
       request_timeout = timeout || 10
 
       begin
