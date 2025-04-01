@@ -4147,7 +4147,7 @@ class PostHog
             'Accept-Encoding'=>'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Content-Type'=>'application/json',
             'Host'=>'app.posthog.com',
-            'User-Agent'=>''
+            'User-Agent'=>"posthog-ruby#{PostHog::VERSION}"
           }).
         to_return(status: 200, body: "{\"featureFlags\": {}}", headers: {})
 
