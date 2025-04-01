@@ -1,5 +1,5 @@
 # https://github.com/codecov/codecov-ruby#usage
-if ENV['GH_ACTIONS_UNIT_TESTS']
+if ENV['RUN_SIMPLECOV'] == '1'
   # Only load SimpleCov in CI
   require 'simplecov'
   SimpleCov.start
