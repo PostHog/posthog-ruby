@@ -77,7 +77,7 @@ class PostHog
         "group_properties": group_properties,
       }
 
-      decide_data = _request_feature_flag_evaluation(request_data)
+      _request_feature_flag_evaluation(request_data)
     end
 
     def get_remote_config_payload(flag_key)
