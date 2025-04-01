@@ -493,40 +493,6 @@ class PostHog
     end
 
     it 'returns undefined when decide or local_eval times out' do
-      api_feature_flag_res = {
-        "flags": [
-          {
-            "id": 1,
-            "name": "Beta Feature",
-            "key": "beta-feature",
-            "is_simple_flag": true,
-            "active": true,
-            "filters": {
-                "groups": [
-                    {
-                        "properties": [],
-                        "rollout_percentage": 0,
-                    }
-                ],
-            },
-          },
-          {
-            "id": 2,
-            "name": "Beta Feature2",
-            "key": "beta-feature2",
-            "is_simple_flag": false,
-            "active": true,
-            "filters": {
-                "groups": [
-                    {
-                        "properties": [{"key": "region", "value": "US", "operator": "exact", "type": "person"}],
-                        "rollout_percentage": 100,
-                    }
-                ],
-            },
-          },
-        ]
-      }
       # TRICKY: Pretty hard to simulate a timeout using sleep with WebMock, so we'll just raise an error
       stub_request(
         :get,
