@@ -483,7 +483,7 @@ class PostHog
       stub_request(:post, decide_endpoint)
       .to_return(status: 400, body: {"error": "went wrong!"}.to_json)
 
-      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true, on_error: Proc.new { |status, body| print "error: #{status}, #{body}" })
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       # beta-feature2 falls back to decide, which on error returns default
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(nil)
@@ -493,40 +493,6 @@ class PostHog
     end
 
     it 'returns undefined when decide or local_eval times out' do
-      api_feature_flag_res = {
-        "flags": [
-          {
-            "id": 1,
-            "name": "Beta Feature",
-            "key": "beta-feature",
-            "is_simple_flag": true,
-            "active": true,
-            "filters": {
-                "groups": [
-                    {
-                        "properties": [],
-                        "rollout_percentage": 0,
-                    }
-                ],
-            },
-          },
-          {
-            "id": 2,
-            "name": "Beta Feature2",
-            "key": "beta-feature2",
-            "is_simple_flag": false,
-            "active": true,
-            "filters": {
-                "groups": [
-                    {
-                        "properties": [{"key": "region", "value": "US", "operator": "exact", "type": "person"}],
-                        "rollout_percentage": 100,
-                    }
-                ],
-            },
-          },
-        ]
-      }
       # TRICKY: Pretty hard to simulate a timeout using sleep with WebMock, so we'll just raise an error
       stub_request(
         :get,
@@ -4147,7 +4113,7 @@ class PostHog
             'Accept-Encoding'=>'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Content-Type'=>'application/json',
             'Host'=>'app.posthog.com',
-            'User-Agent'=>''
+            'User-Agent'=>"posthog-ruby#{PostHog::VERSION}"
           }).
         to_return(status: 200, body: "{\"featureFlags\": {}}", headers: {})
 
