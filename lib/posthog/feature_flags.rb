@@ -3,6 +3,7 @@ require 'net/http'
 require 'json'
 require 'posthog/version'
 require 'posthog/logging'
+require 'posthog/feature_flag'
 require 'digest'
 
 class PostHog
@@ -77,7 +78,25 @@ class PostHog
         "group_properties": group_properties,
       }
 
-      _request_feature_flag_evaluation(request_data)
+      decide_response = _request_feature_flag_evaluation(request_data)
+
+      # Only normalize if we have flags in the response
+      if decide_response[:flags]
+        #v4 format
+        flags_hash = decide_response[:flags].transform_keys(&:to_s).transform_values do |flag|
+          FeatureFlag.new(flag.transform_keys(&:to_s))
+        end
+        decide_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
+        decide_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
+      elsif decide_response[:featureFlags]
+        #v3 format
+        decide_response[:featureFlags] = decide_response[:featureFlags] || {}
+        decide_response[:featureFlagPayloads] = decide_response[:featureFlagPayloads] || {}
+        decide_response[:flags] = decide_response[:featureFlags].map do |key, value|
+          [key, FeatureFlag.from_value_and_payload(key, value, decide_response[:featureFlagPayloads][key])]
+        end.to_h
+      end
+      decide_response
     end
 
     def get_remote_config_payload(flag_key)
