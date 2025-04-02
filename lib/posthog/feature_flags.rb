@@ -161,7 +161,7 @@ class PostHog
       end
       # returns a string hash of all flags
       response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
-      flags = response[:featureFlags]
+      response[:featureFlags]
     end
 
     def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false, raise_on_error = false)
