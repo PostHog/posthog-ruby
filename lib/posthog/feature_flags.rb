@@ -170,6 +170,7 @@ class PostHog
       flags = {}
       payloads = {}
       fallback_to_decide = @feature_flags.empty?
+      request_id = nil # Only for /decide requests
 
       @feature_flags.each do |flag|
         begin
@@ -202,13 +203,14 @@ class PostHog
           else
             flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+            request_id = flags_and_payloads[:requestId]
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
           raise if raise_on_error
         end
       end
-      {"featureFlags": flags, "featureFlagPayloads": payloads}
+      {"featureFlags": flags, "featureFlagPayloads": payloads, "requestId": request_id}
     end
 
     def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
