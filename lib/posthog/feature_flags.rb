@@ -138,6 +138,8 @@ class PostHog
 
       flag_was_locally_evaluated = !response.nil?
 
+      request_id = nil
+
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
           decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
@@ -146,6 +148,7 @@ class PostHog
             flags = {}
           else
             flags =stringify_keys(decide_data[:featureFlags] || {})
+            request_id = decide_data[:requestId]
           end
 
           response = flags[key]
@@ -158,7 +161,7 @@ class PostHog
         end
       end
 
-      [response, flag_was_locally_evaluated]
+      [response, flag_was_locally_evaluated, request_id]
     end
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
