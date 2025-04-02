@@ -1,7 +1,8 @@
 require 'spec_helper'
+require 'posthog/client'
 
 class PostHog
-  RSpec.describe 'FeatureFlagsPoller#get_decide' do
+  describe 'FeatureFlagsPoller#get_decide' do
     let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=3' }
     let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
@@ -157,4 +158,32 @@ class PostHog
       })
     end
   end
-end 
+
+  describe 'Client#get_feature_flag' do
+    let(:client) { Client.new(api_key: API_KEY, personal_api_key: nil, test_mode: true) }
+    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=3' }
+    let(:decide_v4_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true) }
+    describe '#get_feature_flag' do
+      it 'calls the $feature_flag_called event with additional properties' do
+        stub_request(:post, decide_endpoint)
+          .to_return(status: 200, body: decide_v4_response.to_json)
+        stub_const("PostHog::VERSION", "2.7.3")
+
+        expect(client.get_feature_flag('enabled-flag', 'test-distinct-id')).to eq(true)
+
+        captured_message = client.dequeue_last_message
+        expect(captured_message[:event]).to eq('$feature_flag_called')
+        expect(captured_message[:properties]).to eq({
+          "$feature_flag" => "enabled-flag",
+          "$feature_flag_response" => true,
+          "$feature_flag_request_id"=>"42853c54-1431-4861-996e-3a548989fa2c",
+          "$lib"=>"posthog-ruby",
+          "$lib_version"=>"2.7.3",
+          "$groups"=>{},
+          "locally_evaluated"=>false,
+        })
+      end
+    end
+  end
+
+end
