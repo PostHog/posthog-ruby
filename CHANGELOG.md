@@ -1,3 +1,7 @@
+## 2.7.3 – 2025-04-03
+
+1. Add more information to `$feature_flag_called` events for `/decide` requests such as flag id, version, reason, and the request id.
+
 ## 2.7.2 – 2025-03-14
 
 1. Fix invocation of shell by ` character

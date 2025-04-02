@@ -183,7 +183,7 @@ class PostHog
     # ```
     def get_feature_flag(key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      feature_flag_response, flag_was_locally_evaluated = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      feature_flag_response, flag_was_locally_evaluated, request_id = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
 
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
       if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
@@ -195,7 +195,7 @@ class PostHog
               '$feature_flag' => key,
               '$feature_flag_response' => feature_flag_response,
               'locally_evaluated' => flag_was_locally_evaluated
-            },
+            }.merge(request_id ? {'$feature_flag_request_id' => request_id} : {}),
             'groups': groups,
           }
         )
@@ -233,6 +233,10 @@ class PostHog
     end
 
     # Returns all flags and payloads for a given user
+    # 
+    # @return [Hash] A hash with the following keys:
+    #   featureFlags: A hash of feature flags
+    #   featureFlagPayloads: A hash of feature flag payloads
     #
     # @param [String] distinct_id The distinct id of the user
     # @option [Hash] groups
@@ -242,7 +246,9 @@ class PostHog
     #
     def get_all_flags_and_payloads(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      response = @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      response.delete(:requestId) # remove internal information.
+      response
     end
 
     def reload_feature_flags
