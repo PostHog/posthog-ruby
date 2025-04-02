@@ -140,7 +140,14 @@ class PostHog
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
-          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties, true)
+          decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
+          if !decide_data.key?(:featureFlags)
+            logger.debug "Missing feature flags key: #{decide_data.to_json}"
+            flags = {}
+          else
+            flags =stringify_keys(decide_data[:featureFlags] || {})
+          end
+
           response = flags[key]
           if response.nil?
             response = false
