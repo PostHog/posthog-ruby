@@ -3,7 +3,7 @@ require 'posthog/client'
 
 class PostHog
   describe 'FeatureFlagsPoller#get_decide' do
-    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=3' }
+    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=4' }
     let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
@@ -325,7 +325,7 @@ class PostHog
 
   describe 'Client#get_feature_flag' do
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: nil, test_mode: true) }
-    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=3' }
+    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=4' }
     let(:decide_v4_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true) }
     describe '#get_feature_flag' do
       it 'calls the $feature_flag_called event with additional properties' do

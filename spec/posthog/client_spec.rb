@@ -2,7 +2,7 @@ require 'spec_helper'
 
 class PostHog
 
-  decide_endpoint = 'https://app.posthog.com/decide/?v=3'
+  decide_endpoint = 'https://app.posthog.com/decide/?v=4'
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 

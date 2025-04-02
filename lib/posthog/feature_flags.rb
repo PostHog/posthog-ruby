@@ -566,7 +566,7 @@ class PostHog
     end
 
     def _request_feature_flag_evaluation(data={})
-      uri = URI("#{@host}/decide/?v=3")
+      uri = URI("#{@host}/decide/?v=4")
       req = Net::HTTP::Post.new(uri)
       req['Content-Type'] = 'application/json'
       data['token'] = @project_api_key
