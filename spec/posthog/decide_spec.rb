@@ -8,7 +8,7 @@ class PostHog
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
     let(:decide_v3_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v3.json')), symbolize_names: true) }
-
+    let(:decide_v4_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true) }
     before do
       # Stub the initial feature flag definitions request
       stub_request(:get, feature_flag_endpoint)
@@ -75,33 +75,136 @@ class PostHog
       # Verify v3 to v4 transformation
       # We'll assert a sampling of the fields
       expect(result[:flags]).to be_present
-      expect(result[:flags].keys).to eq([:"enabled-flag", :"group-flag", :"disabled-flag", :"multi-variate-flag", :"simple-flag", :"beta-feature", :"beta-feature2", :"false-flag-2", :"test-get-feature", :"continuation-flag"])
+      expect(result[:flags].keys).to contain_exactly(
+        :"enabled-flag",
+        :"group-flag",
+        :"disabled-flag",
+        :"multi-variate-flag",
+        :"simple-flag",
+        :"beta-feature",
+        :"beta-feature2",
+        :"false-flag-2",
+        :"test-get-feature",
+        :"continuation-flag"
+      )
 
       enabled_flag = result[:flags][:"enabled-flag"]
-      expect(enabled_flag).to be_a(FeatureFlag)
-
-      expect(enabled_flag).to be_a(FeatureFlag)
-      expect(enabled_flag.key).to eq(:"enabled-flag")
-      expect(enabled_flag.enabled).to be true
-      expect(enabled_flag.variant).to be nil
-      expect(enabled_flag.reason).to be nil
-      expect(enabled_flag.metadata.payload).to eq("{\"foo\": 1}")
+      expect(enabled_flag).to have_attributes(
+        class: FeatureFlag,
+        key: :"enabled-flag",
+        enabled: true,
+        variant: nil,
+        reason: nil,
+        metadata: have_attributes(
+          payload: "{\"foo\": 1}"
+        )
+      )
 
       multi_variate_flag = result[:flags][:"multi-variate-flag"]
-      expect(multi_variate_flag).to be_a(FeatureFlag)
-      expect(multi_variate_flag.key).to eq(:"multi-variate-flag")
-      expect(multi_variate_flag.enabled).to be true
-      expect(multi_variate_flag.variant).to eq("hello")
-      expect(multi_variate_flag.reason).to be nil
-      expect(multi_variate_flag.metadata.payload).to eq("this is the payload")
+      expect(multi_variate_flag).to have_attributes(
+        class: FeatureFlag,
+        key: :"multi-variate-flag",
+        enabled: true,
+        variant: "hello",
+        reason: nil,
+        metadata: have_attributes(
+          payload: "this is the payload"
+        )
+      )
 
       disabled_flag = result[:flags][:"disabled-flag"]
-      expect(disabled_flag).to be_a(FeatureFlag)
-      expect(disabled_flag.key).to eq(:"disabled-flag")
-      expect(disabled_flag.enabled).to be false
-      expect(disabled_flag.variant).to be nil
-      expect(disabled_flag.reason).to be nil
-      expect(disabled_flag.metadata.payload).to be nil
+      expect(disabled_flag).to have_attributes(
+        class: FeatureFlag,
+        key: :"disabled-flag",
+        enabled: false,
+        variant: nil,
+        reason: nil,
+        metadata: have_attributes(
+          payload: nil
+        )
+      )
+    end
+
+    it 'transforms v4 response flags into hash of FeatureFlag instances' do
+      stub_request(:post, decide_endpoint)
+        .to_return(status: 200, body: decide_v4_response.to_json)
+
+      result = poller.get_decide("test-distinct-id")
+
+      # We'll assert a sampling of the fields
+      expect(result[:flags]).to be_present
+      expect(result[:flags].keys).to contain_exactly(
+        :"enabled-flag",
+        :"group-flag",
+        :"disabled-flag",
+        :"multi-variate-flag",
+        :"simple-flag",
+        :"beta-feature",
+        :"beta-feature2",
+        :"false-flag-2",
+        :"test-get-feature",
+        :"continuation-flag"
+      )
+
+      enabled_flag = result[:flags][:"enabled-flag"]
+      
+      expect(enabled_flag).to have_attributes(
+        class: FeatureFlag,
+        key: "enabled-flag",
+        enabled: true,
+        variant: nil,
+        reason: have_attributes(
+          class: EvaluationReason,
+          code: "condition_match",
+          description: "Matched conditions set 3",
+          condition_index: 2  
+        ),
+        metadata: have_attributes(
+          id: 1,
+          version: 23,
+          payload: "{\"foo\": 1}",
+          description: "This is an enabled flag"
+        )
+      )
+
+      multi_variate_flag = result[:flags][:"multi-variate-flag"]
+      expect(multi_variate_flag).to have_attributes(
+        class: FeatureFlag,
+        key: "multi-variate-flag",
+        enabled: true,
+        variant: "hello",
+        reason: have_attributes(
+          class: EvaluationReason,
+          code: "condition_match",
+          description: "Matched conditions set 2",
+          condition_index: 1
+        ),
+        metadata: have_attributes(
+          id: 4,
+          version: 42,
+          payload: "this is the payload"
+        )
+      )
+
+
+      disabled_flag = result[:flags][:"disabled-flag"]
+      expect(disabled_flag).to have_attributes(
+        class: FeatureFlag,
+        key: "disabled-flag",
+        enabled: false,
+        variant: nil,
+        reason: have_attributes(
+          class: EvaluationReason,
+          code: "no_condition_match",
+          description: "No matching condition set",
+          condition_index: 0
+        ),
+        metadata: have_attributes(
+          id: 3,
+          version: 12,
+          payload: nil
+        )
+      )
     end
 
     it 'handles error responses gracefully' do
@@ -156,6 +259,67 @@ class PostHog
         body: "invalid json",
         status: 200
       })
+    end
+  end
+
+  describe FeatureFlag do
+    let(:decide_v4_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true) }
+
+    it 'transforms v4 response flags into hash of FeatureFlag instances' do
+      json = decide_v4_response[:flags][:"enabled-flag"]
+
+      result = FeatureFlag.new(json)
+
+      expect(result).to have_attributes(
+        class: FeatureFlag,
+        key: "enabled-flag",
+        enabled: true,
+        variant: nil,
+        reason: have_attributes(
+          class: EvaluationReason,
+          code: "condition_match",
+          description: "Matched conditions set 3"
+        )
+      )
+    end
+
+    it 'transforms a hash into a FeatureFlag instance' do
+      result = FeatureFlag.new({
+        "key" => "enabled-flag",
+        "enabled" => true,
+        "variant" => nil,
+        "reason" => {
+          "code" => "condition_match",
+          "description" => "Matched conditions set 3",
+          "condition_index" => 2
+        },
+        "metadata" => {
+          "id" => 1,
+          "version" => 23,
+          "payload" => "{\"foo\": 1}",
+          "description" => "This is an enabled flag"
+        }
+      })
+
+      expect(result).to have_attributes(
+        class: FeatureFlag,
+        key: "enabled-flag",
+        enabled: true,
+        variant: nil,
+        reason: have_attributes(
+          class: EvaluationReason,
+          code: "condition_match",
+          description: "Matched conditions set 3",
+          condition_index: 2
+        ),
+        metadata: have_attributes(
+          class: FeatureFlagMetadata,
+          id: 1,
+          version: 23,
+          payload: "{\"foo\": 1}",
+          description: "This is an enabled flag"
+        )
+      )
     end
   end
 

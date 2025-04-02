@@ -83,9 +83,10 @@ class PostHog
       # Only normalize if we have flags in the response
       if decide_response[:flags]
         #v4 format
-        flags_hash = decide_response[:flags].transform_keys(&:to_s).transform_values do |flag|
-          FeatureFlag.new(flag.transform_keys(&:to_s))
+        flags_hash = decide_response[:flags].transform_values do |flag|
+          FeatureFlag.new(flag)
         end
+        decide_response[:flags] = flags_hash
         decide_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
         decide_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
       elsif decide_response[:featureFlags]
