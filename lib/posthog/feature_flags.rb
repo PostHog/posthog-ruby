@@ -148,7 +148,7 @@ class PostHog
             logger.debug "Missing feature flags key: #{decide_data.to_json}"
             flags = {}
           else
-            flags =stringify_keys(decide_data[:featureFlags] || {})
+            flags = stringify_keys(decide_data[:featureFlags] || {})
             request_id = decide_data[:requestId]
           end
 
