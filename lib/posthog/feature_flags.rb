@@ -3,6 +3,7 @@ require 'net/http'
 require 'json'
 require 'posthog/version'
 require 'posthog/logging'
+require 'posthog/feature_flag'
 require 'digest'
 
 class PostHog
@@ -77,7 +78,26 @@ class PostHog
         "group_properties": group_properties,
       }
 
-      decide_data = _request_feature_flag_evaluation(request_data)
+      decide_response = _request_feature_flag_evaluation(request_data)
+
+      # Only normalize if we have flags in the response
+      if decide_response[:flags]
+        #v4 format
+        flags_hash = decide_response[:flags].transform_values do |flag|
+          FeatureFlag.new(flag)
+        end
+        decide_response[:flags] = flags_hash
+        decide_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
+        decide_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
+      elsif decide_response[:featureFlags]
+        #v3 format
+        decide_response[:featureFlags] = decide_response[:featureFlags] || {}
+        decide_response[:featureFlagPayloads] = decide_response[:featureFlagPayloads] || {}
+        decide_response[:flags] = decide_response[:featureFlags].map do |key, value|
+          [key, FeatureFlag.from_value_and_payload(key, value, decide_response[:featureFlagPayloads][key])]
+        end.to_h
+      end
+      decide_response
     end
 
     def get_remote_config_payload(flag_key)
@@ -119,9 +139,19 @@ class PostHog
 
       flag_was_locally_evaluated = !response.nil?
 
+      request_id = nil
+
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
-          flags = get_feature_variants(distinct_id, groups, person_properties, group_properties, true)
+          decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
+          if !decide_data.key?(:featureFlags)
+            logger.debug "Missing feature flags key: #{decide_data.to_json}"
+            flags = {}
+          else
+            flags = stringify_keys(decide_data[:featureFlags] || {})
+            request_id = decide_data[:requestId]
+          end
+
           response = flags[key]
           if response.nil?
             response = false
@@ -132,7 +162,7 @@ class PostHog
         end
       end
 
-      [response, flag_was_locally_evaluated]
+      [response, flag_was_locally_evaluated, request_id]
     end
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -142,7 +172,7 @@ class PostHog
       end
       # returns a string hash of all flags
       response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
-      flags = response[:featureFlags]
+      response[:featureFlags]
     end
 
     def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false, raise_on_error = false)
@@ -151,6 +181,7 @@ class PostHog
       flags = {}
       payloads = {}
       fallback_to_decide = @feature_flags.empty?
+      request_id = nil # Only for /decide requests
 
       @feature_flags.each do |flag|
         begin
@@ -183,13 +214,14 @@ class PostHog
           else
             flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+            request_id = flags_and_payloads[:requestId]
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
           raise if raise_on_error
         end
       end
-      {"featureFlags": flags, "featureFlagPayloads": payloads}
+      {"featureFlags": flags, "featureFlagPayloads": payloads, "requestId": request_id}
     end
 
     def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
@@ -534,7 +566,7 @@ class PostHog
     end
 
     def _request_feature_flag_evaluation(data={})
-      uri = URI("#{@host}/decide/?v=3")
+      uri = URI("#{@host}/decide/?v=4")
       req = Net::HTTP::Post.new(uri)
       req['Content-Type'] = 'application/json'
       data['token'] = @project_api_key

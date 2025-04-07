@@ -18,8 +18,8 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 
 ## Testing
 
-1. Run `bundle exec rspec`
-2. An example of running specific tests: `bundle exec rspec spec/posthog/client_spec.rb:26`
+1. Run `bin/test` (this ends up calling `bundle exec rspec`)
+2. An example of running specific tests: `bin/test spec/posthog/client_spec.rb:26`
 
 ## Questions?
 

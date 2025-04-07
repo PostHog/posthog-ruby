@@ -5,7 +5,7 @@ class PostHog
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
-  decide_endpoint = 'https://app.posthog.com/decide/?v=3'
+  decide_endpoint = 'https://app.posthog.com/decide/?v=4'
 
   describe 'local evaluation' do
   
@@ -4105,7 +4105,7 @@ class PostHog
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # Add the exact stub for the decide endpoint as recommended in the error
-      stub_request(:post, "https://app.posthog.com/decide/?v=3").
+      stub_request(:post, "https://app.posthog.com/decide/?v=4").
         with(
           body: "{\"distinct_id\":\"distinct_id\",\"groups\":{},\"person_properties\":{\"distinct_id\":\"distinct_id\",\"region\":\"USA\"},\"group_properties\":{},\"token\":\"testsecret\"}",
           headers: {
