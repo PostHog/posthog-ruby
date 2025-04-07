@@ -331,7 +331,7 @@ class PostHog
       it 'calls the $feature_flag_called event with additional properties' do
         stub_request(:post, decide_endpoint)
           .to_return(status: 200, body: decide_v4_response.to_json)
-        stub_const("PostHog::VERSION", "2.7.3")
+        stub_const("PostHog::VERSION", "2.8.0")
 
         expect(client.get_feature_flag('enabled-flag', 'test-distinct-id')).to eq(true)
 
@@ -342,7 +342,7 @@ class PostHog
           "$feature_flag_response" => true,
           "$feature_flag_request_id"=>"42853c54-1431-4861-996e-3a548989fa2c",
           "$lib"=>"posthog-ruby",
-          "$lib_version"=>"2.7.3",
+          "$lib_version"=>"2.8.0",
           "$groups"=>{},
           "locally_evaluated"=>false,
         })
