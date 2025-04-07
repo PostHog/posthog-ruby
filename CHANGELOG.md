@@ -1,4 +1,4 @@
-## 2.7.3 – 2025-04-03
+## 2.7.3 – 2025-04-07
 
 1. Add more information to `$feature_flag_called` events for `/decide` requests such as flag id, version, reason, and the request id.
 
