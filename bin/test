@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#/ Usage: bin/test [<configuration>]
+#/ Description: Runs all the rspec tests.
+source bin/helpers/_utils.sh
+set_source_and_root_dir
+
+bundle exec rspec
