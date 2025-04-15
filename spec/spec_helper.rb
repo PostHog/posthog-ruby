@@ -1,12 +1,3 @@
-# https://github.com/codecov/codecov-ruby#usage
-if ENV['RUN_SIMPLECOV'] == '1'
-  # Only load SimpleCov in CI
-  require 'simplecov'
-  SimpleCov.start
-  require 'codecov'
-  SimpleCov.formatter = SimpleCov::Formatter::Codecov
-end
-
 require 'posthog'
 require 'active_support/all'
 require 'webmock/rspec'
