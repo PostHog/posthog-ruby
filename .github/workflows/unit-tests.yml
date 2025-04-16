@@ -13,7 +13,6 @@ jobs:
     env:
       RAILS_ENV: test
       GH_ACTIONS_UNIT_TESTS: 1
-      RUN_SIMPLECOV: 0
 
     steps:
       - uses: actions/checkout@v4
