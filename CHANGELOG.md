@@ -1,3 +1,7 @@
+## 2.8.1 – 2025-04-18
+
+1. Fix `condition_index` can be null in `/decide` requests
+
 ## 2.8.0 – 2025-04-07
 
 1. Add more information to `$feature_flag_called` events for `/decide` requests such as flag id, version, reason, and the request id.
