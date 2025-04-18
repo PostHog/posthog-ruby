@@ -43,7 +43,7 @@ class EvaluationReason
     json.transform_keys!(&:to_s)
     @code = json["code"]
     @description = json["description"]
-    @condition_index = json["condition_index"]
+    @condition_index = json["condition_index"]&.to_i if json["condition_index"]
   end
 end
 

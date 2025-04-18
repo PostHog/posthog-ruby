@@ -197,7 +197,7 @@ class PostHog
           class: EvaluationReason,
           code: "no_condition_match",
           description: "No matching condition set",
-          condition_index: 0
+          condition_index: nil
         ),
         metadata: have_attributes(
           id: 3,
