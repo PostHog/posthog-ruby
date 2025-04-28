@@ -1,4 +1,4 @@
-# Represents a feature flag returned by /decide v4
+# Represents a feature flag returned by /flags v2
 class FeatureFlag
   attr_reader :key, :enabled, :variant, :reason, :metadata
 

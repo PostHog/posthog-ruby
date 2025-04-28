@@ -51,26 +51,26 @@ class PostHog
 
     def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={}, raise_on_error=false)
       # TODO: Convert to options hash for easier argument passing
-      decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, raise_on_error)
-      if !decide_data.key?(:featureFlags)
-        logger.debug "Missing feature flags key: #{decide_data.to_json}"
+      flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, raise_on_error)
+      if !flags_data.key?(:featureFlags)
+        logger.debug "Missing feature flags key: #{flags_data.to_json}"
         {}
       else
-        stringify_keys(decide_data[:featureFlags] || {})
+        stringify_keys(flags_data[:featureFlags] || {})
       end
     end
 
     def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties)
-      if !decide_data.key?(:featureFlagPayloads)
-        logger.debug "Missing feature flag payloads key: #{decide_data.to_json}"
+      flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties)
+      if !flags_data.key?(:featureFlagPayloads)
+        logger.debug "Missing feature flag payloads key: #{flags_data.to_json}"
         return {}
       else
-        stringify_keys(decide_data[:featureFlagPayloads] || {})
+        stringify_keys(flags_data[:featureFlagPayloads] || {})
       end
     end
 
-    def get_decide(distinct_id, groups={}, person_properties={}, group_properties={})
+    def get_flags(distinct_id, groups={}, person_properties={}, group_properties={})
       request_data = {
         "distinct_id": distinct_id,
         "groups": groups,
@@ -78,26 +78,26 @@ class PostHog
         "group_properties": group_properties,
       }
 
-      decide_response = _request_feature_flag_evaluation(request_data)
+      flags_response = _request_feature_flag_evaluation(request_data)
 
       # Only normalize if we have flags in the response
-      if decide_response[:flags]
+      if flags_response[:flags]
         #v4 format
-        flags_hash = decide_response[:flags].transform_values do |flag|
+        flags_hash = flags_response[:flags].transform_values do |flag|
           FeatureFlag.new(flag)
         end
-        decide_response[:flags] = flags_hash
-        decide_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
-        decide_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
-      elsif decide_response[:featureFlags]
+        flags_response[:flags] = flags_hash
+        flags_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
+        flags_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
+      elsif flags_response[:featureFlags]
         #v3 format
-        decide_response[:featureFlags] = decide_response[:featureFlags] || {}
-        decide_response[:featureFlagPayloads] = decide_response[:featureFlagPayloads] || {}
-        decide_response[:flags] = decide_response[:featureFlags].map do |key, value|
-          [key, FeatureFlag.from_value_and_payload(key, value, decide_response[:featureFlagPayloads][key])]
+        flags_response[:featureFlags] = flags_response[:featureFlags] || {}
+        flags_response[:featureFlagPayloads] = flags_response[:featureFlagPayloads] || {}
+        flags_response[:flags] = flags_response[:featureFlags].map do |key, value|
+          [key, FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
         end.to_h
       end
-      decide_response
+      flags_response
     end
 
     def get_remote_config_payload(flag_key)
@@ -143,13 +143,13 @@ class PostHog
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
-          decide_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
-          if !decide_data.key?(:featureFlags)
-            logger.debug "Missing feature flags key: #{decide_data.to_json}"
+          flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
+          if !flags_data.key?(:featureFlags)
+            logger.debug "Missing feature flags key: #{flags_data.to_json}"
             flags = {}
           else
-            flags = stringify_keys(decide_data[:featureFlags] || {})
-            request_id = decide_data[:requestId]
+            flags = stringify_keys(flags_data[:featureFlags] || {})
+            request_id = flags_data[:requestId]
           end
 
           response = flags[key]
@@ -167,7 +167,7 @@ class PostHog
 
     def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
       if @quota_limited.true?
-        logger.debug "Not fetching flags from decide - quota limited"
+        logger.debug "Not fetching flags from server - quota limited"
         return {}
       end
       # returns a string hash of all flags
@@ -180,8 +180,8 @@ class PostHog
 
       flags = {}
       payloads = {}
-      fallback_to_decide = @feature_flags.empty?
-      request_id = nil # Only for /decide requests
+      fallback_to_server = @feature_flags.empty?
+      request_id = nil # Only for /flags requests
 
       @feature_flags.each do |flag|
         begin
@@ -192,15 +192,15 @@ class PostHog
             payloads[flag[:key]] = match_payload
           end
         rescue InconclusiveMatchError => e
-          fallback_to_decide = true
+          fallback_to_server = true
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")} ")
-          fallback_to_decide = true
+          fallback_to_server = true
         end
       end
-      if fallback_to_decide && !only_evaluate_locally
+      if fallback_to_server && !only_evaluate_locally
         begin
-          flags_and_payloads = get_decide(distinct_id, groups, person_properties, group_properties)
+          flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties)
 
           unless flags_and_payloads.key?(:featureFlags)
             raise StandardError.new("Error flags response: #{flags_and_payloads}")
@@ -240,8 +240,8 @@ class PostHog
         response = _compute_flag_payload_locally(key, match_value)
       end
       if response == nil and !only_evaluate_locally
-        decide_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
-        response = decide_payloads[key.downcase] || nil
+        flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
+        response = flags_payloads[key.downcase] || nil
       end
       response
     end
@@ -395,7 +395,7 @@ class PostHog
 
         if group_name.nil?
           logger.warn "[FEATURE FLAGS] Unknown group type index #{aggregation_group_type_index} for feature flag #{flag[:key]}"
-          # failover to `/decide/`
+          # failover to `/flags/`
           raise InconclusiveMatchError.new("Flag has unknown group type index")
         end
 
@@ -403,7 +403,7 @@ class PostHog
 
         if !groups.key?(group_name_symbol)
           # Group flags are never enabled if appropriate `groups` aren't passed in
-          # don't failover to `/decide/`, since response will be the same
+          # don't failover to `/flags/`, since response will be the same
           logger.warn "[FEATURE FLAGS] Can't compute group feature flag: #{flag[:key]} without group names passed in"
           return false
         end
@@ -566,7 +566,7 @@ class PostHog
     end
 
     def _request_feature_flag_evaluation(data={})
-      uri = URI("#{@host}/decide/?v=4")
+      uri = URI("#{@host}/flags/?v=2")
       req = Net::HTTP::Post.new(uri)
       req['Content-Type'] = 'application/json'
       data['token'] = @project_api_key

@@ -2,8 +2,8 @@ require 'spec_helper'
 require 'posthog/client'
 
 class PostHog
-  describe 'FeatureFlagsPoller#get_decide' do
-    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=4' }
+  describe 'FeatureFlagsPoller#get_flags' do
+    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
     let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
@@ -25,13 +25,13 @@ class PostHog
     end
 
     shared_examples 'decide response format' do |version|
-      let(:decide_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', "test-decide-#{version}.json")), symbolize_names: true) }
+      let(:flags_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', "test-decide-#{version}.json")), symbolize_names: true) }
 
       it 'correctly parses the response' do
-        stub_request(:post, decide_endpoint)
-          .to_return(status: 200, body: decide_response.to_json)
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: flags_response.to_json)
 
-        result = poller.get_decide("test-distinct-id")
+        result = poller.get_flags("test-distinct-id")
 
         # Verify the complete response structure
         expect(result[:config]).to eq(enable_collect_everything: true)
@@ -67,10 +67,10 @@ class PostHog
     end
 
     it 'transforms v3 response flags into v4 format' do
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: decide_v3_response.to_json)
 
-      result = poller.get_decide("test-distinct-id")
+      result = poller.get_flags("test-distinct-id")
 
       # Verify v3 to v4 transformation
       # We'll assert a sampling of the fields
@@ -126,10 +126,10 @@ class PostHog
     end
 
     it 'transforms v4 response flags into hash of FeatureFlag instances' do
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: decide_v4_response.to_json)
 
-      result = poller.get_decide("test-distinct-id")
+      result = poller.get_flags("test-distinct-id")
 
       # We'll assert a sampling of the fields
       expect(result[:flags]).to be_present
@@ -208,19 +208,19 @@ class PostHog
     end
 
     it 'handles error responses gracefully' do
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 400, body: { error: "Invalid request" }.to_json)
 
-      result = poller.get_decide("test-distinct-id")
+      result = poller.get_flags("test-distinct-id")
 
       expect(result).to eq({ error: "Invalid request", status: 400 })
     end
 
     it 'handles network timeouts' do
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_timeout
 
-      expect { poller.get_decide("test-distinct-id") }.to raise_error(Timeout::Error)
+      expect { poller.get_flags("test-distinct-id") }.to raise_error(Timeout::Error)
     end
 
     it 'handles quota limited responses v3' do
@@ -231,28 +231,28 @@ class PostHog
         errorsWhileComputingFlags: true,
         quotaLimited: ["feature_flags"]
       }
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: quota_limited_response.to_json)
 
-      result = poller.get_decide("test-distinct-id")
+      result = poller.get_flags("test-distinct-id")
 
       expect(result).to eq(quota_limited_response.merge(status: 200))
     end
 
     it 'handles empty responses' do
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: {}.to_json)
 
-      result = poller.get_decide("test-distinct-id")
+      result = poller.get_flags("test-distinct-id")
 
       expect(result).to eq({ status: 200 })
     end
 
     it 'handles malformed JSON responses' do
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: "invalid json")
 
-      result = poller.get_decide("test-distinct-id")
+      result = poller.get_flags("test-distinct-id")
 
       expect(result).to eq({
         error: "Invalid JSON response",
@@ -325,11 +325,11 @@ class PostHog
 
   describe 'Client#get_feature_flag' do
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: nil, test_mode: true) }
-    let(:decide_endpoint) { 'https://app.posthog.com/decide/?v=4' }
+    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
     let(:decide_v4_response) { JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true) }
     describe '#get_feature_flag' do
       it 'calls the $feature_flag_called event with additional properties' do
-        stub_request(:post, decide_endpoint)
+        stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: decide_v4_response.to_json)
         stub_const("PostHog::VERSION", "2.8.0")
 
