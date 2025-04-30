@@ -1,3 +1,7 @@
+## 2.9.0 – 2025-04-30
+
+1. Use new `/flags` service to power feature flag evaluation.
+
 ## 2.8.1 – 2025-04-18
 
 1. Fix `condition_index` can be null in `/decide` requests
