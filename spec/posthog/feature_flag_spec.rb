@@ -5,7 +5,7 @@ class PostHog
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
-  decide_endpoint = 'https://app.posthog.com/decide/?v=4'
+  flags_endpoint = 'https://app.posthog.com/flags/?v=2'
 
   describe 'local evaluation' do
   
@@ -40,8 +40,8 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      # shouldn't call decide
-      stub_request(:post, decide_endpoint)
+      # shouldn't call flags
+      stub_request(:post, flags_endpoint)
         .to_return(status: 400)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -87,9 +87,9 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      # shouldn't call decide
-      stub_request(:post, decide_endpoint)
-          .to_return(status: 200, body: {"featureFlags": {"group-flag": "decide-fallback-value"}}.to_json)
+      # shouldn't call flags
+      stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: {"featureFlags": {"group-flag": "flags-fallback-value"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
@@ -109,10 +109,10 @@ class PostHog
       # property mismatch
       expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company" => "amazon_without_rollout"}, group_properties: {"company" => {"name" => "Project Name 2"}})).to eq(false)
 
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
 
-    it 'evaluates group properties and falls back to decide when group_type_mappings not present' do
+    it 'evaluates group properties and falls back to server when group_type_mappings not present' do
       api_feature_flag_res = {
         "flags": [
           {
@@ -146,14 +146,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
-          .to_return(status: 200, body: {"featureFlags": {"group-flag": "decide-fallback-value"}}.to_json)
+      stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: {"featureFlags": {"group-flag": "flags-fallback-value"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # group_type_mappings not present, so fallback to `/decide`
-      expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company" => "amazon"}, group_properties: {"company" => {"name" => "Project Name 2"}})).to eq("decide-fallback-value")
-      assert_requested :post, decide_endpoint, times: 1
+      # group_type_mappings not present, so fallback to `/flags`
+      expect(c.get_feature_flag("group-flag", "some-distinct-2", groups: {"company" => "amazon"}, group_properties: {"company" => {"name" => "Project Name 2"}})).to eq("flags-fallback-value")
+      assert_requested :post, flags_endpoint, times: 1
     end
 
     it 'evaluates flag with complex definition' do
@@ -215,48 +215,48 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
-      .to_return(status: 200, body: {"featureFlags": {"complex-flag": "decide-fallback-value"}}.to_json)
+      stub_request(:post, flags_endpoint)
+      .to_return(status: 200, body: {"featureFlags": {"complex-flag": "flags-fallback-value"}}.to_json)
 
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region" => "USA", "name" => "Aloha"})).to eq(true)
       expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region": "USA", "name": "Aloha"})).to eq(true)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
       
       
       # this distinctIDs hash is < rollout %
       expect(c.get_feature_flag("complex-flag", "some-distinct-id_within_rollout?", person_properties: {"region" => "USA", "email" => "a@b.com"})).to eq(true)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
       
-      # will fall back on `/decide`, as all properties present for second group, but that group resolves to false
-      expect(c.get_feature_flag("complex-flag", "some-distinct-id_outside_rollout?", person_properties: {"region" => "USA", "email" => "a@b.com"})).to eq("decide-fallback-value")
-      assert_requested :post, decide_endpoint, times: 1
-      expect(WebMock).to have_requested(:post, decide_endpoint).with(
+      # will fall back on `/flags`, as all properties present for second group, but that group resolves to false
+      expect(c.get_feature_flag("complex-flag", "some-distinct-id_outside_rollout?", person_properties: {"region" => "USA", "email" => "a@b.com"})).to eq("flags-fallback-value")
+      assert_requested :post, flags_endpoint, times: 1
+      expect(WebMock).to have_requested(:post, flags_endpoint).with(
         body: {"distinct_id": "some-distinct-id_outside_rollout?", "groups": {}, "group_properties": {}, "person_properties": {"distinct_id": "some-distinct-id_outside_rollout?", "region" => "USA", "email" => "a@b.com"}, "token": "testsecret"})
       
       WebMock.reset_executed_requests!
       
       # same as above
-      expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"doesnt_matter" => "1"})).to eq("decide-fallback-value")
-      assert_requested :post, decide_endpoint, times: 1
+      expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"doesnt_matter" => "1"})).to eq("flags-fallback-value")
+      assert_requested :post, flags_endpoint, times: 1
       
-      expect(WebMock).to have_requested(:post, decide_endpoint).with(
+      expect(WebMock).to have_requested(:post, flags_endpoint).with(
         body: {"distinct_id": "some-distinct-id", "groups": {}, "group_properties": {}, "person_properties": {"distinct_id": "some-distinct-id", "doesnt_matter" => "1"}, "token": "testsecret"})
         
       WebMock.reset_executed_requests!
       
-      expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq("decide-fallback-value")
-      assert_requested :post, decide_endpoint, times: 1
+      expect(c.get_feature_flag("complex-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq("flags-fallback-value")
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
       
       # won't need to fallback when all values are present, and resolves to False
       expect(c.get_feature_flag("complex-flag", "some-distinct-id_outside_rollout?", person_properties: {"region" => "USA", "email" => "a@b.com", "name" => "X", "doesnt_matter" => "1"})).to eq(false)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
 
-    it 'falls back to decide' do
+    it 'falls back to server' do
       api_feature_flag_res = {
         "flags": [
           {
@@ -301,24 +301,24 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body: {"featureFlags": {"beta-feature": "alakazam", "beta-feature2": "alakazam2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # beta-feature fallbacks to decide because property type is unknown
+      # beta-feature fallbacks to server because property type is unknown
       expect(c.get_feature_flag("beta-feature", "some-distinct-id")).to eq("alakazam")
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
 
-      # beta-feature2 fallbacks to decide because region property not given with call
+      # beta-feature2 fallbacks to server because region property not given with call
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to eq("alakazam2")
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
 
     end
 
-    it 'dont fall back to decide when local evaluation is set' do
+    it 'dont fall back to server when local evaluation is set' do
       api_feature_flag_res = {
         "flags": [
           {
@@ -363,22 +363,22 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body: {"featureFlags": {"beta-feature": "alakazam", "beta-feature2": "alakazam2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # beta-feature should fallback to decide because property type is unknown
+      # beta-feature should fallback to server because property type is unknown
       # but doesn't because only_evaluate_locally is true
       expect(c.get_feature_flag("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
       expect(c.is_feature_enabled("beta-feature", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
-      # beta-feature2 should fallback to decide because region property not given with call
+      # beta-feature2 should fallback to server because region property not given with call
       # but doesn't because only_evaluate_locally is true
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
       expect(c.is_feature_enabled("beta-feature2", "some-distinct-id", only_evaluate_locally: true)).to be(nil)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
     end
 
@@ -422,7 +422,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body: {"featureFlags": {}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -430,16 +430,16 @@ class PostHog
       # beta-feature resolves to False, so no matter the default, stays False
       expect(c.get_feature_flag("beta-feature", "some-distinct-id")).to be(false)
       expect(c.is_feature_enabled("beta-feature", "some-distinct-id")).to be(false)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
-      # beta-feature2 falls back to decide, and whatever decide returns is the value
+      # beta-feature2 falls back to server, and whatever server returns is the value
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(false)
       expect(c.is_feature_enabled("beta-feature2", "some-distinct-id")).to be(false)
-      assert_requested :post, decide_endpoint, times: 2
+      assert_requested :post, flags_endpoint, times: 2
       WebMock.reset_executed_requests!
     end
 
-    it 'returns undefined when decide errors out' do
+    it 'returns undefined when `/flags` errors out' do
       api_feature_flag_res = {
         "flags": [
           {
@@ -474,49 +474,49 @@ class PostHog
           },
         ]
       }
-      # We don't go to decide if local eval is enabled and the flag is not in list of all flag definitions
+      # We don't go to `/flags` if local eval is enabled and the flag is not in list of all flag definitions
       stub_request(
         :get,
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 400, body: {"error": "went wrong!"}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # beta-feature2 falls back to decide, which on error returns default
+      # beta-feature2 falls back to server, which on error returns default
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(nil)
       expect(c.is_feature_enabled("beta-feature2", "some-distinct-id")).to be(nil)
-      assert_requested :post, decide_endpoint, times: 2
+      assert_requested :post, flags_endpoint, times: 2
       WebMock.reset_executed_requests!
     end
 
-    it 'returns undefined when decide or local_eval times out' do
+    it 'returns undefined when `/flags` or `/local_evaluation` times out' do
       # TRICKY: Pretty hard to simulate a timeout using sleep with WebMock, so we'll just raise an error
       stub_request(
         :get,
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_raise(Net::ReadTimeout)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_raise(Net::ReadTimeout)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # beta-feature falls back to decide, which on error returns default
+      # beta-feature falls back to `/flags`, which on error returns default
       expect(c.get_feature_flag("beta-feature", "some-distinct-id")).to be(nil)
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
 
-      # beta-feature2 falls back to decide, which on error returns default
+      # beta-feature2 falls back to `/flags`, which on error returns default
       expect(c.get_feature_flag("beta-feature2", "some-distinct-id")).to be(nil)
       expect(c.is_feature_enabled("beta-feature2", "some-distinct-id")).to be(nil)
-      assert_requested :post, decide_endpoint, times: 2
+      assert_requested :post, flags_endpoint, times: 2
       WebMock.reset_executed_requests!
 
       expect(c.get_all_flags("some-distinct-id")).to eq({})
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
     end
 
@@ -546,14 +546,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
-      .to_return(status: 200, body: {"featureFlags": {"beta-feature": "decide-fallback-value"}}.to_json)
+      stub_request(:post, flags_endpoint)
+      .to_return(status: 200, body: {"featureFlags": {"beta-feature": "flags-fallback-value"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # beta-feature2 falls back to decide, which on error returns default
-      expect(c.get_feature_flag("beta-feature", "some-distinct-id")).to eq("decide-fallback-value")
-      assert_requested :post, decide_endpoint, times: 1
+      # beta-feature2 falls back to `/flags`, which on error returns default
+      expect(c.get_feature_flag("beta-feature", "some-distinct-id")).to eq("flags-fallback-value")
+      assert_requested :post, flags_endpoint, times: 1
     end
 
     it 'get all flags with fallback' do
@@ -612,14 +612,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2", "disabled-feature": false}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      # beta-feature value overridden by /decide
+      # beta-feature value overridden by `/flags`
       expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => "variant-1", "beta-feature2" => "variant-2", "disabled-feature" => false})
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
 
     end
@@ -680,14 +680,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       # beta-feature2 has no value
       expect(c.get_all_flags("distinct-id", only_evaluate_locally: true)).to eq({"beta-feature" => true, "disabled-feature" => false})
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
     end
 
@@ -700,13 +700,13 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => "variant-1", "beta-feature2" => "variant-2"})
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
       WebMock.reset_executed_requests!
 
     end
@@ -752,13 +752,13 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => true, "disabled-feature" => false})
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
     end
 
@@ -803,13 +803,13 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => true, "disabled-feature" => false})
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
       # Now, after a poll interval, flag 1 is inactive, and flag 2 rollout is set to 100%.
       api_feature_flag_res_updated = {
@@ -856,7 +856,7 @@ class PostHog
       c.reload_feature_flags
 
       expect(c.get_all_flags("distinct-id")).to eq({"beta-feature" => false, "disabled-feature" => true})
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
 
 
     end
@@ -898,14 +898,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
       expect(c.get_feature_flag("beta-feature", "example_id")).to eq("first-variant")
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
 
     it 'gets feature flag with clashing variant overrides' do
@@ -953,14 +953,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
       expect(c.get_feature_flag("beta-feature", "example_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
 
     it 'gets feature flag with invalid variant overrides' do
@@ -1000,14 +1000,14 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("third-variant")
       expect(c.get_feature_flag("beta-feature", "example_id")).to eq("second-variant")
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
     
     it 'gets feature flag with multiple variant overrides' do
@@ -1051,7 +1051,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"beta-feature" => "variant-1", "beta-feature2" => "variant-2"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -1059,7 +1059,7 @@ class PostHog
       expect(c.get_feature_flag("beta-feature", "test_id", person_properties: {"email" => "test@posthog.com"})).to eq("second-variant")
       expect(c.get_feature_flag("beta-feature", "example_id")).to eq("third-variant")
       expect(c.get_feature_flag("beta-feature", "another_id")).to eq("second-variant")
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
   end
 
@@ -1564,8 +1564,8 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      # shouldn't call decide
-      stub_request(:post, decide_endpoint)
+      # shouldn't call `/flags`
+      stub_request(:post, flags_endpoint)
         .to_return(status: 400)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -2615,8 +2615,8 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      # shouldn't call decide
-      stub_request(:post, decide_endpoint)
+      # shouldn't call `/flags`
+      stub_request(:post, flags_endpoint)
         .to_return(status: 400)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -3703,7 +3703,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": flag_res}.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{
         "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2", "disabled-feature": false},
         "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
@@ -3711,7 +3711,7 @@ class PostHog
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
       expect(c.get_all_flags_and_payloads("distinct_id")[:featureFlagPayloads]).to eq({"beta-feature" => 100, "beta-feature2" => 300})
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
     end
 
     it 'get all flags and payloads with fallback and empty local flags' do
@@ -3720,7 +3720,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": []}.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body:{
         "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"},
         "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
@@ -3729,7 +3729,7 @@ class PostHog
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       expect(c.get_all_flags_and_payloads("distinct_id")[:featureFlagPayloads]).to eq({"beta-feature" => 100, "beta-feature2" => 300})
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
     end
 
     it 'get all flags and payloads with fallback but only local eval is set' do
@@ -3796,7 +3796,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": flag_res}.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body:{
         "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"},
         "featureFlagPayloads": {"beta-feature": 100, "beta-feature2": 300},
@@ -3849,7 +3849,7 @@ class PostHog
           'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: {"flags": [basic_flag, disabled_flag]}.to_json)
   
-        stub_request(:post, decide_endpoint)
+        stub_request(:post, flags_endpoint)
           .to_return(status: 200, body:{
           "featureFlags": {"beta-feature": "variant-1", "beta-feature2": "variant-2"}
         }.to_json)
@@ -3857,7 +3857,7 @@ class PostHog
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
         expect(c.get_all_flags_and_payloads("distinct_id")[:featureFlagPayloads]).to eq({"beta-feature" => "new"})
-        assert_not_requested :post, decide_endpoint
+        assert_not_requested :post, flags_endpoint
     end
 
     it 'evaluates boolean feature flags locally' do
@@ -3889,26 +3889,26 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": [basic_flag_res]}.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 200, body:{"featureFlags": {"person-flag" => "person-flag-value"}}.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region" => "USA"})).to eq(300)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value: true, person_properties: {"region" => "USA"})).to eq(300)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
 
-    it 'evaluates boolean feature flags with decide' do
+    it 'evaluates boolean feature flags with `/flags`' do
       stub_request(
         :get,
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": []}.to_json)
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body:{"featureFlags": {}, "featureFlagPayloads": {"person-flag" => 300}}.to_json)
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", person_properties: {"region": "USA"})).to eq(300)
       expect(c.get_feature_flag_payload("person-flag", "some-distinct-id", match_value: true, person_properties: {"region": "USA"})).to eq(300)
-      assert_requested :post, decide_endpoint, times: 2
+      assert_requested :post, flags_endpoint, times: 2
     end
 
     it 'with multivariate feature flag payloads' do
@@ -3945,7 +3945,7 @@ class PostHog
           :get,
           'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
         ).to_return(status: 200, body: {"flags": [multivariate_flag]}.to_json)
-        stub_request(:post, decide_endpoint)
+        stub_request(:post, flags_endpoint)
         .to_return(status: 200, body:{"featureFlagPayloads": {"first-variant": {"b": "json"}}}.to_json)
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -3954,7 +3954,7 @@ class PostHog
         expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value: "third-variant", person_properties: {"email": "test@posthog.com"})).to eq({"a": "json"})
         # Force different match value
         expect(c.get_feature_flag_payload("beta-feature", "test_id", match_value: "first-variant", person_properties: {"email": "test@posthog.com"})).to eq("some-payload")
-        assert_not_requested :post, decide_endpoint
+        assert_not_requested :post, flags_endpoint
     end
 
     it 'with decrypted feature flag payloads' do
@@ -3972,7 +3972,7 @@ class PostHog
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
         expect(c.get_remote_config_payload(encrypted_payload_flag_key))
-        assert_not_requested :post, decide_endpoint
+        assert_not_requested :post, flags_endpoint
     end
 
     it 'handles quota limited response by unsetting all flags' do
@@ -4003,7 +4003,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: {"flags": flag_res}.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: {
           "featureFlags": {"beta-feature": true, "other-flag": false},
           "featureFlagPayloads": {"beta-feature": "some-payload"},
@@ -4015,7 +4015,7 @@ class PostHog
       result = c.get_all_flags_and_payloads("distinct_id")
       expect(result[:featureFlags]).to eq({})
       expect(result[:featureFlagPayloads]).to eq({})
-      assert_requested :post, decide_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 1
     end
   end
 
@@ -4052,7 +4052,7 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, decide_endpoint)
+      stub_request(:post, flags_endpoint)
       .to_return(status: 400)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -4068,7 +4068,7 @@ class PostHog
       c.reload_feature_flags
 
       expect(c.get_feature_flag("person-flag", "distinct_id", person_properties: {"region" => "USA"})).to eq(true)
-      assert_not_requested :post, decide_endpoint
+      assert_not_requested :post, flags_endpoint
     end
 
     it 'clears all flags when hitting quota limits (402 response)' do
@@ -4104,8 +4104,8 @@ class PostHog
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      # Add the exact stub for the decide endpoint as recommended in the error
-      stub_request(:post, "https://app.posthog.com/decide/?v=4").
+      # Add the exact stub for the `/flags` endpoint as recommended in the error
+      stub_request(:post, "https://app.posthog.com/flags/?v=2").
         with(
           body: "{\"distinct_id\":\"distinct_id\",\"groups\":{},\"person_properties\":{\"distinct_id\":\"distinct_id\",\"region\":\"USA\"},\"group_properties\":{},\"token\":\"testsecret\"}",
           headers: {
