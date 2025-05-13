@@ -1,3 +1,39 @@
+## 2.9.0 – 2025-04-30
+
+1. Use new `/flags` service to power feature flag evaluation.
+
+## 2.8.1 – 2025-04-18
+
+1. Fix `condition_index` can be null in `/decide` requests
+
+## 2.8.0 – 2025-04-07
+
+1. Add more information to `$feature_flag_called` events for `/decide` requests such as flag id, version, reason, and the request id.
+
+## 2.7.2 – 2025-03-14
+
+1. Fix invocation of shell by ` character
+
+## 2.7.0 – 2025-02-26
+
+1. Add support for quota-limited feature flags
+
+## 2.6.0 - 2025-02-13
+
+1. Add method for fetching decrypted remote config flag payload
+
+## 2.5.1 - 2024-12-19
+
+1. Adds a new, optional `distinct_id` parameter to group identify calls which allows specifying the Distinct ID for the event.
+
+## 2.5.0 - 2024-03-15
+
+1. Adds a new `feature_flag_request_timeout_seconds` timeout parameter for feature flags which defaults to 3 seconds, updated from the default 10s for all other API calls.
+
+## 2.4.3 - 2024-02-29
+
+1. Fix memory leak in PostHog::Client.new
+
 ## 2.4.2 - 2024-01-26
 
 1. Remove new relative date operators, combine into regular date operators
@@ -43,7 +79,6 @@ New Changes:
 
 1. You can now evaluate feature flags locally (i.e. without sending a request to your PostHog servers) by setting a personal API key, and passing in groups and person properties to `is_feature_enabled` and `get_feature_flag` calls.
 2. Introduces a `get_all_flags` method that returns all feature flags. This is useful for when you want to seed your frontend with some initial flags, given a user ID.
-
 
 # 1.3.0 - 2022-06-24
 

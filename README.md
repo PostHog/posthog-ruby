@@ -18,8 +18,8 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 
 ## Testing
 
-1. Run `bundle exec rspec`
-2. An example of running specific tests: `bundle exec rspec spec/posthog/client_spec.rb:26`
+1. Run `bin/test` (this ends up calling `bundle exec rspec`)
+2. An example of running specific tests: `bin/test spec/posthog/client_spec.rb:26`
 
 ## Questions?
 
@@ -27,14 +27,15 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 
 ## How to release
 
-1. Get access to RubyGems from @yakkomajuri or @mariusandra
+1. Get access to RubyGems from @dmarticus, @daibhin or @mariusandra
 2. Update `lib/posthog/version.rb` with the new version & add to `CHANGELOG.md`. Commit the changes:
 
 ```shell
 git commit -am "Version 1.2.3"
 git tag -a 1.2.3 -m "Version 1.2.3"
-git push && git push --tags 
+git push && git push --tags
 ```
+
 3. Run
 
 ```shell

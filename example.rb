@@ -16,7 +16,7 @@ posthog.capture({distinct_id: "distinct_id", event: "event", properties: {"prope
 
 puts(posthog.is_feature_enabled("beta-feature", "distinct_id"))
 puts(posthog.is_feature_enabled("beta-feature", "new_distinct_id"))
-puts(posthog.is_feature_enabled("beta-feature", "distinct_id", {"company" => "id:5"}))
+puts(posthog.is_feature_enabled("beta-feature", "distinct_id", groups: {"company" => "id:5"}))
 
 
 puts(posthog.is_feature_enabled("beta-feature", "distinct_id"))
@@ -54,7 +54,7 @@ posthog.capture({distinct_id: "new_distinct_id", event: "signup", properties: { 
 # Assume test-flag has `City Name = Sydney` as a person property set, then this will evaluate locally & return true
 puts posthog.is_feature_enabled("test-flag", "random_id_12345", person_properties: {"$geoip_city_name" => "Sydney"})
 
-puts posthog.is_feature_enabled("test-flag", "distinct_id_random_22", person_properties={"$geoip_city_name": "Sydney"}, only_evaluate_locally: true)
+puts posthog.is_feature_enabled("test-flag", "distinct_id_random_22", person_properties: {"$geoip_city_name": "Sydney"}, only_evaluate_locally: true)
 
 
 puts posthog.get_all_flags("distinct_id_random_22")
@@ -69,5 +69,6 @@ puts posthog.get_all_flags("distinct_id_random_22", person_properties: {"$geoip_
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id")
 puts posthog.get_feature_flag_payload("test-flag", "distinct_id", match_value: true)
 puts posthog.get_all_flags_and_payloads("distinct_id")
+puts posthog.get_remote_config_payload("secret-encrypted-flag")
 
 posthog.shutdown()

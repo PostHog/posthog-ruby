@@ -1,0 +1,12 @@
+{
+    "rubyTestExplorer.rspecCommand": "bundle exec rspec",
+    "rubyTestExplorer.logpanel": true,
+    "testExplorer.useNativeTesting": false,
+    "rubyTestExplorer.debugCommand": "bundle exec rspec",
+    "rubyTestExplorer.env": {
+        "RUBY_TEST_ADAPTER_DRY_RUN": "1",
+        "RUBY_TEST_ADAPTER": "1"
+    },
+    "rubyTestExplorer.rspecConfigFile": ".vscode/.rspec",
+    "rubyTestExplorer.testFramework": "rspec"
+}

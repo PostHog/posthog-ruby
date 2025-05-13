@@ -23,6 +23,7 @@ class PostHog
     # @option opts [Proc] :on_error Handles error calls from the API.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
     # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes. Measured in seconds, defaults to 30.
+    # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation. Measured in seconds, defaults to 3.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -48,12 +49,12 @@ class PostHog
           opts[:feature_flags_polling_interval],
           opts[:personal_api_key],
           @api_key,
-          opts[:host]
+          opts[:host],
+          opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
+          opts[:on_error]
         )
 
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) { |hash, key| hash[key] = Array.new }
-
-      at_exit { @worker_thread && @worker_thread[:should_exit] = true }
     end
 
     # Synchronously waits until the worker has cleared the queue.
@@ -93,7 +94,7 @@ class PostHog
       symbolize_keys! attrs
 
       if attrs[:send_feature_flags]
-        feature_variants = @feature_flags_poller._get_active_feature_variants(attrs[:distinct_id], attrs[:groups])
+        feature_variants = @feature_flags_poller.get_feature_variants(attrs[:distinct_id], attrs[:groups] || {})
 
         attrs[:feature_variants] = feature_variants
       end
@@ -119,6 +120,7 @@ class PostHog
     # @option attrs [String] :group_type Group type
     # @option attrs [String] :group_key Group key
     # @option attrs [Hash] :properties Group properties (optional)
+    # @option attrs [String] :distinct_id Distinct ID (optional)
     # @macro common_attrs
     def group_identify(attrs)
       symbolize_keys! attrs
@@ -154,6 +156,12 @@ class PostHog
       !!response
     end
 
+    # @param [String] flag_key The unique flag key of the feature flag
+    # @return [String] The decrypted value of the feature flag payload
+    def get_remote_config_payload(flag_key)
+      return @feature_flags_poller.get_remote_config_payload(flag_key)
+    end
+
     # Returns whether the given feature flag is enabled for the given user or not
     #
     # @param [String] key The key of the feature flag
@@ -176,7 +184,7 @@ class PostHog
     # ```
     def get_feature_flag(key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      feature_flag_response, flag_was_locally_evaluated = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      feature_flag_response, flag_was_locally_evaluated, request_id = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
 
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
       if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
@@ -188,7 +196,7 @@ class PostHog
               '$feature_flag' => key,
               '$feature_flag_response' => feature_flag_response,
               'locally_evaluated' => flag_was_locally_evaluated
-            },
+            }.merge(request_id ? {'$feature_flag_request_id' => request_id} : {}),
             'groups': groups,
           }
         )
@@ -226,6 +234,10 @@ class PostHog
     end
 
     # Returns all flags and payloads for a given user
+    # 
+    # @return [Hash] A hash with the following keys:
+    #   featureFlags: A hash of feature flags
+    #   featureFlagPayloads: A hash of feature flag payloads
     #
     # @param [String] distinct_id The distinct id of the user
     # @option [Hash] groups
@@ -235,7 +247,9 @@ class PostHog
     #
     def get_all_flags_and_payloads(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      response = @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      response.delete(:requestId) # remove internal information.
+      response
     end
 
     def reload_feature_flags

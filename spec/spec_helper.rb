@@ -1,14 +1,12 @@
-# https://github.com/codecov/codecov-ruby#usage
-if !ENV['GH_ACTIONS_UNIT_TESTS']
-  require 'simplecov'
-  SimpleCov.start
-  require 'codecov'
-  SimpleCov.formatter = SimpleCov::Formatter::Codecov
-end
-
 require 'posthog'
-require 'active_support/time'
+require 'active_support/all'
 require 'webmock/rspec'
+
+RSpec.configure do |config|
+  config.before(:each) do
+    PostHog::Logging.logger = Logger.new('/dev/null') # Suppress all logging
+  end
+end
 
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'
