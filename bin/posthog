@@ -11,7 +11,7 @@ program :version, '1.0.0'
 program :description, 'PostHog API'
 
 def json_hash(str)
-  return JSON.parse(str) if str
+  JSON.parse(str) if str
 end
 
 command :capture do |c|
@@ -27,13 +27,13 @@ command :capture do |c|
   c.option '--event=<event>', String, 'The event name to send with the event'
   c.option '--properties=<properties>', 'The properties to send (JSON-encoded)'
 
-  c.action do |args, options|
+  c.action do |_args, options|
     posthog =
       PostHog::Client.new(
         {
           api_key: options.api_key,
           api_host: options.api_host,
-          on_error: Proc.new { |status, msg| print msg }
+          on_error: proc { |_status, msg| print msg }
         }
       )
 
@@ -61,13 +61,13 @@ command :identify do |c|
            'The distinct id to send the event as'
   c.option '--properties=<properties>', 'The properties to send (JSON-encoded)'
 
-  c.action do |args, options|
+  c.action do |_args, options|
     posthog =
       PostHog::Client.new(
         {
           api_key: options.api_key,
           api_host: options.api_host,
-          on_error: Proc.new { |status, msg| print msg }
+          on_error: proc { |_status, msg| print msg }
         }
       )
 
@@ -92,13 +92,13 @@ command :alias do |c|
   c.option '--distinct-id=<distinct_id>', String, 'The distinct id'
   c.option '--alias=<alias>', 'The alias to give to the distinct id'
 
-  c.action do |args, options|
+  c.action do |_args, options|
     posthog =
       PostHog::Client.new(
         {
           api_key: options.api_key,
           api_host: options.api_host,
-          on_error: Proc.new { |status, msg| print msg }
+          on_error: proc { |_status, msg| print msg }
         }
       )
 
