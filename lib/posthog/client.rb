@@ -53,7 +53,7 @@ class PostHog
           opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
           opts[:on_error]
         )
-      
+
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) { |hash, key| hash[key] = Array.new }
     end
 
@@ -88,6 +88,7 @@ class PostHog
     # @option attrs [String] :event Event name
     # @option attrs [Hash] :properties Event properties (optional)
     # @option attrs [Bool] :send_feature_flags Whether to send feature flags with this event (optional)
+    # @option attrs [String] :uuid ID that uniquely identifies an event, NB events in posthog are deduplicated by the combination of teamId, timestamp date, event name, distinct id, and UUID
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
@@ -168,7 +169,7 @@ class PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
-    # 
+    #
     # @return [String, nil] The value of the feature flag
     #
     # The provided properties are used to calculate feature flags locally, if possible.
@@ -210,7 +211,7 @@ class PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
-    # 
+    #
     # @return [Hash] String (not symbol) key value pairs of flag and their values
     def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
