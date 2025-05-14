@@ -430,6 +430,7 @@ class PostHog
             uuid: "i am obviously not a uuid"
           }
         ) }.to raise_error(ArgumentError)
+      end
     end
 
     describe '#identify' do
