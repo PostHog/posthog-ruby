@@ -21,10 +21,10 @@ class PostHog
         options[:port] = uri.port
       end
 
-      options[:host] = !options[:host].nil? ? options[:host] : HOST
-      options[:port] = !options[:port].nil? ? options[:port] : PORT
-      options[:ssl] = !options[:ssl].nil? ? options[:ssl] : SSL
-      
+      options[:host] = options[:host].nil? ? HOST : options[:host]
+      options[:port] = options[:port].nil? ? PORT : options[:port]
+      options[:ssl] = options[:ssl].nil? ? SSL : options[:ssl]
+
       @headers = options[:headers] || HEADERS
       @path = options[:path] || PATH
       @retries = options[:retries] || RETRIES
@@ -34,9 +34,7 @@ class PostHog
       http.use_ssl = options[:ssl]
       http.read_timeout = 8
       http.open_timeout = 4
-      if options[:skip_ssl_verification]
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      end
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE if options[:skip_ssl_verification]
 
       @http = http
     end
@@ -77,7 +75,7 @@ class PostHog
     def should_retry_request?(status_code, body)
       if status_code >= 500
         true # Server error
-      elsif status_code == 429
+      elsif status_code == 429 # rubocop:disable Lint/DuplicateBranch
         true # Rate limited
       elsif status_code >= 400
         logger.error(body)
@@ -123,7 +121,7 @@ class PostHog
 
       if self.class.stub
         logger.debug "stubbed request to #{@path}: " \
-                       "api key = #{api_key}, batch = #{JSON.generate(batch)}"
+                     "api key = #{api_key}, batch = #{JSON.generate(batch)}"
 
         [200, '{}']
       else
@@ -137,7 +135,7 @@ class PostHog
       attr_writer :stub
 
       def stub
-        @stub || ENV['STUB']
+        @stub || ENV.fetch('STUB', nil)
       end
     end
   end

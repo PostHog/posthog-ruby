@@ -22,8 +22,10 @@ class PostHog
     #   queued for testing. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
-    # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes. Measured in seconds, defaults to 30.
-    # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation. Measured in seconds, defaults to 3.
+    # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes.
+    #   Measured in seconds, defaults to 30.
+    # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation.
+    #   Measured in seconds, defaults to 3.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -34,10 +36,10 @@ class PostHog
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
       @worker = if opts[:test_mode]
-        NoopWorker.new(@queue)
-      else
-        SendWorker.new(@queue, @api_key, opts)
-      end
+                  NoopWorker.new(@queue)
+                else
+                  SendWorker.new(@queue, @api_key, opts)
+                end
       @worker_thread = nil
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
@@ -53,8 +55,10 @@ class PostHog
           opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
           opts[:on_error]
         )
-      
-      @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) { |hash, key| hash[key] = Array.new }
+
+      @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
+        hash[key] = []
+      end
     end
 
     # Synchronously waits until the worker has cleared the queue.
@@ -147,18 +151,34 @@ class PostHog
       @queue.length
     end
 
-    def is_feature_enabled(flag_key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
-      response = get_feature_flag(flag_key, distinct_id, groups: groups, person_properties: person_properties, group_properties: group_properties, only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events)
-      if response.nil?
-        return nil
-      end
+    # TODO: In future version, rename to `feature_flag_enabled?`
+    def is_feature_enabled( # rubocop:disable Naming/PredicateName
+      flag_key,
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false,
+      send_feature_flag_events: true
+    )
+      response = get_feature_flag(
+        flag_key,
+        distinct_id,
+        groups: groups,
+        person_properties: person_properties,
+        group_properties: group_properties,
+        only_evaluate_locally: only_evaluate_locally,
+        send_feature_flag_events: send_feature_flag_events
+      )
+      return nil if response.nil?
+
       !!response
     end
 
     # @param [String] flag_key The unique flag key of the feature flag
     # @return [String] The decrypted value of the feature flag payload
     def get_remote_config_payload(flag_key)
-      return @feature_flags_poller.get_remote_config_payload(flag_key)
+      @feature_flags_poller.get_remote_config_payload(flag_key)
     end
 
     # Returns whether the given feature flag is enabled for the given user or not
@@ -168,35 +188,56 @@ class PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
-    # 
+    #
     # @return [String, nil] The value of the feature flag
     #
     # The provided properties are used to calculate feature flags locally, if possible.
     #
-    # `groups` are a mapping from group type to group key. So, if you have a group type of "organization" and a group key of "5",
+    # `groups` are a mapping from group type to group key. So, if you have a group type of "organization"
+    # and a group key of "5",
     # you would pass groups={"organization": "5"}.
     # `group_properties` take the format: { group_type_name: { group_properties } }
-    # So, for example, if you have the group type "organization" and the group key "5", with the properties name, and employee count,
-    # you'll send these as:
+    # So, for example, if you have the group type "organization" and the group key "5", with the properties name,
+    # and employee count, you'll send these as:
     # ```ruby
     #     group_properties: {"organization": {"name": "PostHog", "employees": 11}}
     # ```
-    def get_feature_flag(key, distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false, send_feature_flag_events: true)
-      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      feature_flag_response, flag_was_locally_evaluated, request_id = @feature_flags_poller.get_feature_flag(key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+    def get_feature_flag(
+      key,
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false,
+      send_feature_flag_events: true
+    )
+      person_properties, group_properties = add_local_person_and_group_properties(
+        distinct_id,
+        groups,
+        person_properties,
+        group_properties
+      )
+      feature_flag_response, flag_was_locally_evaluated, request_id = @feature_flags_poller.get_feature_flag(
+        key,
+        distinct_id,
+        groups,
+        person_properties,
+        group_properties,
+        only_evaluate_locally
+      )
 
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
       if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
         capture(
           {
-            'distinct_id': distinct_id,
-            'event': '$feature_flag_called',
-            'properties': {
+            distinct_id: distinct_id,
+            event: '$feature_flag_called',
+            properties: {
               '$feature_flag' => key,
               '$feature_flag_response' => feature_flag_response,
               'locally_evaluated' => flag_was_locally_evaluated
-            }.merge(request_id ? {'$feature_flag_request_id' => request_id} : {}),
-            'groups': groups,
+            }.merge(request_id ? { '$feature_flag_request_id' => request_id } : {}),
+            groups: groups
           }
         )
         @distinct_id_has_sent_flag_calls[distinct_id] << feature_flag_reported_key
@@ -210,11 +251,19 @@ class PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
-    # 
+    #
     # @return [Hash] String (not symbol) key value pairs of flag and their values
-    def get_all_flags(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
-      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      return @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+    def get_all_flags(
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false
+    )
+      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups,
+                                                                                  person_properties, group_properties)
+      @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties,
+                                          only_evaluate_locally)
     end
 
     # Returns payload for a given feature flag
@@ -227,13 +276,23 @@ class PostHog
     # @option [Hash] group_properties
     # @option [Boolean] only_evaluate_locally
     #
-    def get_feature_flag_payload(key, distinct_id, match_value: nil, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
-      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties, group_properties, only_evaluate_locally)
+    def get_feature_flag_payload(
+      key,
+      distinct_id,
+      match_value: nil,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false
+    )
+      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups,
+                                                                                  person_properties, group_properties)
+      @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties,
+                                                     group_properties, only_evaluate_locally)
     end
 
     # Returns all flags and payloads for a given user
-    # 
+    #
     # @return [Hash] A hash with the following keys:
     #   featureFlags: A hash of feature flags
     #   featureFlagPayloads: A hash of feature flag payloads
@@ -244,9 +303,20 @@ class PostHog
     # @option [Hash] group_properties
     # @option [Boolean] only_evaluate_locally
     #
-    def get_all_flags_and_payloads(distinct_id, groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false)
-      person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-      response = @feature_flags_poller.get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+    def get_all_flags_and_payloads(
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false
+    )
+      person_properties, group_properties = add_local_person_and_group_properties(
+        distinct_id, groups, person_properties, group_properties
+      )
+      response = @feature_flags_poller.get_all_flags_and_payloads(
+        distinct_id, groups, person_properties, group_properties, only_evaluate_locally
+      )
+
       response.delete(:requestId) # remove internal information.
       response
     end
@@ -283,8 +353,8 @@ class PostHog
       else
         logger.warn(
           'Queue is full, dropping events. The :max_queue_size ' \
-            'configuration parameter can be increased to prevent this from ' \
-            'happening.'
+          'configuration parameter can be increased to prevent this from ' \
+          'happening.'
         )
         false
       end
@@ -297,8 +367,10 @@ class PostHog
 
     def ensure_worker_running
       return if worker_running?
+
       @worker_mutex.synchronize do
         return if worker_running?
+
         @worker_thread = Thread.new { @worker.run }
       end
     end
@@ -308,7 +380,6 @@ class PostHog
     end
 
     def add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
-
       groups ||= {}
       person_properties ||= {}
       group_properties ||= {}
@@ -317,21 +388,22 @@ class PostHog
       symbolize_keys! person_properties
       symbolize_keys! group_properties
 
-      group_properties.each do |key, value|
+      group_properties.each_value do |value|
         symbolize_keys! value
       end
 
-      all_person_properties = { "distinct_id" => distinct_id }.merge(person_properties)
+      all_person_properties = { distinct_id: distinct_id }.merge(person_properties)
 
       all_group_properties = {}
       if groups
         groups.each do |group_name, group_key|
           all_group_properties[group_name] = {
-            "$group_key" => group_key}.merge(group_properties&.dig(group_name) || {})
+            :'$group_key' => group_key
+          }.merge((group_properties && group_properties[group_name]) || {})
         end
       end
 
-      return all_person_properties, all_group_properties
+      [all_person_properties, all_group_properties]
     end
   end
 end

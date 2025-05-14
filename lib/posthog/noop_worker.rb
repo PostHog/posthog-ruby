@@ -9,7 +9,8 @@ class PostHog
       # Does nothing
     end
 
-    def is_requesting?
+    # TODO: Rename to `requesting?` in future version
+    def is_requesting? # rubocop:disable Naming/PredicateName
       false
     end
   end
