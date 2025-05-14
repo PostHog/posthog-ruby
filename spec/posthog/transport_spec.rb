@@ -71,12 +71,12 @@ class PostHog
         let(:port) { 8080 }
         let(:options) do
           {
-            path: path,
-            retries: retries,
-            backoff_policy: backoff_policy,
-            skip_ssl_verification: skip_ssl_verification,
-            host: host,
-            port: port
+            :path => path,
+            :retries => retries,
+            :backoff_policy => backoff_policy,
+            :skip_ssl_verification => skip_ssl_verification,
+            :host => host,
+            :port => port
           }
         end
 
@@ -164,8 +164,8 @@ class PostHog
           let(:backoff_policy) { FakeBackoffPolicy.new([1000, 1000, 1000]) }
           subject do
             described_class.new(
-              retries: retries,
-              backoff_policy: backoff_policy
+              :retries => retries,
+              :backoff_policy => backoff_policy
             )
           end
 
@@ -184,7 +184,7 @@ class PostHog
           let(:body) { body }
           let(:retries) { 4 }
           let(:backoff) { 1 }
-          subject { described_class.new(retries: retries, backoff: backoff) }
+          subject { described_class.new(:retries => retries, :backoff => backoff) }
 
           it 'does not retry the request' do
             expect(subject).to receive(:sleep).never
@@ -205,7 +205,7 @@ class PostHog
 
         context 'request results in errorful response' do
           let(:error) { 'this is an error' }
-          let(:response_body) { { error: error }.to_json }
+          let(:response_body) { { :error => error }.to_json }
 
           it 'returns the parsed error' do
             expect(subject.send(api_key, batch).error).to eq(error)
@@ -226,7 +226,7 @@ class PostHog
         context 'request or parsing of response results in an exception' do
           let(:response_body) { 'Malformed JSON ---' }
 
-          subject { described_class.new(retries: 0) }
+          subject { described_class.new(:retries => 0) }
 
           it 'returns a -1 for status' do
             expect(subject.send(api_key, batch).status).to eq(-1)

@@ -1,7 +1,7 @@
 source 'http://rubygems.org'
 gemspec
 
-gem 'concurrent-ruby', require: 'concurrent'
+gem 'concurrent-ruby', :require => 'concurrent'
 gem 'irb'
 
 group :development, :test do

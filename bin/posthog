@@ -31,17 +31,17 @@ command :capture do |c|
     posthog =
       PostHog::Client.new(
         {
-          api_key: options.api_key,
-          api_host: options.api_host,
-          on_error: proc { |_status, msg| print msg }
+          :api_key => options.api_key,
+          :api_host => options.api_host,
+          :on_error => proc { |_status, msg| print msg }
         }
       )
 
     posthog.capture(
       {
-        distinct_id: options.distinct_id,
-        event: options.event,
-        properties: json_hash(options.properties)
+        :distinct_id => options.distinct_id,
+        :event => options.event,
+        :properties => json_hash(options.properties)
       }
     )
 
@@ -65,16 +65,16 @@ command :identify do |c|
     posthog =
       PostHog::Client.new(
         {
-          api_key: options.api_key,
-          api_host: options.api_host,
-          on_error: proc { |_status, msg| print msg }
+          :api_key => options.api_key,
+          :api_host => options.api_host,
+          :on_error => proc { |_status, msg| print msg }
         }
       )
 
     posthog.identify(
       {
-        distinct_id: options.distinct_id,
-        properties: json_hash(options.properties)
+        :distinct_id => options.distinct_id,
+        :properties => json_hash(options.properties)
       }
     )
 
@@ -96,13 +96,13 @@ command :alias do |c|
     posthog =
       PostHog::Client.new(
         {
-          api_key: options.api_key,
-          api_host: options.api_host,
-          on_error: proc { |_status, msg| print msg }
+          :api_key => options.api_key,
+          :api_host => options.api_host,
+          :on_error => proc { |_status, msg| print msg }
         }
       )
 
-    posthog.alias({ distinct_id: options.distinct_id, alias: options.alias })
+    posthog.alias({ :distinct_id => options.distinct_id, :alias => options.alias })
 
     posthog.flush
   end

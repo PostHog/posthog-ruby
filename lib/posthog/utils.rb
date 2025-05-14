@@ -91,10 +91,10 @@ class PostHog
         begin
           DateTime.parse(value)
         rescue ArgumentError
-          raise InconclusiveMatchError.new("#{value} is not in a valid date format")
+          raise InconclusiveMatchError, "#{value} is not in a valid date format"
         end
       else
-        raise InconclusiveMatchError.new('The date provided must be a string or date object')
+        raise InconclusiveMatchError, 'The date provided must be a string or date object'
       end
     end
 

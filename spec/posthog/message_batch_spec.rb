@@ -21,15 +21,15 @@ class PostHog
 
     describe '#full?' do
       it 'returns true once item count is exceeded' do
-        99.times { subject << { a: 'b' } }
+        99.times { subject << { :a => 'b' } }
         expect(subject.full?).to be(false)
 
-        subject << { a: 'b' }
+        subject << { :a => 'b' }
         expect(subject.full?).to be(true)
       end
 
       it 'returns true once max size is almost exceeded' do
-        message = { a: 'b' * (Defaults::Message::MAX_BYTES - 10) }
+        message = { :a => 'b' * (Defaults::Message::MAX_BYTES - 10) }
 
         message_size = message.to_json.bytesize
 

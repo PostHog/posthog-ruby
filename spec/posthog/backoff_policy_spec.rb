@@ -33,10 +33,10 @@ class PostHog
 
         let(:options) do
           {
-            min_timeout_ms: min_timeout_ms,
-            max_timeout_ms: max_timeout_ms,
-            multiplier: multiplier,
-            randomization_factor: randomization_factor
+            :min_timeout_ms => min_timeout_ms,
+            :max_timeout_ms => max_timeout_ms,
+            :multiplier => multiplier,
+            :randomization_factor => randomization_factor
           }
         end
 
@@ -67,10 +67,10 @@ class PostHog
     describe '#next_interval' do
       subject do
         described_class.new(
-          min_timeout_ms: 1000,
-          max_timeout_ms: 10_000,
-          multiplier: 2,
-          randomization_factor: 0.5
+          :min_timeout_ms => 1000,
+          :max_timeout_ms => 10_000,
+          :multiplier => 2,
+          :randomization_factor => 0.5
         )
       end
 

@@ -57,7 +57,7 @@ class PostHog
 
         queue = Queue.new
         queue << {}
-        worker = described_class.new(queue, 'secret', on_error: on_error)
+        worker = described_class.new(queue, 'secret', :on_error => on_error)
 
         # This is to ensure that Client#flush doesn't finish before calling
         # the error handler.
@@ -77,7 +77,7 @@ class PostHog
 
         queue = Queue.new
         queue << Requested::CAPTURE
-        worker = described_class.new(queue, 'testsecret', on_error: on_error)
+        worker = described_class.new(queue, 'testsecret', :on_error => on_error)
         worker.run
 
         expect(queue).to be_empty
@@ -99,7 +99,7 @@ class PostHog
         queue << good_message
         queue << bad_message
 
-        worker = described_class.new(queue, 'testsecret', on_error: on_error)
+        worker = described_class.new(queue, 'testsecret', :on_error => on_error)
         worker.run
         expect(queue).to be_empty
       end

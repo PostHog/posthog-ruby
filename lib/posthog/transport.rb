@@ -115,7 +115,7 @@ class PostHog
 
     # Sends a request for the batch, returns [status_code, body]
     def send_request(api_key, batch)
-      payload = JSON.generate(api_key: api_key, batch: batch)
+      payload = JSON.generate(:api_key => api_key, :batch => batch)
 
       request = Net::HTTP::Post.new(@path, @headers)
 
