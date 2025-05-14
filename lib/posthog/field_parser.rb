@@ -173,9 +173,9 @@ class PostHog
       end
 
       def check_is_uuid!(uuid)
-        unless uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
-          raise ArgumentError, "uuid is not formated like a uuid"
-        end
+        return if uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+
+        raise ArgumentError, 'uuid is not formated like a uuid'
       end
     end
   end
