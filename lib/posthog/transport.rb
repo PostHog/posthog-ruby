@@ -24,7 +24,7 @@ class PostHog
       options[:host] = !options[:host].nil? ? options[:host] : HOST
       options[:port] = !options[:port].nil? ? options[:port] : PORT
       options[:ssl] = !options[:ssl].nil? ? options[:ssl] : SSL
-
+      
       @headers = options[:headers] || HEADERS
       @path = options[:path] || PATH
       @retries = options[:retries] || RETRIES
@@ -34,7 +34,9 @@ class PostHog
       http.use_ssl = options[:ssl]
       http.read_timeout = 8
       http.open_timeout = 4
-      http.verify_mode = OpenSSL::SSL::VERIFY_NONE if options[:skip_ssl_verification]
+      if options[:skip_ssl_verification]
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      end
 
       @http = http
     end

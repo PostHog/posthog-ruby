@@ -1,6 +1,7 @@
 require 'securerandom'
 
 class PostHog
+
   class InconclusiveMatchError < StandardError
   end
 
@@ -79,22 +80,26 @@ class PostHog
     end
 
     def seconds_to_utc_offset(seconds, colon = true)
-      format((colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON), (seconds < 0 ? '-' : '+'),
-             seconds.abs / 3600, (seconds.abs % 3600) / 60)
+      (colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON) % [
+        (seconds < 0 ? '-' : '+'),
+        (seconds.abs / 3600),
+        ((seconds.abs % 3600) / 60)
+      ]
     end
 
     def convert_to_datetime(value)
       if value.respond_to?(:strftime)
-        value
-
+        parsed_date = value
+        return parsed_date
       elsif value.respond_to?(:to_str)
         begin
-          DateTime.parse(value)
-        rescue ArgumentError
+          parsed_date = DateTime.parse(value)
+          return parsed_date
+        rescue ArgumentError => e
           raise InconclusiveMatchError.new("#{value} is not in a valid date format")
         end
       else
-        raise InconclusiveMatchError.new('The date provided must be a string or date object')
+        raise InconclusiveMatchError.new("The date provided must be a string or date object")
       end
     end
 
@@ -102,10 +107,12 @@ class PostHog
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
 
     def is_valid_regex(regex)
-      Regexp.new(regex)
-      true
-    rescue RegexpError
-      false
+      begin
+        Regexp.new(regex)
+        return true
+      rescue RegexpError
+        return false
+      end
     end
 
     class SizeLimitedHash < Hash
@@ -115,7 +122,9 @@ class PostHog
       end
 
       def []=(key, value)
-        clear if length >= @max_length
+        if length >= @max_length
+          clear
+        end
         super
       end
     end

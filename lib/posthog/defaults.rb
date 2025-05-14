@@ -1,5 +1,6 @@
 class PostHog
   module Defaults
+
     MAX_HASH_SIZE = 50_000
 
     module Request
@@ -18,7 +19,7 @@ class PostHog
     module FeatureFlags
       FLAG_REQUEST_TIMEOUT_SECONDS = 3
     end
-
+    
     module Queue
       MAX_SIZE = 10_000
     end

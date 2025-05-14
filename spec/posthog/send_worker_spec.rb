@@ -51,8 +51,7 @@ class PostHog
         on_error =
           proc do |yielded_status, yielded_error|
             sleep 0.2 # Make this take longer than thread spin-up (below)
-            status = yielded_status
-            error = yielded_error
+            status, error = yielded_status, yielded_error
           end
 
         queue = Queue.new
