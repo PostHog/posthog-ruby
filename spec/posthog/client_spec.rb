@@ -406,8 +406,8 @@ class PostHog
             uuid: "123e4567-e89b-12d3-a456-426614174000"
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        expect(properties["$uuid"]).to eq("123e4567-e89b-12d3-a456-426614174000")
+        last_message = client.dequeue_last_message
+        expect(last_message["uuid"]).to eq("123e4567-e89b-12d3-a456-426614174000")
       end
 
       it 'generates uuid when not provided' do
@@ -418,8 +418,8 @@ class PostHog
           }
         )
         properties = client.dequeue_last_message[:properties]
-        expect(properties["$uuid"]).to be_a(String)
-        expect(properties["$uuid"].length).to eq(36)
+        # ingestion will add a UUID if one is not provided
+        expect(properties["uuid"]).to be_nil
       end
 
       it 'rejects likely invalid uuid' do
