@@ -92,6 +92,10 @@ class PostHog
     # @option attrs [String] :event Event name
     # @option attrs [Hash] :properties Event properties (optional)
     # @option attrs [Bool] :send_feature_flags Whether to send feature flags with this event (optional)
+    # @option attrs [String] :uuid ID that uniquely identifies an event;
+    #                             events in PostHog are deduplicated by the
+    #                             combination of teamId, timestamp date,
+    #                             event name, distinct id, and UUID
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs

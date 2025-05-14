@@ -419,6 +419,42 @@ class PostHog
         properties = client.dequeue_last_message[:properties]
         expect(properties['$groups']).to eq({ 'company' => 'id:5', 'instance' => 'app.posthog.com' })
       end
+
+      it 'captures uuid when provided' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: '123e4567-e89b-12d3-a456-426614174000'
+          }
+        )
+        last_message = client.dequeue_last_message
+        expect(last_message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
+      end
+
+      it 'generates uuid when not provided' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+        properties = client.dequeue_last_message[:properties]
+        # ingestion will add a UUID if one is not provided
+        expect(properties['uuid']).to be_nil
+      end
+
+      it 'rejects likely invalid uuid' do
+        expect do
+          client.capture(
+            {
+              distinct_id: 'distinct_id',
+              event: 'test_event',
+              uuid: 'i am obviously not a uuid'
+            }
+          )
+        end.to raise_error(ArgumentError)
+      end
     end
 
     describe '#identify' do
