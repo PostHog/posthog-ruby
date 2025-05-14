@@ -423,35 +423,37 @@ class PostHog
       it 'captures uuid when provided' do
         client.capture(
           {
-            distinct_id: "distinct_id",
-            event: "test_event",
-            uuid: "123e4567-e89b-12d3-a456-426614174000"
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: '123e4567-e89b-12d3-a456-426614174000'
           }
         )
         last_message = client.dequeue_last_message
-        expect(last_message["uuid"]).to eq("123e4567-e89b-12d3-a456-426614174000")
+        expect(last_message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
       end
 
       it 'generates uuid when not provided' do
         client.capture(
           {
-            distinct_id: "distinct_id",
-            event: "test_event",
+            distinct_id: 'distinct_id',
+            event: 'test_event'
           }
         )
         properties = client.dequeue_last_message[:properties]
         # ingestion will add a UUID if one is not provided
-        expect(properties["uuid"]).to be_nil
+        expect(properties['uuid']).to be_nil
       end
 
       it 'rejects likely invalid uuid' do
-        expect { client.capture(
-          {
-            distinct_id: "distinct_id",
-            event: "test_event",
-            uuid: "i am obviously not a uuid"
-          }
-        ) }.to raise_error(ArgumentError)
+        expect do
+          client.capture(
+            {
+              distinct_id: 'distinct_id',
+              event: 'test_event',
+              uuid: 'i am obviously not a uuid'
+            }
+          )
+        end.to raise_error(ArgumentError)
       end
     end
 
