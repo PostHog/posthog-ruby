@@ -4,14 +4,14 @@ require 'webmock/rspec'
 
 RSpec.configure do |config|
   config.before(:each) do
-    PostHog::Logging.logger = Logger.new('/dev/null') # Suppress all logging
+    PostHog::Logging.logger = Logger.new(File::NULL) # Suppress all logging
   end
 end
 
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'
 
-API_KEY = 'testsecret'
+API_KEY = 'testsecret'.freeze
 
 CAPTURE = {
   event: 'Ruby Library test event',
@@ -21,17 +21,17 @@ CAPTURE = {
     layers: 20,
     timestamp: Time.new
   }
-}
+}.freeze
 
-IDENTIFY = { '$set': { likes_animals: true, instrument: 'Guitar', age: 25 } }
+IDENTIFY = { '$set' => { likes_animals: true, instrument: 'Guitar', age: 25 } }.freeze
 
-ALIAS = { alias: 1234, distinct_id: 'abcd' }
+ALIAS = { alias: 1234, distinct_id: 'abcd' }.freeze
 
-GROUP = {}
+GROUP = {}.freeze
 
-PAGE = {}
+PAGE = { name: 'main' }.freeze
 
-SCREEN = { name: 'main' }
+SCREEN = { name: 'main' }.freeze
 
 DISTINCT_ID = 1234
 GROUP_ID = 1234
@@ -66,6 +66,7 @@ class FakeBackoffPolicy
 
   def next_interval
     raise 'FakeBackoffPolicy has no values left' if @interval_values.empty?
+
     @interval_values.shift
   end
 end
@@ -84,12 +85,13 @@ module AsyncHelper
       begin
         yield
         return
-      rescue RSpec::Expectations::ExpectationNotMetError => error
-        raise error if Time.now >= time_limit
+      rescue RSpec::Expectations::ExpectationNotMetError => e
+        raise e if Time.now >= time_limit
+
         sleep interval
       end
     end
   end
 end
 
-include AsyncHelper
+include AsyncHelper # rubocop:disable Style/MixinUsage

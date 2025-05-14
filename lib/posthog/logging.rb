@@ -42,7 +42,7 @@ class PostHog
           if defined?(Rails)
             Rails.logger
           else
-            logger = Logger.new STDOUT
+            logger = Logger.new $stdout
             logger.progname = 'PostHog'
             logger.level = Logger::WARN
             logger

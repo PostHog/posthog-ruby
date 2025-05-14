@@ -4,34 +4,35 @@ class FeatureFlag
 
   def initialize(json)
     json.transform_keys!(&:to_s)
-    @key = json["key"]
-    @enabled = json["enabled"]
-    @variant = json["variant"]
-    @reason = json["reason"] ? EvaluationReason.new(json["reason"]) : nil
-    @metadata = json["metadata"] ? FeatureFlagMetadata.new(json["metadata"].transform_keys(&:to_s)) : nil
+    @key = json['key']
+    @enabled = json['enabled']
+    @variant = json['variant']
+    @reason = json['reason'] ? EvaluationReason.new(json['reason']) : nil
+    @metadata = json['metadata'] ? FeatureFlagMetadata.new(json['metadata'].transform_keys(&:to_s)) : nil
   end
 
-  def get_value
+  # TODO: Rename to `value` in future version
+  def get_value # rubocop:disable Naming/AccessorMethodName
     @variant || @enabled
   end
 
   def payload
-    @metadata&.payload
+    @metadata.payload if @metadata
   end
 
   def self.from_value_and_payload(key, value, payload)
     new({
-      "key" => key,
-      "enabled" => value.is_a?(String) ? true : value,
-      "variant" => value.is_a?(String) ? value : nil,
-      "reason" => nil,
-      "metadata" => {
-        "id" => nil,
-        "version" => nil,
-        "payload" => payload,
-        "description" => nil
-      }
-    })
+          'key' => key,
+          'enabled' => value.is_a?(String) || value,
+          'variant' => value.is_a?(String) ? value : nil,
+          'reason' => nil,
+          'metadata' => {
+            'id' => nil,
+            'version' => nil,
+            'payload' => payload,
+            'description' => nil
+          }
+        })
   end
 end
 
@@ -41,9 +42,9 @@ class EvaluationReason
 
   def initialize(json)
     json.transform_keys!(&:to_s)
-    @code = json["code"]
-    @description = json["description"]
-    @condition_index = json["condition_index"]&.to_i if json["condition_index"]
+    @code = json['code']
+    @description = json['description']
+    @condition_index = json['condition_index'].to_i if json['condition_index']
   end
 end
 
@@ -53,9 +54,9 @@ class FeatureFlagMetadata
 
   def initialize(json)
     json.transform_keys!(&:to_s)
-    @id = json["id"]
-    @version = json["version"]
-    @payload = json["payload"]
-    @description = json["description"]
+    @id = json['id']
+    @version = json['version']
+    @payload = json['payload']
+    @description = json['description']
   end
 end

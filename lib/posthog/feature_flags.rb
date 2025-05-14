@@ -7,7 +7,6 @@ require 'posthog/feature_flag'
 require 'digest'
 
 class PostHog
-
   class InconclusiveMatchError < StandardError
   end
 
@@ -15,7 +14,14 @@ class PostHog
     include PostHog::Logging
     include PostHog::Utils
 
-    def initialize(polling_interval, personal_api_key, project_api_key, host, feature_flag_request_timeout_seconds, on_error = nil)
+    def initialize(
+      polling_interval,
+      personal_api_key,
+      project_api_key,
+      host,
+      feature_flag_request_timeout_seconds,
+      on_error = nil
+    )
       @polling_interval = polling_interval || 30
       @personal_api_key = personal_api_key
       @project_api_key = project_api_key
@@ -29,12 +35,12 @@ class PostHog
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @task =
         Concurrent::TimerTask.new(
-          execution_interval: polling_interval,
+          execution_interval: polling_interval
         ) { _load_feature_flags }
 
       # If no personal API key, disable local evaluation & thus polling for definitions
       if @personal_api_key.nil?
-        logger.info "No personal API key provided, disabling local evaluation"
+        logger.info 'No personal API key provided, disabling local evaluation'
         @loaded_flags_successfully_once.make_true
       else
         # load once before timer
@@ -44,45 +50,71 @@ class PostHog
     end
 
     def load_feature_flags(force_reload = false)
-      if @loaded_flags_successfully_once.false? || force_reload
-        _load_feature_flags
-      end
+      return unless @loaded_flags_successfully_once.false? || force_reload
+
+      _load_feature_flags
     end
 
-    def get_feature_variants(distinct_id, groups={}, person_properties={}, group_properties={}, raise_on_error=false)
+    def get_feature_variants(
+      distinct_id,
+      groups = {},
+      person_properties = {},
+      group_properties = {},
+      raise_on_error = false
+    )
       # TODO: Convert to options hash for easier argument passing
-      flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, raise_on_error)
-      if !flags_data.key?(:featureFlags)
+      flags_data = get_all_flags_and_payloads(
+        distinct_id,
+        groups,
+        person_properties,
+        group_properties,
+        false,
+        raise_on_error
+      )
+
+      if flags_data.key?(:featureFlags)
+        stringify_keys(flags_data[:featureFlags] || {})
+      else
         logger.debug "Missing feature flags key: #{flags_data.to_json}"
         {}
-      else
-        stringify_keys(flags_data[:featureFlags] || {})
       end
     end
 
-    def get_feature_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties)
-      if !flags_data.key?(:featureFlagPayloads)
-        logger.debug "Missing feature flag payloads key: #{flags_data.to_json}"
-        return {}
-      else
+    def get_feature_payloads(
+      distinct_id,
+      groups = {},
+      person_properties = {},
+      group_properties = {},
+      _only_evaluate_locally = false
+    )
+      flags_data = get_all_flags_and_payloads(
+        distinct_id,
+        groups,
+        person_properties,
+        group_properties
+      )
+
+      if flags_data.key?(:featureFlagPayloads)
         stringify_keys(flags_data[:featureFlagPayloads] || {})
+      else
+        logger.debug "Missing feature flag payloads key: #{flags_data.to_json}"
+        {}
       end
     end
 
-    def get_flags(distinct_id, groups={}, person_properties={}, group_properties={})
+    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {})
       request_data = {
-        "distinct_id": distinct_id,
-        "groups": groups,
-        "person_properties": person_properties,
-        "group_properties": group_properties,
+        distinct_id: distinct_id,
+        groups: groups,
+        person_properties: person_properties,
+        group_properties: group_properties
       }
 
       flags_response = _request_feature_flag_evaluation(request_data)
 
       # Only normalize if we have flags in the response
       if flags_response[:flags]
-        #v4 format
+        # v4 format
         flags_hash = flags_response[:flags].transform_values do |flag|
           FeatureFlag.new(flag)
         end
@@ -90,7 +122,7 @@ class PostHog
         flags_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
         flags_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
       elsif flags_response[:featureFlags]
-        #v3 format
+        # v3 format
         flags_response[:featureFlags] = flags_response[:featureFlags] || {}
         flags_response[:featureFlagPayloads] = flags_response[:featureFlagPayloads] || {}
         flags_response[:flags] = flags_response[:featureFlags].map do |key, value|
@@ -101,10 +133,17 @@ class PostHog
     end
 
     def get_remote_config_payload(flag_key)
-      return _request_remote_config_payload(flag_key)
+      _request_remote_config_payload(flag_key)
     end
 
-    def get_feature_flag(key, distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+    def get_feature_flag(
+      key,
+      distinct_id,
+      groups = {},
+      person_properties = {},
+      group_properties = {},
+      only_evaluate_locally = false
+    )
       # make sure they're loaded on first run
       load_feature_flags
 
@@ -112,8 +151,8 @@ class PostHog
       symbolize_keys! person_properties
       symbolize_keys! group_properties
 
-      group_properties.each do |key, value|
-        symbolize_keys! value
+      group_properties.each_value do |value|
+        symbolize_keys!(value)
       end
 
       response = nil
@@ -126,7 +165,7 @@ class PostHog
         end
       end
 
-      if !feature_flag.nil?
+      unless feature_flag.nil?
         begin
           response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties)
           logger.debug "Successfully computed flag locally: #{key} -> #{response}"
@@ -144,18 +183,16 @@ class PostHog
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
           flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
-          if !flags_data.key?(:featureFlags)
-            logger.debug "Missing feature flags key: #{flags_data.to_json}"
-            flags = {}
-          else
+          if flags_data.key?(:featureFlags)
             flags = stringify_keys(flags_data[:featureFlags] || {})
             request_id = flags_data[:requestId]
+          else
+            logger.debug "Missing feature flags key: #{flags_data.to_json}"
+            flags = {}
           end
 
           response = flags[key]
-          if response.nil?
-            response = false
-          end
+          response = false if response.nil?
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}. #{e.backtrace.join("\n")}")
@@ -165,17 +202,38 @@ class PostHog
       [response, flag_was_locally_evaluated, request_id]
     end
 
-    def get_all_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
+    def get_all_flags(
+      distinct_id,
+      groups = {},
+      person_properties = {},
+      group_properties = {},
+      only_evaluate_locally = false
+    )
       if @quota_limited.true?
-        logger.debug "Not fetching flags from server - quota limited"
+        logger.debug 'Not fetching flags from server - quota limited'
         return {}
       end
+
       # returns a string hash of all flags
-      response = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, only_evaluate_locally)
+      response = get_all_flags_and_payloads(
+        distinct_id,
+        groups,
+        person_properties,
+        group_properties,
+        only_evaluate_locally
+      )
+
       response[:featureFlags]
     end
 
-    def get_all_flags_and_payloads(distinct_id, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false, raise_on_error = false)
+    def get_all_flags_and_payloads(
+      distinct_id,
+      groups = {},
+      person_properties = {},
+      group_properties = {},
+      only_evaluate_locally = false,
+      raise_on_error = false
+    )
       load_feature_flags
 
       flags = {}
@@ -188,27 +246,26 @@ class PostHog
           match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
           flags[flag[:key]] = match_value
           match_payload = _compute_flag_payload_locally(flag[:key], match_value)
-          if match_payload
-            payloads[flag[:key]] = match_payload
-          end
-        rescue InconclusiveMatchError => e
+          payloads[flag[:key]] = match_payload if match_payload
+        rescue InconclusiveMatchError
           fallback_to_server = true
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")} ")
           fallback_to_server = true
         end
       end
+
       if fallback_to_server && !only_evaluate_locally
         begin
           flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties)
 
           unless flags_and_payloads.key?(:featureFlags)
-            raise StandardError.new("Error flags response: #{flags_and_payloads}")
+            raise StandardError, "Error flags response: #{flags_and_payloads}"
           end
 
           # Check if feature_flags are quota limited
-          if flags_and_payloads[:quotaLimited]&.include?("feature_flags")
-            logger.warn "[FEATURE FLAGS] Quota limited for feature flags"
+          if flags_and_payloads[:quotaLimited] && flags_and_payloads[:quotaLimited].include?('feature_flags')
+            logger.warn '[FEATURE FLAGS] Quota limited for feature flags'
             flags = {}
             payloads = {}
           else
@@ -221,46 +278,58 @@ class PostHog
           raise if raise_on_error
         end
       end
-      {"featureFlags": flags, "featureFlagPayloads": payloads, "requestId": request_id}
+
+      {
+        featureFlags: flags,
+        featureFlagPayloads: payloads,
+        requestId: request_id
+      }
     end
 
-    def get_feature_flag_payload(key, distinct_id, match_value = nil, groups = {}, person_properties = {}, group_properties = {}, only_evaluate_locally = false)
-      if match_value == nil
+    def get_feature_flag_payload(
+      key,
+      distinct_id,
+      match_value = nil,
+      groups = {},
+      person_properties = {},
+      group_properties = {},
+      only_evaluate_locally = false
+    )
+      if match_value.nil?
         match_value = get_feature_flag(
           key,
           distinct_id,
           groups,
           person_properties,
           group_properties,
-          true,
+          true
         )[0]
       end
       response = nil
-      if match_value != nil
-        response = _compute_flag_payload_locally(key, match_value)
-      end
-      if response == nil and !only_evaluate_locally
+      response = _compute_flag_payload_locally(key, match_value) unless match_value.nil?
+      if response.nil? && !only_evaluate_locally
         flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
         response = flags_payloads[key.downcase] || nil
       end
       response
     end
 
-    def shutdown_poller()
+    def shutdown_poller
       @task.shutdown
     end
 
     # Class methods
 
     def self.compare(lhs, rhs, operator)
-      if operator == "gt"
-        return lhs > rhs
-      elsif operator == "gte"
-        return lhs >= rhs
-      elsif operator == "lt"
-        return lhs < rhs
-      elsif operator == "lte"
-        return lhs <= rhs
+      case operator
+      when 'gt'
+        lhs > rhs
+      when 'gte'
+        lhs >= rhs
+      when 'lt'
+        lhs < rhs
+      when 'lte'
+        lhs <= rhs
       else
         raise "Invalid operator: #{operator}"
       end
@@ -269,34 +338,33 @@ class PostHog
     def self.relative_date_parse_for_feature_flag_matching(value)
       match = /^-?([0-9]+)([a-z])$/.match(value)
       parsed_dt = DateTime.now.new_offset(0)
-      if match
-        number = match[1].to_i
+      return unless match
 
-        if number >= 10000
-          # Guard against overflow, disallow numbers greater than 10_000
-          return nil
-        end
+      number = match[1].to_i
 
-        interval = match[2]
-        if interval == "h"
-          parsed_dt = parsed_dt - (number/24r)
-        elsif interval == "d"
-          parsed_dt = parsed_dt.prev_day(number)
-        elsif interval == "w"
-          parsed_dt = parsed_dt.prev_day(number*7)
-        elsif interval == "m"
-          parsed_dt = parsed_dt.prev_month(number)
-        elsif interval == "y"
-          parsed_dt = parsed_dt.prev_year(number)
-        else
-          return nil
-        end
-        parsed_dt
-      else
-        nil
+      if number >= 10_000
+        # Guard against overflow, disallow numbers greater than 10_000
+        return nil
       end
-    end
 
+      interval = match[2]
+      case interval
+      when 'h'
+        parsed_dt -= (number / 24.0)
+      when 'd'
+        parsed_dt = parsed_dt.prev_day(number)
+      when 'w'
+        parsed_dt = parsed_dt.prev_day(number * 7)
+      when 'm'
+        parsed_dt = parsed_dt.prev_month(number)
+      when 'y'
+        parsed_dt = parsed_dt.prev_year(number)
+      else
+        return nil
+      end
+
+      parsed_dt
+    end
 
     def self.match_property(property, property_values)
       # only looks for matches where key exists in property_values
@@ -310,9 +378,9 @@ class PostHog
       operator = property[:operator] || 'exact'
 
       if !property_values.key?(key)
-        raise InconclusiveMatchError.new("Property #{key} not found in property_values")
+        raise InconclusiveMatchError, "Property #{key} not found in property_values"
       elsif operator == 'is_not_set'
-        raise InconclusiveMatchError.new("Operator is_not_set not supported")
+        raise InconclusiveMatchError, 'Operator is_not_set not supported'
       end
 
       override_value = property_values[key]
@@ -321,11 +389,10 @@ class PostHog
       when 'exact', 'is_not'
         if value.is_a?(Array)
           values_stringified = value.map { |val| val.to_s.downcase }
-          if operator == 'exact'
-            return values_stringified.any?(override_value.to_s.downcase)
-          else
-            return !values_stringified.any?(override_value.to_s.downcase)
-          end
+          return values_stringified.any?(override_value.to_s.downcase) if operator == 'exact'
+
+          return values_stringified.none?(override_value.to_s.downcase)
+
         end
         if operator == 'exact'
           value.to_s.downcase == override_value.to_s.downcase
@@ -346,74 +413,68 @@ class PostHog
         parsed_value = nil
         begin
           parsed_value = Float(value)
-        rescue StandardError => e
+        rescue StandardError # rubocop:disable Lint/SuppressedException
         end
         if !parsed_value.nil? && !override_value.nil?
           if override_value.is_a?(String)
-            self.compare(override_value, value.to_s, operator)
+            compare(override_value, value.to_s, operator)
           else
-            self.compare(override_value, parsed_value, operator)
+            compare(override_value, parsed_value, operator)
           end
         else
-          self.compare(override_value.to_s, value.to_s, operator)
+          compare(override_value.to_s, value.to_s, operator)
         end
       when 'is_date_before', 'is_date_after'
         override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
-        parsed_date = self.relative_date_parse_for_feature_flag_matching(value.to_s)
+        parsed_date = relative_date_parse_for_feature_flag_matching(value.to_s)
 
-        if parsed_date.nil?
-          parsed_date = PostHog::Utils.convert_to_datetime(value.to_s)
-        end
+        parsed_date = PostHog::Utils.convert_to_datetime(value.to_s) if parsed_date.nil?
 
-        if !parsed_date
-          raise InconclusiveMatchError.new("Invalid date format")
-        end
+        raise InconclusiveMatchError, 'Invalid date format' unless parsed_date
+
         if operator == 'is_date_before'
-          return override_date < parsed_date
+          override_date < parsed_date
         elsif operator == 'is_date_after'
-          return override_date > parsed_date
+          override_date > parsed_date
         end
       else
-        raise InconclusiveMatchError.new("Unknown operator: #{operator}")
+        raise InconclusiveMatchError, "Unknown operator: #{operator}"
       end
     end
 
     private
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
-      if flag[:ensure_experience_continuity]
-        raise InconclusiveMatchError.new("Flag has experience continuity enabled")
-      end
+      raise InconclusiveMatchError, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
 
-      return false if !flag[:active]
+      return false unless flag[:active]
 
       flag_filters = flag[:filters] || {}
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
-      if !aggregation_group_type_index.nil?
-        group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
+      return match_feature_flag_properties(flag, distinct_id, person_properties) if aggregation_group_type_index.nil?
 
-        if group_name.nil?
-          logger.warn "[FEATURE FLAGS] Unknown group type index #{aggregation_group_type_index} for feature flag #{flag[:key]}"
-          # failover to `/flags/`
-          raise InconclusiveMatchError.new("Flag has unknown group type index")
-        end
+      group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
 
-        group_name_symbol = group_name.to_sym
-
-        if !groups.key?(group_name_symbol)
-          # Group flags are never enabled if appropriate `groups` aren't passed in
-          # don't failover to `/flags/`, since response will be the same
-          logger.warn "[FEATURE FLAGS] Can't compute group feature flag: #{flag[:key]} without group names passed in"
-          return false
-        end
-
-        focused_group_properties = group_properties[group_name_symbol]
-        return match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties)
-      else
-        return match_feature_flag_properties(flag, distinct_id, person_properties)
+      if group_name.nil?
+        logger.warn(
+          "[FEATURE FLAGS] Unknown group type index #{aggregation_group_type_index} for feature flag #{flag[:key]}"
+        )
+        # failover to `/flags/`
+        raise InconclusiveMatchError, 'Flag has unknown group type index'
       end
 
+      group_name_symbol = group_name.to_sym
+
+      unless groups.key?(group_name_symbol)
+        # Group flags are never enabled if appropriate `groups` aren't passed in
+        # don't failover to `/flags/`, since response will be the same
+        logger.warn "[FEATURE FLAGS] Can't compute group feature flag: #{flag[:key]} without group names passed in"
+        return false
+      end
+
+      focused_group_properties = group_properties[group_name_symbol]
+      match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties)
     end
 
     def _compute_flag_payload_locally(key, match_value)
@@ -437,23 +498,27 @@ class PostHog
 
       # Stable sort conditions with variant overrides to the top. This ensures that if overrides are present, they are
       # evaluated first, and the variant override is applied to the first matching condition.
-      sorted_flag_conditions = flag_conditions.each_with_index.sort_by { |condition, idx| [condition[:variant].nil? ? 1 : -1, idx] }
+      sorted_flag_conditions = flag_conditions.each_with_index.sort_by do |condition, idx|
+        [condition[:variant].nil? ? 1 : -1, idx]
+      end
 
-      sorted_flag_conditions.each do |condition, idx|
+      # NOTE: This NEEDS to be `each` because `each_key` breaks
+      # This is not a hash, it's just an array with 2 entries
+      sorted_flag_conditions.each do |condition, _idx| # rubocop:disable Style/HashEachMethods
         begin
           if is_condition_match(flag, distinct_id, condition, properties)
             variant_override = condition[:variant]
             flag_multivariate = flag_filters[:multivariate] || {}
             flag_variants = flag_multivariate[:variants] || []
-            if flag_variants.map{|variant| variant[:key]}.include?(condition[:variant])
-                variant = variant_override
-            else
-                variant = get_matching_variant(flag, distinct_id)
-            end
+            variant = if flag_variants.map { |variant| variant[:key] }.include?(condition[:variant])
+                        variant_override
+                      else
+                        get_matching_variant(flag, distinct_id)
+                      end
             result = variant || true
             break
           end
-        rescue InconclusiveMatchError => e
+        rescue InconclusiveMatchError
           is_inconclusive = true
         end
       end
@@ -461,47 +526,46 @@ class PostHog
       if !result.nil?
         return result
       elsif is_inconclusive
-        raise InconclusiveMatchError.new("Can't determine if feature flag is enabled or not with given properties")
+        raise InconclusiveMatchError, "Can't determine if feature flag is enabled or not with given properties"
       end
 
       # We can only return False when all conditions are False
-      return false
+      false
     end
 
-    def is_condition_match(flag, distinct_id, condition, properties)
+    # TODO: Rename to `condition_match?` in future version
+    def is_condition_match(flag, distinct_id, condition, properties) # rubocop:disable Naming/PredicateName
       rollout_percentage = condition[:rollout_percentage]
 
-      if !(condition[:properties] || []).empty?
-        if !condition[:properties].all? { |prop|
-            FeatureFlagsPoller.match_property(prop, properties)
-          }
+      unless (condition[:properties] || []).empty?
+        if !condition[:properties].all? do |prop|
+          FeatureFlagsPoller.match_property(prop, properties)
+        end
           return false
         elsif rollout_percentage.nil?
           return true
         end
       end
 
-      if !rollout_percentage.nil? and _hash(flag[:key], distinct_id) > (rollout_percentage.to_f/100)
-        return false
-      end
+      return false if !rollout_percentage.nil? && (_hash(flag[:key], distinct_id) > (rollout_percentage.to_f / 100))
 
-      return true
+      true
     end
 
     # This function takes a distinct_id and a feature flag key and returns a float between 0 and 1.
     # Given the same distinct_id and key, it'll always return the same float. These floats are
     # uniformly distributed between 0 and 1, so if we want to show this feature to 20% of traffic
     # we can do _hash(key, distinct_id) < 0.2
-    def _hash(key, distinct_id, salt="")
+    def _hash(key, distinct_id, salt = '')
       hash_key = Digest::SHA1.hexdigest "#{key}.#{distinct_id}#{salt}"
-      return (Integer(hash_key[0..14], 16).to_f / 0xfffffffffffffff)
+      (Integer(hash_key[0..14], 16).to_f / 0xfffffffffffffff)
     end
 
     def get_matching_variant(flag, distinct_id)
-      hash_value = _hash(flag[:key], distinct_id, salt="variant")
-      matching_variant = variant_lookup_table(flag).find { |variant|
-          hash_value >= variant[:value_min] and hash_value < variant[:value_max]
-      }
+      hash_value = _hash(flag[:key], distinct_id, 'variant')
+      matching_variant = variant_lookup_table(flag).find do |variant|
+        hash_value >= variant[:value_min] and hash_value < variant[:value_max]
+      end
       matching_variant.nil? ? nil : matching_variant[:key]
     end
 
@@ -512,14 +576,14 @@ class PostHog
       variants = flag_filters[:multivariate] || {}
       multivariates = variants[:variants] || []
       multivariates.each do |variant|
-        value_max = value_min + variant[:rollout_percentage].to_f / 100
-        lookup_table << {'value_min': value_min, 'value_max': value_max, 'key': variant[:key]}
+        value_max = value_min + (variant[:rollout_percentage].to_f / 100)
+        lookup_table << { value_min: value_min, value_max: value_max, key: variant[:key] }
         value_min = value_max
       end
-      return lookup_table
+      lookup_table
     end
 
-    def _load_feature_flags()
+    def _load_feature_flags
       begin
         res = _request_feature_flag_definitions
       rescue StandardError => e
@@ -529,7 +593,10 @@ class PostHog
 
       # Handle quota limits with 402 status
       if res.is_a?(Hash) && res[:status] == 402
-        logger.warn "[FEATURE FLAGS] Feature flags quota limit exceeded - unsetting all local flags. Learn more about billing limits at https://posthog.com/docs/billing/limits-alerts"
+        logger.warn(
+          '[FEATURE FLAGS] Feature flags quota limit exceeded - unsetting all local flags. ' \
+          'Learn more about billing limits at https://posthog.com/docs/billing/limits-alerts'
+        )
         @feature_flags = Concurrent::Array.new
         @feature_flags_by_key = {}
         @group_type_mapping = Concurrent::Hash.new
@@ -538,22 +605,18 @@ class PostHog
         return
       end
 
-      if !res.key?(:flags)
-        logger.debug "Failed to load feature flags: #{res}"
-      else
+      if res.key?(:flags)
         @feature_flags = res[:flags] || []
         @feature_flags_by_key = {}
         @feature_flags.each do |flag|
-          if flag[:key] != nil
-            @feature_flags_by_key[flag[:key]] = flag
-          end
+          @feature_flags_by_key[flag[:key]] = flag unless flag[:key].nil?
         end
         @group_type_mapping = res[:group_type_mapping] || {}
 
         logger.debug "Loaded #{@feature_flags.length} feature flags"
-        if @loaded_flags_successfully_once.false?
-          @loaded_flags_successfully_once.make_true
-        end
+        @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
+      else
+        logger.debug "Failed to load feature flags: #{res}"
       end
     end
 
@@ -565,7 +628,7 @@ class PostHog
       _request(uri, req)
     end
 
-    def _request_feature_flag_evaluation(data={})
+    def _request_feature_flag_evaluation(data = {})
       uri = URI("#{@host}/flags/?v=2")
       req = Net::HTTP::Post.new(uri)
       req['Content-Type'] = 'application/json'
@@ -584,23 +647,29 @@ class PostHog
       _request(uri, req, @feature_flag_request_timeout_seconds)
     end
 
+    # rubocop:disable Lint/ShadowedException
     def _request(uri, request_object, timeout = nil)
       request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
       request_timeout = timeout || 10
 
       begin
-        Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https', :read_timeout => request_timeout) do |http|
+        Net::HTTP.start(
+          uri.hostname,
+          uri.port,
+          use_ssl: uri.scheme == 'https',
+          read_timeout: request_timeout
+        ) do |http|
           res = http.request(request_object)
-          
+
           # Parse response body to hash
           begin
-            response = JSON.parse(res.body, {symbolize_names: true})
+            response = JSON.parse(res.body, { symbolize_names: true })
             # Only add status if response is a hash
-            response = response.is_a?(Hash) ? response.merge({status: res.code.to_i}) : response
+            response = response.merge({ status: res.code.to_i }) if response.is_a?(Hash)
             return response
           rescue JSON::ParserError
             # Handle case when response isn't valid JSON
-            return {error: "Invalid JSON response", body: res.body, status: res.code.to_i}
+            return { error: 'Invalid JSON response', body: res.body, status: res.code.to_i }
           end
         end
       rescue Timeout::Error,
@@ -611,10 +680,11 @@ class PostHog
              Net::HTTPHeaderSyntaxError,
              Net::ReadTimeout,
              Net::WriteTimeout,
-             Net::ProtocolError => e
+             Net::ProtocolError
         logger.debug("Unable to complete request to #{uri}")
         raise
       end
     end
+    # rubocop:enable Lint/ShadowedException
   end
 end

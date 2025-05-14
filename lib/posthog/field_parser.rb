@@ -21,7 +21,7 @@ class PostHog
 
         if groups
           check_is_hash!(groups, 'groups')
-          properties["$groups"] = groups
+          properties['$groups'] = groups
         end
 
         isoify_dates! properties
@@ -55,7 +55,7 @@ class PostHog
           {
             type: 'identify',
             event: '$identify',
-            '$set': properties,
+            :'$set' => properties,
             properties: properties.merge(common[:properties] || {})
           }
         )
@@ -79,10 +79,10 @@ class PostHog
           {
             event: '$groupidentify',
             properties: {
-              "$group_type": group_type,
-              "$group_key": group_key,
-              "$group_set": properties.merge(common[:properties] || {})
-            },
+              :'$group_type' => group_type,
+              :'$group_key' => group_key,
+              :'$group_set' => properties.merge(common[:properties] || {})
+            }
           }
         )
       end
@@ -145,19 +145,17 @@ class PostHog
           active_feature_variants = {}
           feature_variants.each do |key, value|
             parsed[:properties]["$feature/#{key}"] = value
-            if value != false
-              active_feature_variants[key] = value
-            end
+            active_feature_variants[key] = value if value != false
           end
-          parsed[:properties]["$active_feature_flags"] = active_feature_variants.keys
+          parsed[:properties]['$active_feature_flags'] = active_feature_variants.keys
         end
         parsed
       end
 
       def check_timestamp!(timestamp)
-        unless timestamp.is_a? Time
-          raise ArgumentError, 'Timestamp must be a Time'
-        end
+        return if timestamp.is_a? Time
+
+        raise ArgumentError, 'Timestamp must be a Time'
       end
 
       # private: Ensures that a string is non-empty
@@ -165,9 +163,9 @@ class PostHog
       # obj    - String|Number that must be non-blank
       # name   - Name of the validated value
       def check_presence!(obj, name)
-        if obj.nil? || (obj.is_a?(String) && obj.empty?)
-          raise ArgumentError, "#{name} must be given"
-        end
+        return unless obj.nil? || (obj.is_a?(String) && obj.empty?)
+
+        raise ArgumentError, "#{name} must be given"
       end
 
       def check_is_hash!(obj, name)
