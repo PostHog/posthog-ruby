@@ -6,9 +6,10 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 
 ## Developing Locally
 
-1. Install Ruby (and optionally `rbenv` to control ruby versions)
-2. Install Bundler
-3. Run `bundle install` to install dependencies
+1. Install `asdf` to manage your Ruby version: `brew install asdf`
+1. Install Ruby's plugin via `asdf plugin add ruby https://github.com/asdf-vm/asdf-ruby.git`
+1. Make `asdf` install the required version by running `asdf install`
+1. Run `bundle install` to install dependencies
 
 ## Running example file
 

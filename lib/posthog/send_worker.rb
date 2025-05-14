@@ -52,7 +52,8 @@ class PostHog
 
     # public: Check whether we have outstanding requests.
     #
-    def is_requesting?
+    # TODO: Rename to `requesting?` in future version
+    def is_requesting? # rubocop:disable Naming/PredicateName
       @lock.synchronize { !@batch.empty? }
     end
 

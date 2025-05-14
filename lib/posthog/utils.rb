@@ -1,12 +1,11 @@
 require 'securerandom'
 
 class PostHog
-
   class InconclusiveMatchError < StandardError
   end
 
   module Utils
-    extend self
+    module_function
 
     # public: Return a new hash with keys converted from strings to symbols
     #
@@ -47,7 +46,8 @@ class PostHog
       arr = SecureRandom.random_bytes(16).unpack('NnnnnN')
       arr[2] = (arr[2] & 0x0fff) | 0x4000
       arr[3] = (arr[3] & 0x3fff) | 0x8000
-      '%08x-%04x-%04x-%04x-%04x%08x' % arr
+
+      '%08x-%04x-%04x-%04x-%04x%08x' % arr # rubocop:disable Style/FormatStringToken, Style/FormatString
     end
 
     def datetime_in_iso8601(datetime)
@@ -65,7 +65,7 @@ class PostHog
 
     def time_in_iso8601(time, fraction_digits = 3)
       fraction =
-        (('.%06i' % time.usec)[0, fraction_digits + 1] if fraction_digits > 0)
+        (('.%06i' % time.usec)[0, fraction_digits + 1] if fraction_digits > 0) # rubocop:disable Style/FormatString
 
       "#{time.strftime('%Y-%m-%dT%H:%M:%S')}#{fraction}#{formatted_offset(time, true, 'Z')}"
     end
@@ -75,44 +75,39 @@ class PostHog
     end
 
     def formatted_offset(time, colon = true, alternate_utc_string = nil)
-      time.utc? && alternate_utc_string ||
+      (time.utc? && alternate_utc_string) ||
         seconds_to_utc_offset(time.utc_offset, colon)
     end
 
     def seconds_to_utc_offset(seconds, colon = true)
-      (colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON) % [
-        (seconds < 0 ? '-' : '+'),
-        (seconds.abs / 3600),
-        ((seconds.abs % 3600) / 60)
-      ]
+      format((colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON), (seconds < 0 ? '-' : '+'),
+             seconds.abs / 3600, (seconds.abs % 3600) / 60)
     end
 
     def convert_to_datetime(value)
       if value.respond_to?(:strftime)
-        parsed_date = value
-        return parsed_date
+        value
+
       elsif value.respond_to?(:to_str)
         begin
-          parsed_date = DateTime.parse(value)
-          return parsed_date
-        rescue ArgumentError => e
-          raise InconclusiveMatchError.new("#{value} is not in a valid date format")
+          DateTime.parse(value)
+        rescue ArgumentError
+          raise InconclusiveMatchError, "#{value} is not in a valid date format"
         end
       else
-        raise InconclusiveMatchError.new("The date provided must be a string or date object")
+        raise InconclusiveMatchError, 'The date provided must be a string or date object'
       end
     end
 
-    UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
+    UTC_OFFSET_WITH_COLON = '%s%02d:%02d'.freeze
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
 
-    def is_valid_regex(regex)
-      begin
-        Regexp.new(regex)
-        return true
-      rescue RegexpError
-        return false
-      end
+    # TODO: Rename to `valid_regex?` in future version
+    def is_valid_regex(regex) # rubocop:disable Naming/PredicateName
+      Regexp.new(regex)
+      true
+    rescue RegexpError
+      false
     end
 
     class SizeLimitedHash < Hash
@@ -122,9 +117,7 @@ class PostHog
       end
 
       def []=(key, value)
-        if length >= @max_length
-          clear
-        end
+        clear if length >= @max_length
         super
       end
     end

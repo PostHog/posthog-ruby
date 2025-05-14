@@ -1,25 +1,24 @@
 class PostHog
   module Defaults
-
     MAX_HASH_SIZE = 50_000
 
     module Request
-      HOST = 'app.posthog.com'
+      HOST = 'app.posthog.com'.freeze
       PORT = 443
-      PATH = '/batch/'
+      PATH = '/batch/'.freeze
       SSL = true
       HEADERS = {
         'Accept' => 'application/json',
         'Content-Type' => 'application/json',
         'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
-      }
+      }.freeze
       RETRIES = 10
     end
 
     module FeatureFlags
       FLAG_REQUEST_TIMEOUT_SECONDS = 3
     end
-    
+
     module Queue
       MAX_SIZE = 10_000
     end
