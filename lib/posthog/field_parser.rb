@@ -1,7 +1,10 @@
+require 'posthog/logging'
+
 class PostHog
   class FieldParser
     class << self
       include PostHog::Utils
+      include PostHog::Logging
 
       # In addition to the common fields, capture accepts:
       #
@@ -26,10 +29,7 @@ class PostHog
 
         isoify_dates! properties
 
-        if uuid
-          check_is_uuid!(uuid)
-          common['uuid'] = uuid
-        end
+        common['uuid'] = uuid if uuid? uuid
 
         common.merge(
           {
@@ -160,8 +160,8 @@ class PostHog
 
       # private: Ensures that a string is non-empty
       #
-      # obj    - String|Number that must be non-blank
-      # name   - Name of the validated value
+      # obj    - String|Number that must be not blank
+      # name   - The name of the validated value
       def check_presence!(obj, name)
         return unless obj.nil? || (obj.is_a?(String) && obj.empty?)
 
@@ -172,10 +172,11 @@ class PostHog
         raise ArgumentError, "#{name} must be a Hash" unless obj.is_a? Hash
       end
 
-      def check_is_uuid!(uuid)
-        return if uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+      def uuid?(uuid)
+        is_valid_uuid = uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i) if uuid
+        logger.warn "UUID is not valid: #{uuid}. Ignoring it." unless is_valid_uuid
 
-        raise ArgumentError, 'uuid is not formated like a uuid'
+        is_valid_uuid
       end
     end
   end

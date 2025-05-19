@@ -7,6 +7,14 @@ class PostHog
 
   describe Client do
     let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
+    let(:logger) { instance_double(Logger) }
+
+    before do
+      allow(PostHog::Logging).to receive(:logger).and_return(logger)
+      allow(logger).to receive(:warn)
+      allow(logger).to receive(:info)
+      allow(logger).to receive(:debug)
+    end
 
     describe '#initialize' do
       it 'errors if no api_key is supplied' do
@@ -444,16 +452,19 @@ class PostHog
         expect(properties['uuid']).to be_nil
       end
 
-      it 'rejects likely invalid uuid' do
-        expect do
-          client.capture(
-            {
-              distinct_id: 'distinct_id',
-              event: 'test_event',
-              uuid: 'i am obviously not a uuid'
-            }
-          )
-        end.to raise_error(ArgumentError)
+      it 'does not use invalid uuid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: 'i am obviously not a uuid'
+          }
+        )
+        properties = client.dequeue_last_message[:properties]
+        expect(properties['uuid']).to be_nil
+        expect(logger).to have_received(:warn).with(
+          'UUID is not valid: i am obviously not a uuid. Ignoring it.'
+        )
       end
     end
 
