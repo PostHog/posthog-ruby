@@ -432,7 +432,7 @@ class PostHog
         expect(last_message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
       end
 
-      it 'generates uuid when not provided' do
+      it 'does not require a uuid be provided - ingestion will generate when absent' do
         client.capture(
           {
             distinct_id: 'distinct_id',
