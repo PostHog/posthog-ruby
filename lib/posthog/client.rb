@@ -350,7 +350,7 @@ class PostHog
     # @param [Object] action The event to be sent to PostHog
     # @return [null, Object, nil] The processed event or nil if the event should not be sent
     def process_before_send(action)
-      return if action.nil? || action.empty?
+      return action if action.nil? || action.empty?
       return action unless @before_send
 
       processed_action = @before_send.call(action)
