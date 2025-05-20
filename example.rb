@@ -3,7 +3,7 @@
 # PostHog Ruby library example
 
 # Import the library
-require 'posthog-ruby'
+require 'posthog'
 
 posthog = PostHog::Client.new(
   api_key: '', # You can find this key on the /setup page in PostHog
