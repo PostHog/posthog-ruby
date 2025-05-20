@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'securerandom'
 
 class PostHog
@@ -10,7 +12,7 @@ class PostHog
     # public: Return a new hash with keys converted from strings to symbols
     #
     def symbolize_keys(hash)
-      hash.each_with_object({}) { |(k, v), memo| memo[k.to_sym] = v }
+      hash.transform_keys(&:to_sym)
     end
 
     # public: Convert hash keys from strings to symbols in place
@@ -22,15 +24,15 @@ class PostHog
     # public: Return a new hash with keys as strings
     #
     def stringify_keys(hash)
-      hash.each_with_object({}) { |(k, v), memo| memo[k.to_s] = v }
+      hash.transform_keys(&:to_s)
     end
 
     # public: Returns a new hash with all the date values in the into iso8601
     #         strings
     #
     def isoify_dates(hash)
-      hash.each_with_object({}) do |(k, v), memo|
-        memo[k] = datetime_in_iso8601(v)
+      hash.transform_values do |v|
+        datetime_in_iso8601(v)
       end
     end
 
@@ -65,7 +67,7 @@ class PostHog
 
     def time_in_iso8601(time, fraction_digits = 3)
       fraction =
-        (('.%06i' % time.usec)[0, fraction_digits + 1] if fraction_digits > 0) # rubocop:disable Style/FormatString
+        (('.%06i' % time.usec)[0, fraction_digits + 1] if fraction_digits.positive?) # rubocop:disable Style/FormatString
 
       "#{time.strftime('%Y-%m-%dT%H:%M:%S')}#{fraction}#{formatted_offset(time, true, 'Z')}"
     end
@@ -80,7 +82,7 @@ class PostHog
     end
 
     def seconds_to_utc_offset(seconds, colon = true)
-      format((colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON), (seconds < 0 ? '-' : '+'),
+      format((colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON), (seconds.negative? ? '-' : '+'),
              seconds.abs / 3600, (seconds.abs % 3600) / 60)
     end
 
@@ -99,7 +101,7 @@ class PostHog
       end
     end
 
-    UTC_OFFSET_WITH_COLON = '%s%02d:%02d'.freeze
+    UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
 
     # TODO: Rename to `valid_regex?` in future version

@@ -1,3 +1,3 @@
-# rubocop:disable Naming/FileName
+# frozen_string_literal: true
+
 require 'posthog'
-# rubocop:enable Naming/FileName

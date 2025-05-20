@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'posthog'
 require 'active_support/all'
 require 'webmock/rspec'
@@ -11,7 +13,7 @@ end
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'
 
-API_KEY = 'testsecret'.freeze
+API_KEY = 'testsecret'
 
 CAPTURE = {
   event: 'Ruby Library test event',

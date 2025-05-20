@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 class PostHog
   class Response
     attr_reader :status, :error

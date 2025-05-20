@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'concurrent'
 require 'net/http'
 require 'json'
@@ -125,9 +127,9 @@ class PostHog
         # v3 format
         flags_response[:featureFlags] = flags_response[:featureFlags] || {}
         flags_response[:featureFlagPayloads] = flags_response[:featureFlagPayloads] || {}
-        flags_response[:flags] = flags_response[:featureFlags].map do |key, value|
+        flags_response[:flags] = flags_response[:featureFlags].to_h do |key, value|
           [key, FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
-        end.to_h
+        end
       end
       flags_response
     end
@@ -262,7 +264,7 @@ class PostHog
           end
 
           # Check if feature_flags are quota limited
-          if flags_and_payloads[:quotaLimited] && flags_and_payloads[:quotaLimited].include?('feature_flags')
+          if flags_and_payloads[:quotaLimited]&.include?('feature_flags')
             logger.warn '[FEATURE FLAGS] Quota limited for feature flags'
             flags = {}
             payloads = {}

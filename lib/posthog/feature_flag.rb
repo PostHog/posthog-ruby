@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 # Represents a feature flag returned by /flags v2
 class FeatureFlag
   attr_reader :key, :enabled, :variant, :reason, :metadata
@@ -17,7 +19,7 @@ class FeatureFlag
   end
 
   def payload
-    @metadata.payload if @metadata
+    @metadata&.payload
   end
 
   def self.from_value_and_payload(key, value, payload)
