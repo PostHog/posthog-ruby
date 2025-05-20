@@ -160,7 +160,7 @@ class PostHog
     end
 
     # TODO: In future version, rename to `feature_flag_enabled?`
-    def is_feature_enabled(# rubocop:disable Naming/PredicateName
+    def is_feature_enabled( # rubocop:disable Naming/PredicateName
       flag_key,
       distinct_id,
       groups: {},
