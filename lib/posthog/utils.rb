@@ -111,8 +111,8 @@ class PostHog
     end
 
     class SizeLimitedHash < Hash
-      def initialize(max_length, *args, &block)
-        super(*args, &block)
+      def initialize(max_length, ...)
+        super(...)
         @max_length = max_length
       end
 

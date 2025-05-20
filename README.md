@@ -4,6 +4,10 @@ Please see the main [PostHog docs](https://posthog.com/docs).
 
 Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-integration) details.
 
+Supports Ruby 3.0 and above
+
+version 2.10.0 of the SDK is the last version to support Ruby 2.x
+
 ## Developing Locally
 
 1. Install `asdf` to manage your Ruby version: `brew install asdf`

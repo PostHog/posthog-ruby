@@ -42,21 +42,21 @@ class PostHog
         # Verify the complete response structure
         expect(result[:config]).to eq(enable_collect_everything: true)
         expect(result[:featureFlags]).to include(
-          :'enabled-flag' => true,
-          :'group-flag' => true,
-          :'disabled-flag' => false,
-          :'multi-variate-flag' => 'hello',
-          :'simple-flag' => true,
-          :'beta-feature' => 'decide-fallback-value',
-          :'beta-feature2' => 'variant-2'
+          'enabled-flag': true,
+          'group-flag': true,
+          'disabled-flag': false,
+          'multi-variate-flag': 'hello',
+          'simple-flag': true,
+          'beta-feature': 'decide-fallback-value',
+          'beta-feature2': 'variant-2'
         )
         expect(result[:featureFlagPayloads]).to include(
-          :'enabled-flag' => '{"foo": 1}',
-          :'simple-flag' => '{"bar": 2}',
-          :'continuation-flag' => '{"foo": "bar"}',
-          :'beta-feature' => '{"foo": "bar"}',
-          :'test-get-feature' => 'this is a string',
-          :'multi-variate-flag' => 'this is the payload'
+          'enabled-flag': '{"foo": 1}',
+          'simple-flag': '{"bar": 2}',
+          'continuation-flag': '{"foo": "bar"}',
+          'beta-feature': '{"foo": "bar"}',
+          'test-get-feature': 'this is a string',
+          'multi-variate-flag': 'this is the payload'
         )
         expect(result[:status]).to eq(200)
         expect(result[:sessionRecording]).to be false

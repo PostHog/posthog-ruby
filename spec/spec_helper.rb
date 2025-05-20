@@ -82,14 +82,12 @@ module AsyncHelper
     interval = options[:interval] || 0.1
     time_limit = Time.now + timeout
     loop do
-      begin
-        yield
-        return
-      rescue RSpec::Expectations::ExpectationNotMetError => e
-        raise e if Time.now >= time_limit
+      yield
+      return
+    rescue RSpec::Expectations::ExpectationNotMetError => e
+      raise e if Time.now >= time_limit
 
-        sleep interval
-      end
+      sleep interval
     end
   end
 end

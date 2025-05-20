@@ -55,7 +55,7 @@ class PostHog
           {
             type: 'identify',
             event: '$identify',
-            :'$set' => properties,
+            '$set': properties,
             properties: properties.merge(common[:properties] || {})
           }
         )
@@ -79,9 +79,9 @@ class PostHog
           {
             event: '$groupidentify',
             properties: {
-              :'$group_type' => group_type,
-              :'$group_key' => group_key,
-              :'$group_set' => properties.merge(common[:properties] || {})
+              '$group_type': group_type,
+              '$group_key': group_key,
+              '$group_set': properties.merge(common[:properties] || {})
             }
           }
         )

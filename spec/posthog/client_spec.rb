@@ -112,7 +112,7 @@ class PostHog
       end
 
       it 'captures feature flags' do
-        flags_response = { featureFlags: { :'beta-feature' => 'random-variant' } }
+        flags_response = { featureFlags: { 'beta-feature': 'random-variant' } }
         # Mock response for flags
         api_feature_flag_res = {
           flags: [

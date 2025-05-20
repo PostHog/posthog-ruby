@@ -1,4 +1,3 @@
-require 'thread'
 require 'time'
 
 require 'posthog/defaults'
@@ -402,7 +401,7 @@ class PostHog
       if groups
         groups.each do |group_name, group_key|
           all_group_properties[group_name] = {
-            :'$group_key' => group_key
+            '$group_key': group_key
           }.merge((group_properties && group_properties[group_name]) || {})
         end
       end
