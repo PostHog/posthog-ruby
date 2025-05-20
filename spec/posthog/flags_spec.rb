@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'posthog/client'
 
-class PostHog
+module PostHog
   describe 'FeatureFlagsPoller#get_flags' do
     let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
     let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }

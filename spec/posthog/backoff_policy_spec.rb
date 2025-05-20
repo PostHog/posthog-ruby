@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe BackoffPolicy do
     describe '#initialize' do
       context 'no options are given' do

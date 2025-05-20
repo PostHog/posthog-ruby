@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe SendWorker do
     around do |example|
       PostHog::Transport.stub = true

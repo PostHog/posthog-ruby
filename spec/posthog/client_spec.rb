@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-class PostHog
+module PostHog
   flags_endpoint = 'https://app.posthog.com/flags/?v=2'
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil

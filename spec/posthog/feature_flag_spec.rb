@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'timecop'
 
-class PostHog
+module PostHog
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
   flags_endpoint = 'https://app.posthog.com/flags/?v=2'

@@ -9,7 +9,7 @@ require 'net/http'
 require 'net/https'
 require 'json'
 
-class PostHog
+module PostHog
   class Transport
     include PostHog::Defaults::Request
     include PostHog::Utils

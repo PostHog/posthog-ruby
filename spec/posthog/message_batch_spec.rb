@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe MessageBatch do
     subject { described_class.new(100) }
 

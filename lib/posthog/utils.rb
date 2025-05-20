@@ -2,7 +2,7 @@
 
 require 'securerandom'
 
-class PostHog
+module PostHog
   class InconclusiveMatchError < StandardError
   end
 

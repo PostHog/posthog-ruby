@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe Utils do
     it 'size limited dict works' do
       size = 10

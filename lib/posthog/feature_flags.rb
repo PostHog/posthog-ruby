@@ -8,7 +8,7 @@ require 'posthog/logging'
 require 'posthog/feature_flag'
 require 'digest'
 
-class PostHog
+module PostHog
   class InconclusiveMatchError < StandardError
   end
 

@@ -2,7 +2,7 @@
 
 require 'posthog/defaults'
 
-class PostHog
+module PostHog
   class BackoffPolicy
     include PostHog::Defaults::BackoffPolicy
 

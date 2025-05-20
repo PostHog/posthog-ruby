@@ -3,7 +3,7 @@
 require 'forwardable'
 require 'posthog/logging'
 
-class PostHog
+module PostHog
   # A batch of `Message`s to be sent to the API
   class MessageBatch
     class JSONGenerationError < StandardError

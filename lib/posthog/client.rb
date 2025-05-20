@@ -9,7 +9,7 @@ require 'posthog/send_worker'
 require 'posthog/noop_worker'
 require 'posthog/feature_flags'
 
-class PostHog
+module PostHog
   class Client
     include PostHog::Utils
     include PostHog::Logging

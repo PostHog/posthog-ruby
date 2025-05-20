@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class PostHog
+module PostHog
   module Defaults
     MAX_HASH_SIZE = 50_000
 

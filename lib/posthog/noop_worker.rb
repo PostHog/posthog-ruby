@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # A worker that doesn't consume jobs
-class PostHog
+module PostHog
   class NoopWorker
     def initialize(queue)
       @queue = queue

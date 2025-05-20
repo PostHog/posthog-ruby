@@ -2,7 +2,7 @@
 
 require 'posthog/logging'
 
-class PostHog
+module PostHog
   class FieldParser
     class << self
       include PostHog::Utils
