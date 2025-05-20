@@ -180,7 +180,7 @@ module PostHog
         return true if uuid.nil?
 
         unless uuid.is_a?(String)
-          logger.warn "UUID is not a string. Ignoring it."
+          logger.warn 'UUID is not a string. Ignoring it.'
           return false
         end
 
