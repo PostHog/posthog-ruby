@@ -470,6 +470,90 @@ class PostHog
       end
     end
 
+    describe '#before_send' do
+      it 'can edit events in before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |message|
+          message[:inserted] = true
+          message[:event] = 'edited_event'
+          message
+        })
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+        last_message = client.dequeue_last_message
+        expect(last_message[:event]).to eq('edited_event')
+        expect(last_message[:inserted]).to eq(true)
+      end
+
+      it 'can reject events in before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+        })
+
+        allow(logger).to receive(:warn)
+
+        # Spy on the queue's << operator
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+
+        expect(queue).not_to have_received(:<<)
+        expect(logger).to have_received(:warn).with('Event test_event was rejected in beforeSend function')
+      end
+
+      it 'warns when event is emptied by before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+          {}
+        })
+
+        allow(logger).to receive(:warn)
+
+        # Spy on the queue's << operator
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+
+        expect(queue).not_to have_received(:<<)
+        warning_message = 'Event test_event has no properties after beforeSend function, this is likely an error'
+        expect(logger).to have_received(:warn).with(warning_message)
+      end
+
+      it 'does not explode if before_send throws an error' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+          raise 'e by gum'
+        })
+
+        allow(logger).to receive(:error)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+
+        expect(logger).to have_received(:error).with('Error in beforeSend function - using original event: e by gum')
+
+        last_message = client.dequeue_last_message
+        expect(last_message[:event]).to eq('test_event')
+      end
+    end
+
     describe '#identify' do
       it 'errors without any user id' do
         expect { client.identify({}) }.to raise_error(ArgumentError)

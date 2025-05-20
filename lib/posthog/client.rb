@@ -27,6 +27,8 @@ class PostHog
     #   Measured in seconds, defaults to 30.
     # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation.
     #   Measured in seconds, defaults to 3.
+    # @option opts [Proc] :before_send A block that receives the event hash and should return either a modified hash
+    #   to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -60,6 +62,8 @@ class PostHog
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
         hash[key] = []
       end
+
+      @before_send = opts[:before_send]
     end
 
     # Synchronously waits until the worker has cleared the queue.
@@ -343,10 +347,36 @@ class PostHog
 
     private
 
+    # before_send should run immediately before the event is sent to the queue.
+    # @param [Object] action The event to be sent to PostHog
+    # @return [null, Object, nil] The processed event or nil if the event should not be sent
+    def process_before_send(action)
+      return action if action.nil? || action.empty?
+      return action unless @before_send
+
+      begin
+        processed_action = @before_send.call(action)
+
+        if processed_action.nil?
+          logger.warn("Event #{action[:event]} was rejected in beforeSend function")
+        elsif processed_action.empty?
+          logger.warn("Event #{action[:event]} has no properties after beforeSend function, this is likely an error")
+        end
+
+        processed_action
+      rescue StandardError => e
+        logger.error("Error in beforeSend function - using original event: #{e.message}")
+        action
+      end
+    end
+
     # private: Enqueues the action.
     #
     # returns Boolean of whether the item was added to the queue.
     def enqueue(action)
+      action = process_before_send(action)
+      return false if action.nil? || action.empty?
+
       # add our request id for tracing purposes
       action[:messageId] ||= uid
 
