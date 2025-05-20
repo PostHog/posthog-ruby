@@ -62,7 +62,7 @@ class PostHog
         hash[key] = []
       end
 
-      @before_send = (opts[:before_send] or nil)
+      @before_send = opts[:before_send]
     end
 
     # Synchronously waits until the worker has cleared the queue.
