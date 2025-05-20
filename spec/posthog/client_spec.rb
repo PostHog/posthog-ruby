@@ -480,7 +480,6 @@ class PostHog
           {
             distinct_id: 'distinct_id',
             event: 'test_event',
-            uuid: '123e4567-e89b-12d3-a456-426614174000'
           }
         )
         last_message = client.dequeue_last_message
@@ -503,12 +502,11 @@ class PostHog
           {
             distinct_id: 'distinct_id',
             event: 'test_event',
-            uuid: '123e4567-e89b-12d3-a456-426614174000'
           }
         )
 
         expect(queue).not_to have_received(:<<)
-        expect(logger).to have_received(:warn).with("Event test_event was rejected in beforeSend function")
+        expect(logger).to have_received(:warn).with('Event test_event was rejected in beforeSend function')
       end
 
       it 'warns when event is emptied by before_send' do
@@ -527,12 +525,31 @@ class PostHog
           {
             distinct_id: 'distinct_id',
             event: 'test_event',
-            uuid: '123e4567-e89b-12d3-a456-426614174000'
           }
         )
 
         expect(queue).not_to have_received(:<<)
-        expect(logger).to have_received(:warn).with("Event test_event has no properties after beforeSend function, this is likely an error")
+        expect(logger).to have_received(:warn).with('Event test_event has no properties after beforeSend function, this is likely an error')
+      end
+
+      it 'does not explode if before_send throws an error' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+          raise 'e by gum'
+        })
+
+        allow(logger).to receive(:error)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+          }
+        )
+
+        expect(logger).to have_received(:error).with('Error in beforeSend function - using original event: e by gum')
+
+        last_message = client.dequeue_last_message
+        expect(last_message[:event]).to eq('test_event')
       end
     end
 

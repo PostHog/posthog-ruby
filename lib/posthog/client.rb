@@ -353,15 +353,20 @@ class PostHog
       return action if action.nil? || action.empty?
       return action unless @before_send
 
-      processed_action = @before_send.call(action)
+      begin
+        processed_action = @before_send.call(action)
 
-      if processed_action.nil?
-        logger.warn("Event #{action[:event]} was rejected in beforeSend function")
-      elsif processed_action.empty?
-        logger.warn("Event #{action[:event]} has no properties after beforeSend function, this is likely an error")
+        if processed_action.nil?
+          logger.warn("Event #{action[:event]} was rejected in beforeSend function")
+        elsif processed_action.empty?
+          logger.warn("Event #{action[:event]} has no properties after beforeSend function, this is likely an error")
+        end
+
+        processed_action
+      rescue StandardError => e
+        logger.error("Error in beforeSend function - using original event: #{e.message}")
+        action
       end
-
-      processed_action
     end
 
     # private: Enqueues the action.
