@@ -4,11 +4,12 @@ Please see the main [PostHog docs](https://posthog.com/docs).
 
 Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-integration) details.
 
-Supports Ruby 3.2 and above
-
-We will lag behind but generally not support versions which are end-of-life as listed here https://www.ruby-lang.org/en/downloads/branches/ 
-
-All 2.x versions of the PostHog Ruby library are compatible with Ruby 2.0 and above if you need Ruby 2.0 support.
+> [!IMPORTANT]
+> Supports Ruby 3.2 and above
+>
+> We will lag behind but generally not support versions which are end-of-life as listed here https://www.ruby-lang.org/en/downloads/branches/
+>
+> All 2.x versions of the PostHog Ruby library are compatible with Ruby 2.0 and above if you need Ruby 2.0 support.
 
 ## Developing Locally
 
@@ -27,10 +28,6 @@ All 2.x versions of the PostHog Ruby library are compatible with Ruby 2.0 and ab
 
 1. Run `bin/test` (this ends up calling `bundle exec rspec`)
 2. An example of running specific tests: `bin/test spec/posthog/client_spec.rb:26`
-
-## Questions?
-
-### [Join our Slack community.](https://join.slack.com/t/posthogusers/shared_invite/enQtOTY0MzU5NjAwMDY3LTc2MWQ0OTZlNjhkODk3ZDI3NDVjMDE1YjgxY2I4ZjI4MzJhZmVmNjJkN2NmMGJmMzc2N2U3Yjc3ZjI5NGFlZDQ)
 
 ## How to release
 
