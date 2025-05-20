@@ -4356,7 +4356,7 @@ module PostHog
 
       # Add the exact stub for the `/flags` endpoint as recommended in the error
       stub_request(:post, 'https://app.posthog.com/flags/?v=2').with(
-        body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"distinct_id":"distinct_id","region":"USA"},"group_properties":{},"token":"testsecret"}', # rubocop:disable Metrics/LineLength
+        body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"distinct_id":"distinct_id","region":"USA"},"group_properties":{},"token":"testsecret"}', # rubocop:disable Layout/LineLength
         headers: {
           'Accept' => '*/*',
           'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
