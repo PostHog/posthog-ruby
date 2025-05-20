@@ -1,3 +1,7 @@
+## 2.11.0 – 2025-05-20
+
+1. feat: add before_send function ([#64](https://github.com/PostHog/posthog-ruby/pull/64))
+
 ## 2.10.0 – 2025-05-20
 
 1. chore: fix all rubocop errors ([#61](https://github.com/PostHog/posthog-ruby/pull/61))
