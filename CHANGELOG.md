@@ -1,3 +1,7 @@
+## 3.0.1 - 2025-05-20
+
+1. fix: was warning on absent UUID when capturing ([#67](https://github.com/PostHog/posthog-ruby/pull/67))
+
 ## 3.0.0 - 2025-05-20
 
 1. Drops support for Ruby 2.x ([#63](https://github.com/PostHog/posthog-ruby/pull/63)) 
