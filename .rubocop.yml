@@ -1,9 +1,54 @@
+inherit_from: .rubocop_todo.yml
+
 AllCops:
   NewCops: enable
   SuggestExtensions: false
 
 Style/Documentation:
   Enabled: false
+
+# Modern Ruby 3.0+ specific cops
+Style/HashTransformKeys:
+  Enabled: true
+
+Style/HashTransformValues:
+  Enabled: true
+
+Style/RedundantFreeze:
+  Enabled: true
+
+Style/RedundantSelf:
+  Enabled: true
+
+Style/RedundantReturn:
+  Enabled: true
+
+Style/RedundantCondition:
+  Enabled: true
+
+Style/RedundantAssignment:
+  Enabled: true
+
+Style/RedundantBegin:
+  Enabled: true
+
+Style/RedundantRegexpEscape:
+  Enabled: true
+
+Style/RedundantParentheses:
+  Enabled: true
+
+Style/RedundantInterpolation:
+  Enabled: true
+
+Style/RedundantFileExtensionInRequire:
+  Enabled: true
+
+Style/RedundantConditional:
+  Enabled: true
+
+Style/RedundantArgument:
+  Enabled: true
 
 # TODO: This should be removed in a future version
 Style/OptionalBooleanParameter:

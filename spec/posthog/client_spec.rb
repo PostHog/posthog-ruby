@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'spec_helper'
 
-class PostHog
+module PostHog
   flags_endpoint = 'https://app.posthog.com/flags/?v=2'
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
@@ -112,7 +114,7 @@ class PostHog
       end
 
       it 'captures feature flags' do
-        flags_response = { featureFlags: { :'beta-feature' => 'random-variant' } }
+        flags_response = { featureFlags: { 'beta-feature': 'random-variant' } }
         # Mock response for flags
         api_feature_flag_res = {
           flags: [

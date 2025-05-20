@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe Response do
     describe '#status' do
       it { expect(subject).to respond_to(:status) }

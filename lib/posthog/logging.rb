@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'logger'
 
-class PostHog
+module PostHog
   # Wraps an existing logger and adds a prefix to all messages
   class PrefixedLogger
     def initialize(logger, prefix)

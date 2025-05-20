@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'posthog'
 require 'active_support/all'
 require 'webmock/rspec'
@@ -11,7 +13,7 @@ end
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'
 
-API_KEY = 'testsecret'.freeze
+API_KEY = 'testsecret'
 
 CAPTURE = {
   event: 'Ruby Library test event',
@@ -82,14 +84,12 @@ module AsyncHelper
     interval = options[:interval] || 0.1
     time_limit = Time.now + timeout
     loop do
-      begin
-        yield
-        return
-      rescue RSpec::Expectations::ExpectationNotMetError => e
-        raise e if Time.now >= time_limit
+      yield
+      return
+    rescue RSpec::Expectations::ExpectationNotMetError => e
+      raise e if Time.now >= time_limit
 
-        sleep interval
-      end
+      sleep interval
     end
   end
 end

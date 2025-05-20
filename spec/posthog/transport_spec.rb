@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe Transport do
     before do
       # Try and keep debug statements out of tests

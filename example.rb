@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 # PostHog Ruby library example
 
 # Import the library

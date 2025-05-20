@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require File.expand_path('lib/posthog/version', __dir__)
 
 Gem::Specification.new do |spec|
@@ -13,7 +15,7 @@ Gem::Specification.new do |spec|
   spec.email = 'hey@posthog.com'
   spec.homepage = 'https://github.com/PostHog/posthog-ruby'
   spec.license = 'MIT'
-  spec.required_ruby_version = '>= 2.0'
+  spec.required_ruby_version = '>= 3.0'
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   spec.add_dependency 'concurrent-ruby', '~> 1'

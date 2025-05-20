@@ -1,4 +1,5 @@
-require 'thread'
+# frozen_string_literal: true
+
 require 'time'
 
 require 'posthog/defaults'
@@ -8,7 +9,7 @@ require 'posthog/send_worker'
 require 'posthog/noop_worker'
 require 'posthog/feature_flags'
 
-class PostHog
+module PostHog
   class Client
     include PostHog::Utils
     include PostHog::Logging
@@ -410,7 +411,7 @@ class PostHog
     end
 
     def worker_running?
-      @worker_thread && @worker_thread.alive?
+      @worker_thread&.alive?
     end
 
     def add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)
@@ -429,12 +430,10 @@ class PostHog
       all_person_properties = { distinct_id: distinct_id }.merge(person_properties)
 
       all_group_properties = {}
-      if groups
-        groups.each do |group_name, group_key|
-          all_group_properties[group_name] = {
-            :'$group_key' => group_key
-          }.merge((group_properties && group_properties[group_name]) || {})
-        end
+      groups&.each do |group_name, group_key|
+        all_group_properties[group_name] = {
+          '$group_key': group_key
+        }.merge((group_properties && group_properties[group_name]) || {})
       end
 
       [all_person_properties, all_group_properties]
