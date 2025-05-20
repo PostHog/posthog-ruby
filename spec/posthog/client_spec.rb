@@ -431,6 +431,8 @@ module PostHog
       end
 
       it 'captures uuid when provided' do
+        allow(logger).to receive(:warn)
+
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -440,9 +442,12 @@ module PostHog
         )
         last_message = client.dequeue_last_message
         expect(last_message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
+        expect(logger).not_to have_received(:warn)
       end
 
       it 'does not require a uuid be provided - ingestion will generate when absent' do
+        allow(logger).to receive(:warn)
+
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -452,6 +457,7 @@ module PostHog
         properties = client.dequeue_last_message[:properties]
         # ingestion will add a UUID if one is not provided
         expect(properties['uuid']).to be_nil
+        expect(logger).not_to have_received(:warn)
       end
 
       it 'does not use invalid uuid' do
@@ -466,6 +472,21 @@ module PostHog
         expect(properties['uuid']).to be_nil
         expect(logger).to have_received(:warn).with(
           'UUID is not valid: i am obviously not a uuid. Ignoring it.'
+        )
+      end
+
+      it 'does not use really invalid uuid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: { 'not a uuid' => 'not a uuid' }
+          }
+        )
+        properties = client.dequeue_last_message[:properties]
+        expect(properties['uuid']).to be_nil
+        expect(logger).to have_received(:warn).with(
+          'UUID is not a string. Ignoring it.'
         )
       end
     end
