@@ -1,3 +1,8 @@
+## 2.10.0 – 2025-05-20
+
+1. chore: fix all rubocop errors ([#61](https://github.com/PostHog/posthog-ruby/pull/61))
+2. fix: add UUID capture option to capture ([#58](https://github.com/PostHog/posthog-ruby/pull/58))
+
 ## 2.9.0 – 2025-04-30
 
 1. Use new `/flags` service to power feature flag evaluation.
