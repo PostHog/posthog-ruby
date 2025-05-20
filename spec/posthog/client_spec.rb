@@ -468,6 +468,74 @@ class PostHog
       end
     end
 
+    describe '#before_send' do
+      it 'can edit events in before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |message|
+          message[:inserted] = true
+          message[:event] = 'edited_event'
+          message
+        })
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: '123e4567-e89b-12d3-a456-426614174000'
+          }
+        )
+        last_message = client.dequeue_last_message
+        expect(last_message[:event]).to eq('edited_event')
+        expect(last_message[:inserted]).to eq(true)
+      end
+
+      it 'can reject events in before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+        })
+
+        allow(logger).to receive(:warn)
+
+        # Spy on the queue's << operator
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
+
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: '123e4567-e89b-12d3-a456-426614174000'
+          }
+        )
+
+        expect(queue).not_to have_received(:<<)
+        expect(logger).to have_received(:warn).with("Event test_event was rejected in beforeSend function")
+      end
+
+      it 'warns when event is emptied by before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+          {}
+        })
+
+        allow(logger).to receive(:warn)
+
+        # Spy on the queue's << operator
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
+
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: '123e4567-e89b-12d3-a456-426614174000'
+          }
+        )
+
+        expect(queue).not_to have_received(:<<)
+        expect(logger).to have_received(:warn).with("Event test_event has no properties after beforeSend function, this is likely an error")
+      end
+    end
+
     describe '#identify' do
       it 'errors without any user id' do
         expect { client.identify({}) }.to raise_error(ArgumentError)
