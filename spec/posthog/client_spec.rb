@@ -479,7 +479,7 @@ class PostHog
         client.capture(
           {
             distinct_id: 'distinct_id',
-            event: 'test_event',
+            event: 'test_event'
           }
         )
         last_message = client.dequeue_last_message
@@ -497,11 +497,10 @@ class PostHog
         queue = client.instance_variable_get(:@queue)
         allow(queue).to receive(:<<)
 
-
         client.capture(
           {
             distinct_id: 'distinct_id',
-            event: 'test_event',
+            event: 'test_event'
           }
         )
 
@@ -520,16 +519,16 @@ class PostHog
         queue = client.instance_variable_get(:@queue)
         allow(queue).to receive(:<<)
 
-
         client.capture(
           {
             distinct_id: 'distinct_id',
-            event: 'test_event',
+            event: 'test_event'
           }
         )
 
         expect(queue).not_to have_received(:<<)
-        expect(logger).to have_received(:warn).with('Event test_event has no properties after beforeSend function, this is likely an error')
+        warning_message = 'Event test_event has no properties after beforeSend function, this is likely an error'
+        expect(logger).to have_received(:warn).with(warning_message)
       end
 
       it 'does not explode if before_send throws an error' do
@@ -542,7 +541,7 @@ class PostHog
         client.capture(
           {
             distinct_id: 'distinct_id',
-            event: 'test_event',
+            event: 'test_event'
           }
         )
 

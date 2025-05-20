@@ -387,8 +387,8 @@ class PostHog
       else
         logger.warn(
           'Queue is full, dropping events. The :max_queue_size ' \
-            'configuration parameter can be increased to prevent this from ' \
-            'happening.'
+          'configuration parameter can be increased to prevent this from ' \
+          'happening.'
         )
         false
       end
