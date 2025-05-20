@@ -4,7 +4,9 @@ Please see the main [PostHog docs](https://posthog.com/docs).
 
 Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-integration) details.
 
-Supports Ruby 3.0 and above
+Supports Ruby 3.2 and above
+
+We will lag behind but generally not support versions which are end-of-life as listed here https://www.ruby-lang.org/en/downloads/branches/ 
 
 version 2.10.0 of the SDK is the last version to support Ruby 2.x
 
