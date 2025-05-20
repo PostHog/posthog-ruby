@@ -116,7 +116,7 @@ class PostHog
       if flags_response[:flags]
         # v4 format
         flags_hash = flags_response[:flags].transform_values do |flag|
-          FeatureFlag.new(flag)
+          PostHog::FeatureFlag.new(flag)
         end
         flags_response[:flags] = flags_hash
         flags_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
@@ -126,7 +126,7 @@ class PostHog
         flags_response[:featureFlags] = flags_response[:featureFlags] || {}
         flags_response[:featureFlagPayloads] = flags_response[:featureFlagPayloads] || {}
         flags_response[:flags] = flags_response[:featureFlags].map do |key, value|
-          [key, FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
+          [key, PostHog::FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
         end.to_h
       end
       flags_response

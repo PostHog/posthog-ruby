@@ -96,7 +96,7 @@ class PostHog
 
       enabled_flag = result[:flags][:'enabled-flag']
       expect(enabled_flag).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: :'enabled-flag',
         enabled: true,
         variant: nil,
@@ -108,7 +108,7 @@ class PostHog
 
       multi_variate_flag = result[:flags][:'multi-variate-flag']
       expect(multi_variate_flag).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: :'multi-variate-flag',
         enabled: true,
         variant: 'hello',
@@ -120,7 +120,7 @@ class PostHog
 
       disabled_flag = result[:flags][:'disabled-flag']
       expect(disabled_flag).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: :'disabled-flag',
         enabled: false,
         variant: nil,
@@ -155,12 +155,12 @@ class PostHog
       enabled_flag = result[:flags][:'enabled-flag']
 
       expect(enabled_flag).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: 'enabled-flag',
         enabled: true,
         variant: nil,
         reason: have_attributes(
-          class: EvaluationReason,
+          class: PostHog::EvaluationReason,
           code: 'condition_match',
           description: 'Matched conditions set 3',
           condition_index: 2
@@ -175,12 +175,12 @@ class PostHog
 
       multi_variate_flag = result[:flags][:'multi-variate-flag']
       expect(multi_variate_flag).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: 'multi-variate-flag',
         enabled: true,
         variant: 'hello',
         reason: have_attributes(
-          class: EvaluationReason,
+          class: PostHog::EvaluationReason,
           code: 'condition_match',
           description: 'Matched conditions set 2',
           condition_index: 1
@@ -194,12 +194,12 @@ class PostHog
 
       disabled_flag = result[:flags][:'disabled-flag']
       expect(disabled_flag).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: 'disabled-flag',
         enabled: false,
         variant: nil,
         reason: have_attributes(
-          class: EvaluationReason,
+          class: PostHog::EvaluationReason,
           code: 'no_condition_match',
           description: 'No matching condition set',
           condition_index: nil
@@ -267,7 +267,7 @@ class PostHog
     end
   end
 
-  describe FeatureFlag do
+  describe PostHog::FeatureFlag do
     let(:decide_v4_response) do
       JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true)
     end
@@ -275,15 +275,15 @@ class PostHog
     it 'transforms v4 response flags into hash of FeatureFlag instances' do
       json = decide_v4_response[:flags][:'enabled-flag']
 
-      result = FeatureFlag.new(json)
+      result = PostHog::FeatureFlag.new(json)
 
       expect(result).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: 'enabled-flag',
         enabled: true,
         variant: nil,
         reason: have_attributes(
-          class: EvaluationReason,
+          class: PostHog::EvaluationReason,
           code: 'condition_match',
           description: 'Matched conditions set 3'
         )
@@ -291,7 +291,7 @@ class PostHog
     end
 
     it 'transforms a hash into a FeatureFlag instance' do
-      result = FeatureFlag.new({
+      result = PostHog::FeatureFlag.new({
                                  'key' => 'enabled-flag',
                                  'enabled' => true,
                                  'variant' => nil,
@@ -309,18 +309,18 @@ class PostHog
                                })
 
       expect(result).to have_attributes(
-        class: FeatureFlag,
+        class: PostHog::FeatureFlag,
         key: 'enabled-flag',
         enabled: true,
         variant: nil,
         reason: have_attributes(
-          class: EvaluationReason,
+          class: PostHog::EvaluationReason,
           code: 'condition_match',
           description: 'Matched conditions set 3',
           condition_index: 2
         ),
         metadata: have_attributes(
-          class: FeatureFlagMetadata,
+          class: PostHog::FeatureFlagMetadata,
           id: 1,
           version: 23,
           payload: '{"foo": 1}',
