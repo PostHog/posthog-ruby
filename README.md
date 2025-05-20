@@ -8,7 +8,7 @@ Supports Ruby 3.2 and above
 
 We will lag behind but generally not support versions which are end-of-life as listed here https://www.ruby-lang.org/en/downloads/branches/ 
 
-version 2.10.0 of the SDK is the last version to support Ruby 2.x
+All 2.x versions of the PostHog Ruby library are compatible with Ruby 2.0 and above if you need Ruby 2.0 support.
 
 ## Developing Locally
 
