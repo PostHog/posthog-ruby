@@ -236,7 +236,7 @@ module PostHog
 
           it 'has a connection error' do
             error = subject.send(api_key, batch).error
-            expect(error).to match(/Malformed JSON/)
+            expect(error).to match(/unexpected character.*Malformed/)
           end
 
           it_behaves_like('retried request', 200, 'Malformed JSON ---')
