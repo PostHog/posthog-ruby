@@ -540,7 +540,7 @@ module PostHog
           # Skip flag dependencies as they are not supported in local evaluation
           if prop[:type] == 'flag'
             logger.warn(
-              "[FEATURE FLAGS] Flag dependency filters are not supported in local evaluation. " \
+              '[FEATURE FLAGS] Flag dependency filters are not supported in local evaluation. ' \
               "Skipping condition for flag '#{flag[:key]}' with dependency on flag '#{prop[:key]}'"
             )
             next true

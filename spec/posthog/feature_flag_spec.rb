@@ -4439,7 +4439,9 @@ module PostHog
 
       # Verify warning was logged
       expect(log_output.string).to include('Flag dependency filters are not supported in local evaluation')
-      expect(log_output.string).to include("Skipping condition for flag 'dependent-flag' with dependency on flag 'parent-flag'")
+      expect(log_output.string).to include(
+        "Skipping condition for flag 'dependent-flag' with dependency on flag 'parent-flag'"
+      )
 
       assert_not_requested :post, flags_endpoint
     end
