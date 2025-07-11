@@ -4383,5 +4383,67 @@ module PostHog
       # After quota limit, flag should return false (cleared)
       expect(c.get_feature_flag('person-flag', 'distinct_id', person_properties: { region: 'USA' })).to eq(false)
     end
+
+    it 'handles flag dependencies gracefully' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Flag with dependency',
+            'key' => 'dependent-flag',
+            'is_simple_flag' => false,
+            'active' => true,
+            'filters' => {
+              'groups' => [
+                {
+                  'properties' => [
+                    {
+                      'key' => 'parent-flag',
+                      'type' => 'flag',
+                      'value' => true
+                    },
+                    {
+                      'key' => 'region',
+                      'operator' => 'exact',
+                      'value' => ['USA'],
+                      'type' => 'person'
+                    }
+                  ],
+                  'rollout_percentage' => 100
+                }
+              ]
+            }
+          }
+        ]
+      }
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      # Shouldn't call /flags since the property should match
+      stub_request(:post, flags_endpoint)
+        .to_return(status: 400)
+
+      # Capture log output to verify warning
+      log_output = StringIO.new
+      logger = Logger.new(log_output)
+      allow(PostHog::Logging).to receive(:logger).and_return(PostHog::PrefixedLogger.new(logger, '[posthog-ruby]'))
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      # Should return true since flag dependency is skipped and region matches
+      expect(c.get_feature_flag('dependent-flag', 'some-distinct-id',
+                                person_properties: { 'region' => 'USA' })).to eq(true)
+
+      # Verify warning was logged
+      expect(log_output.string).to include('Flag dependency filters are not supported in local evaluation')
+      expect(log_output.string).to include(
+        "Skipping condition for flag 'dependent-flag' with dependency on flag 'parent-flag'"
+      )
+
+      assert_not_requested :post, flags_endpoint
+    end
   end
 end
