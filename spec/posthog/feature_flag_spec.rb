@@ -4426,12 +4426,12 @@ module PostHog
       stub_request(:post, flags_endpoint)
         .to_return(status: 400)
 
-      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
-
       # Capture log output to verify warning
       log_output = StringIO.new
       logger = Logger.new(log_output)
-      allow(c).to receive(:logger).and_return(logger)
+      allow(PostHog::Logging).to receive(:logger).and_return(PostHog::PrefixedLogger.new(logger, '[posthog-ruby]'))
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
       # Should return true since flag dependency is skipped and region matches
       expect(c.get_feature_flag('dependent-flag', 'some-distinct-id',
