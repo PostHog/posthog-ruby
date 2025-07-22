@@ -466,6 +466,103 @@ class PostHog
           'UUID is not valid: i am obviously not a uuid. Ignoring it.'
         )
       end
+
+      it 'captures feature flags with hash options' do
+        flags_response = { featureFlags: { :'beta-feature' => 'hash-variant' } }
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              is_simple_flag: false,
+              rollout_percentage: 100
+            }
+          ]
+        }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: flags_response.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: {
+              person_properties: { plan: 'premium' },
+              group_properties: { company: { industry: 'tech' } }
+            }
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/beta-feature']).to eq(false)
+        expect(properties['$active_feature_flags']).to eq([])
+      end
+
+      it 'captures feature flags with SendFeatureFlagsOptions object' do
+        flags_response = { featureFlags: { :'beta-feature' => 'object-variant' } }
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              is_simple_flag: false,
+              rollout_percentage: 100
+            }
+          ]
+        }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: flags_response.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        options = PostHog::SendFeatureFlagsOptions.new(
+          person_properties: { plan: 'enterprise' },
+          group_properties: { company: { size: 'large' } }
+        )
+
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: options
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/beta-feature']).to eq(false)
+        expect(properties['$active_feature_flags']).to eq([])
+      end
+
+      it 'ignores feature flags with invalid send_feature_flags parameter' do
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: { flags: [] }.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: 'invalid_string'
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/beta-feature']).to be_nil
+        expect(properties['$active_feature_flags']).to be_nil
+      end
     end
 
     describe '#identify' do
