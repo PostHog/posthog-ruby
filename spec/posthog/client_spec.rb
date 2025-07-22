@@ -570,6 +570,8 @@ module PostHog
         properties = c.dequeue_last_message[:properties]
         expect(properties['$feature/beta-feature']).to be_nil
         expect(properties['$active_feature_flags']).to be_nil
+      end
+      
       it 'does not use really invalid uuid' do
         client.capture(
           {
