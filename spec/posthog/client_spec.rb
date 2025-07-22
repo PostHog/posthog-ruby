@@ -476,7 +476,7 @@ module PostHog
       end
 
       it 'captures feature flags with hash options' do
-        flags_response = { featureFlags: { :'beta-feature' => 'hash-variant' } }
+        flags_response = { featureFlags: { 'beta-feature': 'hash-variant' } }
         api_feature_flag_res = {
           flags: [
             {
@@ -514,7 +514,7 @@ module PostHog
       end
 
       it 'captures feature flags with SendFeatureFlagsOptions object' do
-        flags_response = { featureFlags: { :'beta-feature' => 'object-variant' } }
+        flags_response = { featureFlags: { 'beta-feature': 'object-variant' } }
         api_feature_flag_res = {
           flags: [
             {
@@ -571,7 +571,6 @@ module PostHog
         expect(properties['$feature/beta-feature']).to be_nil
         expect(properties['$active_feature_flags']).to be_nil
       end
-      
       it 'does not use really invalid uuid' do
         client.capture(
           {

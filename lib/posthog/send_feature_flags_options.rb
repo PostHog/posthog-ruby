@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module PostHog
   # Options for configuring feature flag behavior in capture calls
   class SendFeatureFlagsOptions

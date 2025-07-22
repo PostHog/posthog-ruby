@@ -97,8 +97,8 @@ module PostHog
     #
     # @option attrs [String] :event Event name
     # @option attrs [Hash] :properties Event properties (optional)
-    # @option attrs [Bool, Hash, SendFeatureFlagsOptions] :send_feature_flags Whether to send feature flags with this event,
-    #                                                                       or configuration for feature flag evaluation (optional)
+    # @option attrs [Bool, Hash, SendFeatureFlagsOptions] :send_feature_flags
+    #   Whether to send feature flags with this event, or configuration for feature flag evaluation (optional)
     # @option attrs [String] :uuid ID that uniquely identifies an event;
     #                             events in PostHog are deduplicated by the
     #                             combination of teamId, timestamp date,
