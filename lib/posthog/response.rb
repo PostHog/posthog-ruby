@@ -1,4 +1,6 @@
-class PostHog
+# frozen_string_literal: true
+
+module PostHog
   class Response
     attr_reader :status, :error
 

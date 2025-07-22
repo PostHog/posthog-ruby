@@ -1,3 +1,26 @@
+## 3.0.1 - 2025-05-20
+
+1. fix: was warning on absent UUID when capturing ([#67](https://github.com/PostHog/posthog-ruby/pull/67))
+
+## 3.0.0 - 2025-05-20
+
+1. Drops support for Ruby 2.x ([#63](https://github.com/PostHog/posthog-ruby/pull/63)) 
+
+Version 3.0 of the Ruby SDK drops support for Ruby 2.x. The minimum supported version is now Ruby 3.2.
+
+In previous version `FeatureFlags` was added as a top-level class and was causing conflicts for other folk's applications. 
+
+In this change we have properly namespaced all classes within a `PostHog` module. See [#60](https://github.com/PostHog/posthog-ruby/issues/60)
+
+## 2.11.0 – 2025-05-20
+
+1. feat: add before_send function ([#64](https://github.com/PostHog/posthog-ruby/pull/64))
+
+## 2.10.0 – 2025-05-20
+
+1. chore: fix all rubocop errors ([#61](https://github.com/PostHog/posthog-ruby/pull/61))
+2. fix: add UUID capture option to capture ([#58](https://github.com/PostHog/posthog-ruby/pull/58))
+
 ## 2.9.0 – 2025-04-30
 
 1. Use new `/flags` service to power feature flag evaluation.

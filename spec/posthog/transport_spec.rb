@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'spec_helper'
 
-class PostHog
+module PostHog
   describe Transport do
     before do
       # Try and keep debug statements out of tests
@@ -234,7 +236,7 @@ class PostHog
 
           it 'has a connection error' do
             error = subject.send(api_key, batch).error
-            expect(error).to match(/Malformed JSON/)
+            expect(error).to match(/unexpected character.*Malformed/)
           end
 
           it_behaves_like('retried request', 200, 'Malformed JSON ---')

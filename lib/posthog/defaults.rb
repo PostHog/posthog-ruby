@@ -1,11 +1,13 @@
-class PostHog
+# frozen_string_literal: true
+
+module PostHog
   module Defaults
     MAX_HASH_SIZE = 50_000
 
     module Request
-      HOST = 'app.posthog.com'.freeze
+      HOST = 'app.posthog.com'
       PORT = 443
-      PATH = '/batch/'.freeze
+      PATH = '/batch/'
       SSL = true
       HEADERS = {
         'Accept' => 'application/json',

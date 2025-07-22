@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'concurrent'
 require 'net/http'
 require 'json'
@@ -6,7 +8,7 @@ require 'posthog/logging'
 require 'posthog/feature_flag'
 require 'digest'
 
-class PostHog
+module PostHog
   class InconclusiveMatchError < StandardError
   end
 
@@ -125,9 +127,9 @@ class PostHog
         # v3 format
         flags_response[:featureFlags] = flags_response[:featureFlags] || {}
         flags_response[:featureFlagPayloads] = flags_response[:featureFlagPayloads] || {}
-        flags_response[:flags] = flags_response[:featureFlags].map do |key, value|
+        flags_response[:flags] = flags_response[:featureFlags].to_h do |key, value|
           [key, FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
-        end.to_h
+        end
       end
       flags_response
     end
@@ -242,17 +244,15 @@ class PostHog
       request_id = nil # Only for /flags requests
 
       @feature_flags.each do |flag|
-        begin
-          match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
-          flags[flag[:key]] = match_value
-          match_payload = _compute_flag_payload_locally(flag[:key], match_value)
-          payloads[flag[:key]] = match_payload if match_payload
-        rescue InconclusiveMatchError
-          fallback_to_server = true
-        rescue StandardError => e
-          @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")} ")
-          fallback_to_server = true
-        end
+        match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+        flags[flag[:key]] = match_value
+        match_payload = _compute_flag_payload_locally(flag[:key], match_value)
+        payloads[flag[:key]] = match_payload if match_payload
+      rescue InconclusiveMatchError
+        fallback_to_server = true
+      rescue StandardError => e
+        @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")} ")
+        fallback_to_server = true
       end
 
       if fallback_to_server && !only_evaluate_locally
@@ -264,7 +264,7 @@ class PostHog
           end
 
           # Check if feature_flags are quota limited
-          if flags_and_payloads[:quotaLimited] && flags_and_payloads[:quotaLimited].include?('feature_flags')
+          if flags_and_payloads[:quotaLimited]&.include?('feature_flags')
             logger.warn '[FEATURE FLAGS] Quota limited for feature flags'
             flags = {}
             payloads = {}
@@ -505,22 +505,20 @@ class PostHog
       # NOTE: This NEEDS to be `each` because `each_key` breaks
       # This is not a hash, it's just an array with 2 entries
       sorted_flag_conditions.each do |condition, _idx| # rubocop:disable Style/HashEachMethods
-        begin
-          if is_condition_match(flag, distinct_id, condition, properties)
-            variant_override = condition[:variant]
-            flag_multivariate = flag_filters[:multivariate] || {}
-            flag_variants = flag_multivariate[:variants] || []
-            variant = if flag_variants.map { |variant| variant[:key] }.include?(condition[:variant])
-                        variant_override
-                      else
-                        get_matching_variant(flag, distinct_id)
-                      end
-            result = variant || true
-            break
-          end
-        rescue InconclusiveMatchError
-          is_inconclusive = true
+        if is_condition_match(flag, distinct_id, condition, properties)
+          variant_override = condition[:variant]
+          flag_multivariate = flag_filters[:multivariate] || {}
+          flag_variants = flag_multivariate[:variants] || []
+          variant = if flag_variants.map { |variant| variant[:key] }.include?(condition[:variant])
+                      variant_override
+                    else
+                      get_matching_variant(flag, distinct_id)
+                    end
+          result = variant || true
+          break
         end
+      rescue InconclusiveMatchError
+        is_inconclusive = true
       end
 
       if !result.nil?
@@ -539,6 +537,14 @@ class PostHog
 
       unless (condition[:properties] || []).empty?
         if !condition[:properties].all? do |prop|
+          # Skip flag dependencies as they are not supported in local evaluation
+          if prop[:type] == 'flag'
+            logger.warn(
+              '[FEATURE FLAGS] Flag dependency filters are not supported in local evaluation. ' \
+              "Skipping condition for flag '#{flag[:key]}' with dependency on flag '#{prop[:key]}'"
+            )
+            next true
+          end
           FeatureFlagsPoller.match_property(prop, properties)
         end
           return false

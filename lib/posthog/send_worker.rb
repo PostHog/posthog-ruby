@@ -1,9 +1,11 @@
+# frozen_string_literal: true
+
 require 'posthog/defaults'
 require 'posthog/message_batch'
 require 'posthog/transport'
 require 'posthog/utils'
 
-class PostHog
+module PostHog
   class SendWorker
     include PostHog::Utils
     include PostHog::Defaults

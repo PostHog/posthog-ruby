@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'spec_helper'
 
-class PostHog
+module PostHog
   flags_endpoint = 'https://app.posthog.com/flags/?v=2'
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
@@ -112,7 +114,7 @@ class PostHog
       end
 
       it 'captures feature flags' do
-        flags_response = { featureFlags: { :'beta-feature' => 'random-variant' } }
+        flags_response = { featureFlags: { 'beta-feature': 'random-variant' } }
         # Mock response for flags
         api_feature_flag_res = {
           flags: [
@@ -429,6 +431,8 @@ class PostHog
       end
 
       it 'captures uuid when provided' do
+        allow(logger).to receive(:warn)
+
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -438,9 +442,12 @@ class PostHog
         )
         last_message = client.dequeue_last_message
         expect(last_message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
+        expect(logger).not_to have_received(:warn)
       end
 
       it 'does not require a uuid be provided - ingestion will generate when absent' do
+        allow(logger).to receive(:warn)
+
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -450,6 +457,7 @@ class PostHog
         properties = client.dequeue_last_message[:properties]
         # ingestion will add a UUID if one is not provided
         expect(properties['uuid']).to be_nil
+        expect(logger).not_to have_received(:warn)
       end
 
       it 'does not use invalid uuid' do
@@ -562,6 +570,103 @@ class PostHog
         properties = c.dequeue_last_message[:properties]
         expect(properties['$feature/beta-feature']).to be_nil
         expect(properties['$active_feature_flags']).to be_nil
+      it 'does not use really invalid uuid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: { 'not a uuid' => 'not a uuid' }
+          }
+        )
+        properties = client.dequeue_last_message[:properties]
+        expect(properties['uuid']).to be_nil
+        expect(logger).to have_received(:warn).with(
+          'UUID is not a string. Ignoring it.'
+        )
+      end
+    end
+
+    describe '#before_send' do
+      it 'can edit events in before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |message|
+          message[:inserted] = true
+          message[:event] = 'edited_event'
+          message
+        })
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+        last_message = client.dequeue_last_message
+        expect(last_message[:event]).to eq('edited_event')
+        expect(last_message[:inserted]).to eq(true)
+      end
+
+      it 'can reject events in before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+        })
+
+        allow(logger).to receive(:warn)
+
+        # Spy on the queue's << operator
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+
+        expect(queue).not_to have_received(:<<)
+        expect(logger).to have_received(:warn).with('Event test_event was rejected in beforeSend function')
+      end
+
+      it 'warns when event is emptied by before_send' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+          {}
+        })
+
+        allow(logger).to receive(:warn)
+
+        # Spy on the queue's << operator
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+
+        expect(queue).not_to have_received(:<<)
+        warning_message = 'Event test_event has no properties after beforeSend function, this is likely an error'
+        expect(logger).to have_received(:warn).with(warning_message)
+      end
+
+      it 'does not explode if before_send throws an error' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+          raise 'e by gum'
+        })
+
+        allow(logger).to receive(:error)
+
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event'
+          }
+        )
+
+        expect(logger).to have_received(:error).with('Error in beforeSend function - using original event: e by gum')
+
+        last_message = client.dequeue_last_message
+        expect(last_message[:event]).to eq('test_event')
       end
     end
 

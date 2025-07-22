@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'posthog/defaults'
 require 'posthog/utils'
 require 'posthog/response'
@@ -7,7 +9,7 @@ require 'net/http'
 require 'net/https'
 require 'json'
 
-class PostHog
+module PostHog
   class Transport
     include PostHog::Defaults::Request
     include PostHog::Utils

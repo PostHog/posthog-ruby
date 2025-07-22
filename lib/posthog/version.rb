@@ -1,3 +1,5 @@
-class PostHog
-  VERSION = '2.10.0'.freeze
+# frozen_string_literal: true
+
+module PostHog
+  VERSION = '3.1.0'.freeze
 end

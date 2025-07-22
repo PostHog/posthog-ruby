@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'posthog/logging'
 
-class PostHog
+module PostHog
   class FieldParser
     class << self
       include PostHog::Utils
@@ -29,7 +31,7 @@ class PostHog
 
         isoify_dates! properties
 
-        common['uuid'] = uuid if uuid? uuid
+        common['uuid'] = uuid if valid_uuid_for_event_props? uuid
 
         common.merge(
           {
@@ -55,7 +57,7 @@ class PostHog
           {
             type: 'identify',
             event: '$identify',
-            :'$set' => properties,
+            '$set': properties,
             properties: properties.merge(common[:properties] || {})
           }
         )
@@ -79,9 +81,9 @@ class PostHog
           {
             event: '$groupidentify',
             properties: {
-              :'$group_type' => group_type,
-              :'$group_key' => group_key,
-              :'$group_set' => properties.merge(common[:properties] || {})
+              '$group_type': group_type,
+              '$group_key': group_key,
+              '$group_set': properties.merge(common[:properties] || {})
             }
           }
         )
@@ -172,8 +174,17 @@ class PostHog
         raise ArgumentError, "#{name} must be a Hash" unless obj.is_a? Hash
       end
 
-      def uuid?(uuid)
-        is_valid_uuid = uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i) if uuid
+      # @param [Object] uuid - the UUID to validate, user provided, so we don't know the type
+      # @return [TrueClass, FalseClass] - true if the UUID is valid or absent, false otherwise
+      def valid_uuid_for_event_props?(uuid)
+        return true if uuid.nil?
+
+        unless uuid.is_a?(String)
+          logger.warn 'UUID is not a string. Ignoring it.'
+          return false
+        end
+
+        is_valid_uuid = uuid.match?(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         logger.warn "UUID is not valid: #{uuid}. Ignoring it." unless is_valid_uuid
 
         is_valid_uuid
