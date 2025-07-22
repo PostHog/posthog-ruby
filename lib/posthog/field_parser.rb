@@ -142,7 +142,7 @@ module PostHog
           }
         }
 
-        if send_feature_flags
+        if send_feature_flags && fields[:feature_variants]
           feature_variants = fields[:feature_variants]
           active_feature_variants = {}
           feature_variants.each do |key, value|

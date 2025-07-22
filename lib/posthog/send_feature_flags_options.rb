@@ -1,4 +1,4 @@
-class PostHog
+module PostHog
   # Options for configuring feature flag behavior in capture calls
   class SendFeatureFlagsOptions
     attr_reader :only_evaluate_locally, :person_properties, :group_properties
