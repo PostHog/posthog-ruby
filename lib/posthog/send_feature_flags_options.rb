@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'posthog/utils'
+
 module PostHog
   # Options for configuring feature flag behavior in capture calls
   class SendFeatureFlagsOptions
@@ -23,9 +25,9 @@ module PostHog
       return nil unless hash.is_a?(Hash)
 
       new(
-        only_evaluate_locally: hash[:only_evaluate_locally] || hash['only_evaluate_locally'],
-        person_properties: hash[:person_properties] || hash['person_properties'],
-        group_properties: hash[:group_properties] || hash['group_properties']
+        only_evaluate_locally: PostHog::Utils.get_by_symbol_or_string_key(hash, :only_evaluate_locally),
+        person_properties: PostHog::Utils.get_by_symbol_or_string_key(hash, :person_properties),
+        group_properties: PostHog::Utils.get_by_symbol_or_string_key(hash, :group_properties)
       )
     end
   end

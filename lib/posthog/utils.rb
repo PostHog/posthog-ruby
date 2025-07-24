@@ -112,6 +112,24 @@ module PostHog
       false
     end
 
+    # public: Get value from hash by symbol key first, then string key
+    #         Handles falsy values correctly (unlike ||)
+    #
+    # hash - Hash to lookup value in
+    # key  - Symbol or String key to lookup
+    #
+    # Returns the value if found, nil otherwise
+    def get_by_symbol_or_string_key(hash, key)
+      symbol_key = key.to_sym
+      string_key = key.to_s
+
+      if hash.key?(symbol_key)
+        hash[symbol_key]
+      else
+        hash[string_key]
+      end
+    end
+
     class SizeLimitedHash < Hash
       def initialize(max_length, ...)
         super(...)

@@ -674,6 +674,57 @@ module PostHog
         # Verify the server was not called
         assert_not_requested :post, flags_endpoint
       end
+
+      it 'handles explicit false value for only_evaluate_locally correctly' do
+        # Setup local flags that would require server fallback (complex property matching)
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [{ key: 'region', value: 'USA', type: 'person' }],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # This SHOULD be called because only_evaluate_locally is explicitly false
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: { featureFlags: { 'beta-feature' => 'server-value' } }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        # Use hash with explicit only_evaluate_locally: false (this was the bug!)
+        # Note: We don't provide the 'region' property, so local evaluation fails
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: { only_evaluate_locally: false, 'only_evaluate_locally' => true }
+          }
+        )
+
+        properties = c.dequeue_last_message[:properties]
+
+        # Since only_evaluate_locally is explicitly false (not nil), should fallback to server
+        expect(properties['$feature/beta-feature']).to eq('server-value')
+        expect(properties['$active_feature_flags']).to eq(['beta-feature'])
+
+        # Verify the server was called because only_evaluate_locally was false
+        assert_requested :post, flags_endpoint, times: 1
+      end
       it 'does not use really invalid uuid' do
         client.capture(
           {

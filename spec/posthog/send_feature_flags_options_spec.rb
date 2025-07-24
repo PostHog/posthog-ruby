@@ -95,5 +95,23 @@ describe PostHog::SendFeatureFlagsOptions do
       expect(options.person_properties).to eq({})
       expect(options.group_properties).to eq({})
     end
+
+    it 'handles explicit false value correctly with symbol key' do
+      hash = { only_evaluate_locally: false, 'only_evaluate_locally' => true }
+      options = PostHog::SendFeatureFlagsOptions.from_hash(hash)
+      expect(options.only_evaluate_locally).to eq(false)
+    end
+
+    it 'handles explicit false value correctly with string key' do
+      hash = { 'only_evaluate_locally' => false }
+      options = PostHog::SendFeatureFlagsOptions.from_hash(hash)
+      expect(options.only_evaluate_locally).to eq(false)
+    end
+
+    it 'handles explicit nil value correctly' do
+      hash = { only_evaluate_locally: nil, 'only_evaluate_locally' => true }
+      options = PostHog::SendFeatureFlagsOptions.from_hash(hash)
+      expect(options.only_evaluate_locally).to be_nil
+    end
   end
 end
