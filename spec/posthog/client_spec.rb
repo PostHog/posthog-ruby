@@ -571,6 +571,109 @@ module PostHog
         expect(properties['$feature/beta-feature']).to be_nil
         expect(properties['$active_feature_flags']).to be_nil
       end
+
+      it 'respects only_evaluate_locally option in SendFeatureFlagsOptions' do
+        # Setup local flags that would normally trigger a server fallback
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [{ key: 'region', value: 'USA', type: 'person' }],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # This should NOT be called because only_evaluate_locally is true
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: { featureFlags: { 'beta-feature' => 'server-value' } }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        # Use SendFeatureFlagsOptions with only_evaluate_locally: true
+        options = PostHog::SendFeatureFlagsOptions.new(only_evaluate_locally: true)
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: options
+          }
+        )
+
+        properties = c.dequeue_last_message[:properties]
+
+        # Since local evaluation fails (no region property provided) and only_evaluate_locally is true,
+        # no server fallback should happen and feature flags should be empty
+        expect(properties.key?('$feature/beta-feature')).to be_falsy
+        expect(properties['$active_feature_flags']).to eq([])
+
+        # Verify the server was not called
+        assert_not_requested :post, flags_endpoint
+      end
+
+      it 'respects only_evaluate_locally option from hash' do
+        # Setup local flags that would normally trigger a server fallback
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [{ key: 'region', value: 'USA', type: 'person' }],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # This should NOT be called because only_evaluate_locally is true
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: { featureFlags: { 'beta-feature' => 'server-value' } }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        # Use hash with only_evaluate_locally: true
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: { only_evaluate_locally: true }
+          }
+        )
+
+        properties = c.dequeue_last_message[:properties]
+
+        # Since local evaluation fails (no region property provided) and only_evaluate_locally is true,
+        # no server fallback should happen and feature flags should be empty
+        expect(properties.key?('$feature/beta-feature')).to be_falsy
+        expect(properties['$active_feature_flags']).to eq([])
+
+        # Verify the server was not called
+        assert_not_requested :post, flags_endpoint
+      end
       it 'does not use really invalid uuid' do
         client.capture(
           {

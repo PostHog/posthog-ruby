@@ -121,7 +121,8 @@ module PostHog
             attrs[:distinct_id],
             attrs[:groups] || {},
             options ? options.person_properties : {},
-            options ? options.group_properties : {}
+            options ? options.group_properties : {},
+            options ? options.only_evaluate_locally : false
           )
         when SendFeatureFlagsOptions
           # SendFeatureFlagsOptions object
@@ -129,7 +130,8 @@ module PostHog
             attrs[:distinct_id],
             attrs[:groups] || {},
             send_feature_flags_param.person_properties,
-            send_feature_flags_param.group_properties
+            send_feature_flags_param.group_properties,
+            send_feature_flags_param.only_evaluate_locally || false
           )
         else
           # Invalid type, treat as false
