@@ -8,6 +8,7 @@ require 'posthog/utils'
 require 'posthog/send_worker'
 require 'posthog/noop_worker'
 require 'posthog/feature_flags'
+require 'posthog/send_feature_flags_options'
 
 module PostHog
   class Client
@@ -96,7 +97,8 @@ module PostHog
     #
     # @option attrs [String] :event Event name
     # @option attrs [Hash] :properties Event properties (optional)
-    # @option attrs [Bool] :send_feature_flags Whether to send feature flags with this event (optional)
+    # @option attrs [Bool, Hash, SendFeatureFlagsOptions] :send_feature_flags
+    #   Whether to send feature flags with this event, or configuration for feature flag evaluation (optional)
     # @option attrs [String] :uuid ID that uniquely identifies an event;
     #                             events in PostHog are deduplicated by the
     #                             combination of teamId, timestamp date,
@@ -105,10 +107,38 @@ module PostHog
     def capture(attrs)
       symbolize_keys! attrs
 
-      if attrs[:send_feature_flags]
-        feature_variants = @feature_flags_poller.get_feature_variants(attrs[:distinct_id], attrs[:groups] || {})
+      send_feature_flags_param = attrs[:send_feature_flags]
+      if send_feature_flags_param
+        # Handle different types of send_feature_flags parameter
+        case send_feature_flags_param
+        when true
+          # Backward compatibility: simple boolean
+          feature_variants = @feature_flags_poller.get_feature_variants(attrs[:distinct_id], attrs[:groups] || {})
+        when Hash
+          # Hash with options
+          options = SendFeatureFlagsOptions.from_hash(send_feature_flags_param)
+          feature_variants = @feature_flags_poller.get_feature_variants(
+            attrs[:distinct_id],
+            attrs[:groups] || {},
+            options ? options.person_properties : {},
+            options ? options.group_properties : {},
+            options ? options.only_evaluate_locally : false
+          )
+        when SendFeatureFlagsOptions
+          # SendFeatureFlagsOptions object
+          feature_variants = @feature_flags_poller.get_feature_variants(
+            attrs[:distinct_id],
+            attrs[:groups] || {},
+            send_feature_flags_param.person_properties,
+            send_feature_flags_param.group_properties,
+            send_feature_flags_param.only_evaluate_locally || false
+          )
+        else
+          # Invalid type, treat as false
+          feature_variants = nil
+        end
 
-        attrs[:feature_variants] = feature_variants
+        attrs[:feature_variants] = feature_variants if feature_variants
       end
 
       enqueue(FieldParser.parse_for_capture(attrs))

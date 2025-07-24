@@ -62,6 +62,7 @@ module PostHog
       groups = {},
       person_properties = {},
       group_properties = {},
+      only_evaluate_locally = false,
       raise_on_error = false
     )
       # TODO: Convert to options hash for easier argument passing
@@ -70,7 +71,7 @@ module PostHog
         groups,
         person_properties,
         group_properties,
-        false,
+        only_evaluate_locally,
         raise_on_error
       )
 

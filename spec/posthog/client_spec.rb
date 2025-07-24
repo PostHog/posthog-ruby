@@ -475,6 +475,256 @@ module PostHog
         )
       end
 
+      it 'captures feature flags with hash options' do
+        flags_response = { featureFlags: { 'beta-feature': 'hash-variant' } }
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              is_simple_flag: false,
+              rollout_percentage: 100
+            }
+          ]
+        }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: flags_response.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: {
+              person_properties: { plan: 'premium' },
+              group_properties: { company: { industry: 'tech' } }
+            }
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/beta-feature']).to eq(false)
+        expect(properties['$active_feature_flags']).to eq([])
+      end
+
+      it 'captures feature flags with SendFeatureFlagsOptions object' do
+        flags_response = { featureFlags: { 'beta-feature': 'object-variant' } }
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              is_simple_flag: false,
+              rollout_percentage: 100
+            }
+          ]
+        }
+
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: flags_response.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        options = PostHog::SendFeatureFlagsOptions.new(
+          person_properties: { plan: 'enterprise' },
+          group_properties: { company: { size: 'large' } }
+        )
+
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: options
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/beta-feature']).to eq(false)
+        expect(properties['$active_feature_flags']).to eq([])
+      end
+
+      it 'ignores feature flags with invalid send_feature_flags parameter' do
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: { flags: [] }.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: 'invalid_string'
+          }
+        )
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/beta-feature']).to be_nil
+        expect(properties['$active_feature_flags']).to be_nil
+      end
+
+      it 'respects only_evaluate_locally option in SendFeatureFlagsOptions' do
+        # Setup local flags that would normally trigger a server fallback
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [{ key: 'region', value: 'USA', type: 'person' }],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # This should NOT be called because only_evaluate_locally is true
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: { featureFlags: { 'beta-feature' => 'server-value' } }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        # Use SendFeatureFlagsOptions with only_evaluate_locally: true
+        options = PostHog::SendFeatureFlagsOptions.new(only_evaluate_locally: true)
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: options
+          }
+        )
+
+        properties = c.dequeue_last_message[:properties]
+
+        # Since local evaluation fails (no region property provided) and only_evaluate_locally is true,
+        # no server fallback should happen and feature flags should be empty
+        expect(properties.key?('$feature/beta-feature')).to be_falsy
+        expect(properties['$active_feature_flags']).to eq([])
+
+        # Verify the server was not called
+        assert_not_requested :post, flags_endpoint
+      end
+
+      it 'respects only_evaluate_locally option from hash' do
+        # Setup local flags that would normally trigger a server fallback
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [{ key: 'region', value: 'USA', type: 'person' }],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # This should NOT be called because only_evaluate_locally is true
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: { featureFlags: { 'beta-feature' => 'server-value' } }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        # Use hash with only_evaluate_locally: true
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: { only_evaluate_locally: true }
+          }
+        )
+
+        properties = c.dequeue_last_message[:properties]
+
+        # Since local evaluation fails (no region property provided) and only_evaluate_locally is true,
+        # no server fallback should happen and feature flags should be empty
+        expect(properties.key?('$feature/beta-feature')).to be_falsy
+        expect(properties['$active_feature_flags']).to eq([])
+
+        # Verify the server was not called
+        assert_not_requested :post, flags_endpoint
+      end
+
+      it 'handles explicit false value for only_evaluate_locally correctly' do
+        # Setup local flags that would require server fallback (complex property matching)
+        api_feature_flag_res = {
+          flags: [
+            {
+              id: 1,
+              name: 'Beta Feature',
+              key: 'beta-feature',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [{ key: 'region', value: 'USA', type: 'person' }],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        stub_request(
+          :get,
+          'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret'
+        ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+        # This SHOULD be called because only_evaluate_locally is explicitly false
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: { featureFlags: { 'beta-feature' => 'server-value' } }.to_json)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        # Use hash with explicit only_evaluate_locally: false (this was the bug!)
+        # Note: We don't provide the 'region' property, so local evaluation fails
+        c.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'ruby test event',
+            send_feature_flags: { only_evaluate_locally: false, 'only_evaluate_locally' => true }
+          }
+        )
+
+        properties = c.dequeue_last_message[:properties]
+
+        # Since only_evaluate_locally is explicitly false (not nil), should fallback to server
+        expect(properties['$feature/beta-feature']).to eq('server-value')
+        expect(properties['$active_feature_flags']).to eq(['beta-feature'])
+
+        # Verify the server was called because only_evaluate_locally was false
+        assert_requested :post, flags_endpoint, times: 1
+      end
       it 'does not use really invalid uuid' do
         client.capture(
           {
