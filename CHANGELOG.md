@@ -1,3 +1,7 @@
+## 3.1.0
+
+1. feat: make the `send_feature_flags` parameter more declarative and ergonomic
+
 ## 3.0.1 - 2025-05-20
 
 1. fix: was warning on absent UUID when capturing ([#67](https://github.com/PostHog/posthog-ruby/pull/67))
