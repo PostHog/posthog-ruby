@@ -362,4 +362,42 @@ module PostHog
       end
     end
   end
+
+  describe 'FeatureFlagsPoller#get_remote_config_payload' do
+    let(:remote_config_endpoint) { 'https://app.posthog.com/api/projects/@current/feature_flags/test-flag/remote_config?token=testsecret' }
+    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
+    let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
+    let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+
+    before do
+      # Stub the initial feature flag definitions request
+      stub_request(:get, feature_flag_endpoint)
+        .to_return(status: 200, body: { flags: [] }.to_json)
+    end
+
+    it 'includes project API key token in remote config URL' do
+      # Mock response
+      remote_config_response = { test: 'payload' }
+
+      stub_request(:get, remote_config_endpoint)
+        .with(
+          headers: {
+            'Accept' => '*/*',
+            'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer personal_key',
+            'Host' => 'app.posthog.com',
+            'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
+          }
+        )
+        .to_return(status: 200, body: remote_config_response.to_json)
+
+      result = poller.get_remote_config_payload('test-flag')
+
+      expect(result[:test]).to eq('payload')
+
+      # Verify the request was made to the correct URL with token parameter
+      expect(WebMock).to have_requested(:get, remote_config_endpoint)
+    end
+  end
 end

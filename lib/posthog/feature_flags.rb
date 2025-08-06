@@ -628,7 +628,8 @@ module PostHog
     end
 
     def _request_feature_flag_definitions
-      uri = URI("#{@host}/api/feature_flag/local_evaluation?token=#{@project_api_key}")
+      uri = URI("#{@host}/api/feature_flag/local_evaluation")
+      uri.query = URI.encode_www_form([['token', @project_api_key]])
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
 
@@ -646,7 +647,8 @@ module PostHog
     end
 
     def _request_remote_config_payload(flag_key)
-      uri = URI("#{@host}/api/projects/@current/feature_flags/#{flag_key}/remote_config/")
+      uri = URI("#{@host}/api/projects/@current/feature_flags/#{flag_key}/remote_config")
+      uri.query = URI.encode_www_form([['token', @project_api_key]])
       req = Net::HTTP::Get.new(uri)
       req['Content-Type'] = 'application/json'
       req['Authorization'] = "Bearer #{@personal_api_key}"
