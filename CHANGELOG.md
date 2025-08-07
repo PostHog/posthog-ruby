@@ -1,3 +1,7 @@
+## 3.1.1
+
+1. fix: Pass project API key in `remote_config` requests ([#72](https://github.com/PostHog/posthog-ruby/pull/72))
+
 ## 3.1.0
 
 1. feat: make the `send_feature_flags` parameter more declarative and ergonomic
