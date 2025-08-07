@@ -4210,7 +4210,7 @@ module PostHog
       mock_decrypted_payload = '"super secret payload in plaintext"'
       stub_request(
         :get,
-        "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config/"
+        "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config?token=testsecret"
       ).to_return(status: 200, body: mock_decrypted_payload)
       stub_request(
         :get,
