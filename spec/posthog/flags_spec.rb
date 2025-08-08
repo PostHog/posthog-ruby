@@ -6,7 +6,7 @@ require 'posthog/client'
 module PostHog
   describe 'FeatureFlagsPoller#get_flags' do
     let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
-    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
+    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
     let(:decide_v3_response) do
@@ -365,7 +365,7 @@ module PostHog
 
   describe 'FeatureFlagsPoller#get_remote_config_payload' do
     let(:remote_config_endpoint) { 'https://app.posthog.com/api/projects/@current/feature_flags/test-flag/remote_config?token=testsecret' }
-    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
+    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -398,6 +398,349 @@ module PostHog
 
       # Verify the request was made to the correct URL with token parameter
       expect(WebMock).to have_requested(:get, remote_config_endpoint)
+    end
+  end
+
+  describe 'Cohort evaluation' do
+    describe '.match_cohort' do
+      it 'matches simple cohort with AND logic' do
+        property = { type: 'cohort', value: 'cohort_1' }
+        property_values = { country: 'US', age: 25 }
+        cohort_properties = {
+          'cohort_1' => {
+            'type' => 'AND',
+            'values' => [
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+              { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
+            ]
+          }
+        }
+
+        result = PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
+        expect(result).to be true
+      end
+
+      it 'matches cohort with OR logic' do
+        property = { type: 'cohort', value: 'cohort_1' }
+        property_values = { country: 'CA', age: 16 }
+        cohort_properties = {
+          'cohort_1' => {
+            'type' => 'OR',
+            'values' => [
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'CA' }
+            ]
+          }
+        }
+
+        result = PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
+        expect(result).to be true
+      end
+
+      it 'handles nested cohorts with complex property groups' do
+        property = { type: 'cohort', value: 'premium_users' }
+        property_values = { country: 'US', age: 25, subscription: 'premium' }
+        cohort_properties = {
+          'premium_users' => {
+            'type' => 'AND',
+            'values' => [
+              {
+                'type' => 'OR',
+                'values' => [
+                  { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+                  { 'key' => 'country', 'operator' => 'exact', 'value' => 'CA' }
+                ]
+              },
+              { 'key' => 'subscription', 'operator' => 'exact', 'value' => 'premium' }
+            ]
+          }
+        }
+
+        result = PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
+        expect(result).to be true
+      end
+
+      it 'raises InconclusiveMatchError when cohort not found' do
+        property = { type: 'cohort', value: 'non_existent_cohort' }
+        property_values = { country: 'US' }
+        cohort_properties = {}
+
+        expect do
+          PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
+        end.to raise_error(PostHog::InconclusiveMatchError, "can't match cohort without a given cohort property value")
+      end
+
+      it 'handles empty cohort definitions gracefully' do
+        property = { type: 'cohort', value: 'empty_cohort' }
+        property_values = { country: 'US' }
+        cohort_properties = {
+          'empty_cohort' => {
+            'type' => 'AND',
+            'values' => []
+          }
+        }
+
+        result = PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
+        expect(result).to be true # Empty conditions should return true
+      end
+
+      it 'handles cohort with missing properties in user data' do
+        property = { type: 'cohort', value: 'cohort_1' }
+        property_values = { country: 'US' } # Missing 'age' property
+        cohort_properties = {
+          'cohort_1' => {
+            'type' => 'AND',
+            'values' => [
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+              { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
+            ]
+          }
+        }
+
+        expect do
+          PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
+        end.to raise_error(PostHog::InconclusiveMatchError, "can't match cohort without a given cohort property value")
+      end
+    end
+
+    describe '.match_property_group' do
+      it 'handles cohorts within property groups' do
+        property_group = {
+          'type' => 'AND',
+          'values' => [
+            { 'type' => 'cohort', 'value' => 'cohort_1' },
+            { 'key' => 'premium', 'operator' => 'exact', 'value' => true }
+          ]
+        }
+        property_values = { country: 'US', age: 25, premium: true }
+        cohort_properties = {
+          'cohort_1' => {
+            'type' => 'AND',
+            'values' => [
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+              { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
+            ]
+          }
+        }
+
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, cohort_properties)
+        expect(result).to be true
+      end
+
+      it 'returns true for empty property groups' do
+        result = PostHog::FeatureFlagsPoller.match_property_group(nil, {}, {})
+        expect(result).to be true
+
+        result = PostHog::FeatureFlagsPoller.match_property_group({}, {}, {})
+        expect(result).to be true
+
+        result = PostHog::FeatureFlagsPoller.match_property_group({ 'values' => [] }, {}, {})
+        expect(result).to be true
+      end
+
+      it 'handles OR logic property groups' do
+        property_group = {
+          'type' => 'OR',
+          'values' => [
+            { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+            { 'key' => 'country', 'operator' => 'exact', 'value' => 'CA' }
+          ]
+        }
+        property_values = { country: 'CA', age: 25 }
+
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
+        expect(result).to be true
+      end
+
+      it 'handles complex nested AND/OR combinations' do
+        # Top-level OR with nested AND groups
+        property_group = {
+          'type' => 'OR',
+          'values' => [
+            {
+              'type' => 'AND',
+              'values' => [
+                { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+                { 'key' => 'age', 'operator' => 'gte', 'value' => 21 }
+              ]
+            },
+            {
+              'type' => 'AND', 
+              'values' => [
+                { 'key' => 'country', 'operator' => 'exact', 'value' => 'CA' },
+                { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
+              ]
+            }
+          ]
+        }
+        
+        # Should match the second condition (CA, 19)
+        property_values = { country: 'CA', age: 19 }
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
+        expect(result).to be true
+
+        # Should not match either condition
+        property_values = { country: 'UK', age: 25 }
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
+        expect(result).to be false
+      end
+
+      it 'handles mixed cohort and regular properties' do
+        property_group = {
+          'type' => 'AND',
+          'values' => [
+            { 'type' => 'cohort', 'value' => 'us_users' },
+            { 'key' => 'premium', 'operator' => 'exact', 'value' => true },
+            { 'key' => 'age', 'operator' => 'gte', 'value' => 21 }
+          ]
+        }
+        
+        property_values = { country: 'US', premium: true, age: 25 }
+        cohort_properties = {
+          'us_users' => {
+            'type' => 'OR',
+            'values' => [
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' },
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'CA' }
+            ]
+          }
+        }
+
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, cohort_properties)
+        expect(result).to be true
+      end
+
+      it 'handles property negation in cohorts' do
+        property_group = {
+          'type' => 'AND',
+          'values' => [
+            { 'key' => 'country', 'operator' => 'exact', 'value' => 'US', 'negation' => true },
+            { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
+          ]
+        }
+        
+        # Should match because country is NOT US and age >= 18
+        property_values = { country: 'CA', age: 25 }
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
+        expect(result).to be true
+
+        # Should not match because country IS US (negated condition fails)
+        property_values = { country: 'US', age: 25 }
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
+        expect(result).to be false
+      end
+
+      it 'handles cohorts referencing other cohorts' do
+        property_group = {
+          'type' => 'OR',
+          'values' => [
+            { 'type' => 'cohort', 'value' => 'us_users' },
+            { 'type' => 'cohort', 'value' => 'premium_users' }
+          ]
+        }
+        
+        property_values = { country: 'CA', subscription: 'premium' }
+        cohort_properties = {
+          'us_users' => {
+            'type' => 'AND',
+            'values' => [
+              { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' }
+            ]
+          },
+          'premium_users' => {
+            'type' => 'AND',
+            'values' => [
+              { 'key' => 'subscription', 'operator' => 'exact', 'value' => 'premium' }
+            ]
+          }
+        }
+
+        # Should match premium_users cohort even though not in us_users
+        result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, cohort_properties)
+        expect(result).to be true
+      end
+
+      it 'handles unknown property group types' do
+        property_group = {
+          'type' => 'XOR', # Invalid type
+          'values' => [
+            { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' }
+          ]
+        }
+        
+        property_values = { country: 'US' }
+        
+        expect do
+          PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
+        end.to raise_error(PostHog::InconclusiveMatchError, 'Unknown property group type: XOR')
+      end
+    end
+
+    describe 'integration with feature flags' do
+      let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+      let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
+      let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+
+      before do
+        flag_definitions = {
+          flags: [
+            {
+              key: 'cohort-flag',
+              active: true,
+              filters: {
+                groups: [
+                  {
+                    properties: [
+                      { type: 'cohort', value: 'us_users' }
+                    ],
+                    rollout_percentage: 100
+                  }
+                ]
+              }
+            }
+          ],
+          group_type_mapping: {},
+          cohorts: {
+            'us_users' => {
+              'type' => 'AND',
+              'values' => [
+                { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' }
+              ]
+            }
+          }
+        }
+
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(status: 200, body: flag_definitions.to_json)
+      end
+
+      it 'evaluates flags with cohorts locally' do
+        poller.load_feature_flags
+
+        result, locally_evaluated, _request_id = poller.get_feature_flag(
+          'cohort-flag',
+          'user123',
+          {},
+          { country: 'US' }
+        )
+
+        expect(result).to be true
+        expect(locally_evaluated).to be true
+      end
+
+      it 'fails to evaluate flags with cohorts when user not in cohort' do
+        poller.load_feature_flags
+
+        result, locally_evaluated, _request_id = poller.get_feature_flag(
+          'cohort-flag',
+          'user123',
+          {},
+          { country: 'CA' }
+        )
+
+        expect(result).to be false
+        expect(locally_evaluated).to be true
+      end
     end
   end
 end
