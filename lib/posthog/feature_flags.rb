@@ -572,8 +572,6 @@ module PostHog
       end
     end
 
-    public
-
     private
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
