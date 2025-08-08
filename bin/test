@@ -4,4 +4,6 @@
 source bin/helpers/_utils.sh
 set_source_and_root_dir
 
-bundle exec rspec
+# Use RUBYLIB to avoid bundler dependency issues
+# This allows tests to run even if bundler can't resolve all dev dependencies
+RUBYLIB=lib rspec "$@"

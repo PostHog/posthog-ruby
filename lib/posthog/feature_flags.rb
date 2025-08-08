@@ -30,6 +30,7 @@ module PostHog
       @host = host
       @feature_flags = Concurrent::Array.new
       @group_type_mapping = Concurrent::Hash.new
+      @cohorts = Concurrent::Hash.new
       @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
       @feature_flags_by_key = nil
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
@@ -367,12 +368,15 @@ module PostHog
       parsed_dt
     end
 
-    def self.match_property(property, property_values)
+    def self.match_property(property, property_values, cohort_properties = {})
       # only looks for matches where key exists in property_values
       # doesn't support operator is_not_set
 
       PostHog::Utils.symbolize_keys! property
       PostHog::Utils.symbolize_keys! property_values
+
+      # Handle cohort properties
+      return match_cohort(property, property_values, cohort_properties) if extract_value(property, :type) == 'cohort'
 
       key = property[:key].to_sym
       value = property[:value]
@@ -443,7 +447,127 @@ module PostHog
       end
     end
 
-    private
+    def self.match_cohort(property, property_values, cohort_properties)
+      # Cohort properties are in the form of property groups like this:
+      # {
+      #   "cohort_id" => {
+      #     "type" => "AND|OR",
+      #     "values" => [{
+      #        "key" => "property_name", "value" => "property_value"
+      #     }]
+      #   }
+      # }
+      cohort_id = extract_value(property, :value).to_s
+      property_group = find_cohort_property(cohort_properties, cohort_id)
+
+      raise InconclusiveMatchError, "can't match cohort without a given cohort property value" unless property_group
+
+      match_property_group(property_group, property_values, cohort_properties)
+    end
+
+    def self.match_property_group(property_group, property_values, cohort_properties)
+      return true if property_group.nil? || property_group.empty?
+
+      group_type = extract_value(property_group, :type)
+      properties = extract_value(property_group, :values)
+
+      return true if properties.nil? || properties.empty?
+
+      if nested_property_group?(properties)
+        match_nested_property_group(properties, group_type, property_values, cohort_properties)
+      else
+        match_regular_property_group(properties, group_type, property_values, cohort_properties)
+      end
+    end
+
+    def self.extract_value(hash, key)
+      return nil unless hash.is_a?(Hash)
+
+      hash[key] || hash[key.to_s]
+    end
+
+    def self.find_cohort_property(cohort_properties, cohort_id)
+      return nil unless cohort_properties.is_a?(Hash)
+
+      cohort_properties[cohort_id] || cohort_properties[cohort_id.to_sym]
+    end
+
+    def self.nested_property_group?(properties)
+      return false unless properties&.any?
+
+      first_property = properties[0]
+      return false unless first_property.is_a?(Hash)
+
+      first_property.key?(:values) || first_property.key?('values')
+    end
+
+    def self.match_nested_property_group(properties, group_type, property_values, cohort_properties)
+      case group_type
+      when 'AND'
+        properties.each do |property|
+          return false unless match_property_group(property, property_values, cohort_properties)
+        end
+        true
+      when 'OR'
+        properties.each do |property|
+          return true if match_property_group(property, property_values, cohort_properties)
+        end
+        false
+      else
+        raise InconclusiveMatchError, "Unknown property group type: #{group_type}"
+      end
+    end
+
+    def self.match_regular_property_group(properties, group_type, property_values, cohort_properties)
+      # Validate group type upfront
+      raise InconclusiveMatchError, "Unknown property group type: #{group_type}" unless %w[AND OR].include?(group_type)
+
+      error_matching_locally = false
+
+      properties.each do |prop|
+        PostHog::Utils.symbolize_keys!(prop)
+        matches = evaluate_property_match(prop, property_values, cohort_properties)
+        next if matches.nil? # Skip flag dependencies
+
+        negated = prop[:negation] || false
+        final_result = negated ? !matches : matches
+
+        # Short-circuit based on group type
+        if group_type == 'AND'
+          return false unless final_result
+        elsif final_result # group_type == 'OR'
+          return true
+        end
+      rescue InconclusiveMatchError => e
+        PostHog::Logging.logger&.debug("Failed to compute property #{prop} locally: #{e}")
+        error_matching_locally = true
+      end
+
+      raise InconclusiveMatchError, "can't match cohort without a given cohort property value" if error_matching_locally
+
+      # If we reach here, return default based on group type
+      group_type == 'AND'
+    end
+
+    def self.evaluate_property_match(prop, property_values, cohort_properties)
+      prop_type = extract_value(prop, :type)
+
+      case prop_type
+      when 'cohort'
+        match_cohort(prop, property_values, cohort_properties)
+      when 'flag'
+        PostHog::Logging.logger&.warn(
+          '[FEATURE FLAGS] Flag dependency filters are not supported in local evaluation. ' \
+          "Skipping condition with dependency on flag '#{prop[:key]}'"
+        )
+        nil # Signal to skip this property
+      else
+        match_property(prop, property_values, cohort_properties)
+      end
+    end
+
+    private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
+                         :match_nested_property_group, :match_regular_property_group, :evaluate_property_match
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
       raise InconclusiveMatchError, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
@@ -453,7 +577,10 @@ module PostHog
       flag_filters = flag[:filters] || {}
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
-      return match_feature_flag_properties(flag, distinct_id, person_properties) if aggregation_group_type_index.nil?
+      if aggregation_group_type_index.nil?
+        return match_feature_flag_properties(flag, distinct_id, person_properties,
+                                             @cohorts)
+      end
 
       group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
 
@@ -475,7 +602,7 @@ module PostHog
       end
 
       focused_group_properties = group_properties[group_name_symbol]
-      match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties)
+      match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties, @cohorts)
     end
 
     def _compute_flag_payload_locally(key, match_value)
@@ -490,7 +617,7 @@ module PostHog
       response
     end
 
-    def match_feature_flag_properties(flag, distinct_id, properties)
+    def match_feature_flag_properties(flag, distinct_id, properties, cohort_properties = {})
       flag_filters = flag[:filters] || {}
 
       flag_conditions = flag_filters[:groups] || []
@@ -506,7 +633,7 @@ module PostHog
       # NOTE: This NEEDS to be `each` because `each_key` breaks
       # This is not a hash, it's just an array with 2 entries
       sorted_flag_conditions.each do |condition, _idx| # rubocop:disable Style/HashEachMethods
-        if is_condition_match(flag, distinct_id, condition, properties)
+        if is_condition_match(flag, distinct_id, condition, properties, cohort_properties)
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
           flag_variants = flag_multivariate[:variants] || []
@@ -533,7 +660,7 @@ module PostHog
     end
 
     # TODO: Rename to `condition_match?` in future version
-    def is_condition_match(flag, distinct_id, condition, properties) # rubocop:disable Naming/PredicateName
+    def is_condition_match(flag, distinct_id, condition, properties, cohort_properties = {}) # rubocop:disable Naming/PredicateName
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
@@ -546,7 +673,7 @@ module PostHog
             )
             next true
           end
-          FeatureFlagsPoller.match_property(prop, properties)
+          FeatureFlagsPoller.match_property(prop, properties, cohort_properties)
         end
           return false
         elsif rollout_percentage.nil?
@@ -607,6 +734,7 @@ module PostHog
         @feature_flags = Concurrent::Array.new
         @feature_flags_by_key = {}
         @group_type_mapping = Concurrent::Hash.new
+        @cohorts = Concurrent::Hash.new
         @loaded_flags_successfully_once.make_false
         @quota_limited.make_true
         return
@@ -619,8 +747,9 @@ module PostHog
           @feature_flags_by_key[flag[:key]] = flag unless flag[:key].nil?
         end
         @group_type_mapping = res[:group_type_mapping] || {}
+        @cohorts = res[:cohorts] || {}
 
-        logger.debug "Loaded #{@feature_flags.length} feature flags"
+        logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
         @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
       else
         logger.debug "Failed to load feature flags: #{res}"
@@ -629,7 +758,7 @@ module PostHog
 
     def _request_feature_flag_definitions
       uri = URI("#{@host}/api/feature_flag/local_evaluation")
-      uri.query = URI.encode_www_form([['token', @project_api_key]])
+      uri.query = URI.encode_www_form([['token', @project_api_key], %w[send_cohorts true]])
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
 
