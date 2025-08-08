@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#/ Usage: bin/fmt [--check]
+#/ Description: Format code using rubocop. Use --check to only check formatting without fixing.
+source bin/helpers/_utils.sh
+set_source_and_root_dir
+
+# Check if --check flag is provided
+if [[ "$1" == "--check" ]]; then
+    echo "Checking code formatting..."
+    rubocop
+else
+    echo "Formatting code with rubocop..."
+    rubocop --autocorrect-all
+fi
