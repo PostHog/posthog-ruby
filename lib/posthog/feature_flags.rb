@@ -376,9 +376,7 @@ module PostHog
       PostHog::Utils.symbolize_keys! property_values
 
       # Handle cohort properties
-      if extract_value(property, :type) == 'cohort'
-        return match_cohort(property, property_values, cohort_properties)
-      end
+      return match_cohort(property, property_values, cohort_properties) if extract_value(property, :type) == 'cohort'
 
       key = property[:key].to_sym
       value = property[:value]
@@ -461,10 +459,8 @@ module PostHog
       # }
       cohort_id = extract_value(property, :value).to_s
       property_group = find_cohort_property(cohort_properties, cohort_id)
-      
-      unless property_group
-        raise InconclusiveMatchError, "can't match cohort without a given cohort property value"
-      end
+
+      raise InconclusiveMatchError, "can't match cohort without a given cohort property value" unless property_group
 
       match_property_group(property_group, property_values, cohort_properties)
     end
@@ -484,22 +480,24 @@ module PostHog
       end
     end
 
-    private
-
     def self.extract_value(hash, key)
       return nil unless hash.is_a?(Hash)
+
       hash[key] || hash[key.to_s]
     end
 
     def self.find_cohort_property(cohort_properties, cohort_id)
       return nil unless cohort_properties.is_a?(Hash)
+
       cohort_properties[cohort_id] || cohort_properties[cohort_id.to_sym]
     end
 
     def self.nested_property_group?(properties)
       return false unless properties&.any?
+
       first_property = properties[0]
       return false unless first_property.is_a?(Hash)
+
       first_property.key?(:values) || first_property.key?('values')
     end
 
@@ -522,42 +520,38 @@ module PostHog
 
     def self.match_regular_property_group(properties, group_type, property_values, cohort_properties)
       # Validate group type upfront
-      unless ['AND', 'OR'].include?(group_type)
-        raise InconclusiveMatchError, "Unknown property group type: #{group_type}"
-      end
-      
+      raise InconclusiveMatchError, "Unknown property group type: #{group_type}" unless %w[AND OR].include?(group_type)
+
       error_matching_locally = false
-      
+
       properties.each do |prop|
-        begin
-          PostHog::Utils.symbolize_keys!(prop)
-          matches = evaluate_property_match(prop, property_values, cohort_properties)
-          next if matches.nil? # Skip flag dependencies
-          
-          negated = prop[:negation] || false
-          final_result = negated ? !matches : matches
-          
-          # Short-circuit based on group type
-          if group_type == 'AND'
-            return false unless final_result
-          else # group_type == 'OR'
-            return true if final_result
-          end
-        rescue InconclusiveMatchError => e
-          PostHog::Logging.logger&.debug("Failed to compute property #{prop} locally: #{e}")
-          error_matching_locally = true
+        PostHog::Utils.symbolize_keys!(prop)
+        matches = evaluate_property_match(prop, property_values, cohort_properties)
+        next if matches.nil? # Skip flag dependencies
+
+        negated = prop[:negation] || false
+        final_result = negated ? !matches : matches
+
+        # Short-circuit based on group type
+        if group_type == 'AND'
+          return false unless final_result
+        elsif final_result # group_type == 'OR'
+          return true
         end
+      rescue InconclusiveMatchError => e
+        PostHog::Logging.logger&.debug("Failed to compute property #{prop} locally: #{e}")
+        error_matching_locally = true
       end
-      
+
       raise InconclusiveMatchError, "can't match cohort without a given cohort property value" if error_matching_locally
-      
+
       # If we reach here, return default based on group type
       group_type == 'AND'
     end
 
     def self.evaluate_property_match(prop, property_values, cohort_properties)
       prop_type = extract_value(prop, :type)
-      
+
       case prop_type
       when 'cohort'
         match_cohort(prop, property_values, cohort_properties)
@@ -572,7 +566,8 @@ module PostHog
       end
     end
 
-    private
+    private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
+                         :match_nested_property_group, :match_regular_property_group, :evaluate_property_match
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
       raise InconclusiveMatchError, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
@@ -582,7 +577,10 @@ module PostHog
       flag_filters = flag[:filters] || {}
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
-      return match_feature_flag_properties(flag, distinct_id, person_properties, @cohorts) if aggregation_group_type_index.nil?
+      if aggregation_group_type_index.nil?
+        return match_feature_flag_properties(flag, distinct_id, person_properties,
+                                             @cohorts)
+      end
 
       group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
 
@@ -760,7 +758,7 @@ module PostHog
 
     def _request_feature_flag_definitions
       uri = URI("#{@host}/api/feature_flag/local_evaluation")
-      uri.query = URI.encode_www_form([['token', @project_api_key], ['send_cohorts', 'true']])
+      uri.query = URI.encode_www_form([['token', @project_api_key], %w[send_cohorts true]])
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
 

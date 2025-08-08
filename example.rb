@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 # PostHog Ruby library example
-# 
+#
 # This script demonstrates various PostHog Ruby SDK capabilities including:
-# - Basic event capture and user identification  
+# - Basic event capture and user identification
 # - Feature flag local evaluation
 # - Complex cohort evaluation (NEW!)
 # - Feature flag payloads
@@ -27,6 +27,7 @@ rescue LoadError
     File.readlines(env_file).each do |line|
       line = line.strip
       next if line.empty? || line.start_with?('#')
+
       key, value = line.split('=', 2)
       ENV[key] = value if key && value && !ENV.key?(key)
     end
@@ -40,14 +41,14 @@ host = ENV['POSTHOG_HOST'] || 'http://localhost:8000'
 
 # Check if credentials are provided
 if api_key.empty? || personal_api_key.empty?
-  puts "❌ Missing PostHog credentials!"
-  puts "   Please set POSTHOG_API_KEY and POSTHOG_PERSONAL_API_KEY environment variables"
-  puts "   or copy .env.example to .env and fill in your values"
+  puts '❌ Missing PostHog credentials!'
+  puts '   Please set POSTHOG_API_KEY and POSTHOG_PERSONAL_API_KEY environment variables'
+  puts '   or copy .env.example to .env and fill in your values'
   exit 1
 end
 
 # Test authentication before proceeding
-puts "🔑 Testing PostHog authentication..."
+puts '🔑 Testing PostHog authentication...'
 
 begin
   # Create a minimal client for testing
@@ -61,21 +62,21 @@ begin
 
   # Test by attempting to load feature flags (this validates both keys)
   test_client.instance_variable_get(:@feature_flags_poller).load_feature_flags(true)
-  
+
   # If we get here without exception, credentials work
-  puts "✅ Authentication successful!"
-  puts "   API Key: #{api_key[0..8]}..." 
+  puts '✅ Authentication successful!'
+  puts "   API Key: #{api_key[0..8]}..."
   puts "   Personal API Key: #{personal_api_key[0..8]}..."
   puts "   Host: #{host}\n\n"
-  
+
   test_client.shutdown
-rescue => e
-  puts "❌ Authentication failed!"
+rescue StandardError => e
+  puts '❌ Authentication failed!'
   puts "   Error: #{e.message}"
   puts "\n   Please check your credentials:"
-  puts "   - POSTHOG_API_KEY: Project API key from PostHog settings"
-  puts "   - POSTHOG_PERSONAL_API_KEY: Personal API key (required for local evaluation)"
-  puts "   - POSTHOG_HOST: Your PostHog instance URL"
+  puts '   - POSTHOG_API_KEY: Project API key from PostHog settings'
+  puts '   - POSTHOG_PERSONAL_API_KEY: Personal API key (required for local evaluation)'
+  puts '   - POSTHOG_HOST: Your PostHog instance URL'
   exit 1
 end
 
@@ -92,31 +93,31 @@ posthog.logger.level = Logger::WARN
 
 # Display menu and get user choice
 puts "🚀 PostHog Ruby SDK Demo - Choose an example to run:\n\n"
-puts "1. Identify and capture examples"
-puts "2. Feature flag local evaluation examples"  
-puts "3. Complex cohort evaluation examples"
-puts "4. Feature flag payload examples"
-puts "5. Run all examples"
-puts "6. Exit"
+puts '1. Identify and capture examples'
+puts '2. Feature flag local evaluation examples'
+puts '3. Complex cohort evaluation examples'
+puts '4. Feature flag payload examples'
+puts '5. Run all examples'
+puts '6. Exit'
 print "\nEnter your choice (1-6): "
 
 choice = gets.chomp.to_i
 
 case choice
 when 1
-  puts "\n" + "="*60
-  puts "IDENTIFY AND CAPTURE EXAMPLES"
-  puts "="*60
-  
+  puts "\n#{'=' * 60}"
+  puts 'IDENTIFY AND CAPTURE EXAMPLES'
+  puts '=' * 60
+
   posthog.logger.level = Logger::DEBUG
-  
+
   # Capture an event
-  puts "📊 Capturing events..."
+  puts '📊 Capturing events...'
   posthog.capture({ distinct_id: 'distinct_id', event: 'event',
                     properties: { 'property1' => 'value', 'property2' => 'value' }, send_feature_flags: true })
 
   # Alias a previous distinct id with a new one
-  puts "🔗 Creating alias..."
+  puts '🔗 Creating alias...'
   posthog.alias(
     distinct_id: 'distinct_id',
     alias: 'new_distinct_id'
@@ -127,7 +128,7 @@ when 1
     event: 'event2',
     properties: { 'property1' => 'value', 'property2' => 'value' }
   )
-  
+
   posthog.capture(
     distinct_id: 'new_distinct_id',
     event: 'event-with-groups',
@@ -139,14 +140,14 @@ when 1
   )
 
   # Add properties to the person
-  puts "👤 Identifying user..."
+  puts '👤 Identifying user...'
   posthog.identify(
     distinct_id: 'new_distinct_id',
     properties: { 'email' => 'something@something.com' }
   )
 
   # Add properties to a group
-  puts "🏢 Identifying group..."
+  puts '🏢 Identifying group...'
   posthog.group_identify(
     group_type: 'company',
     group_key: 'id:5',
@@ -154,7 +155,7 @@ when 1
   )
 
   # Properties set only once to the person
-  puts "🔒 Setting properties once..."
+  puts '🔒 Setting properties once...'
   posthog.capture(
     distinct_id: 'new_distinct_id',
     event: 'signup',
@@ -168,13 +169,13 @@ when 1
     properties: { '$set_once' => { 'self_serve_signup' => false } }
   )
 
-  puts "🔄 Updating properties..."
+  puts '🔄 Updating properties...'
   posthog.capture(
     distinct_id: 'new_distinct_id',
     event: 'signup',
     properties: { '$set' => { 'current_browser' => 'Chrome' } }
   )
-  
+
   posthog.capture(
     distinct_id: 'new_distinct_id',
     event: 'signup',
@@ -182,54 +183,60 @@ when 1
   )
 
 when 2
-  puts "\n" + "="*60
-  puts "FEATURE FLAG LOCAL EVALUATION EXAMPLES"
-  puts "="*60
+  puts "\n#{'=' * 60}"
+  puts 'FEATURE FLAG LOCAL EVALUATION EXAMPLES'
+  puts '=' * 60
 
   posthog.logger.level = Logger::DEBUG
 
-  puts "🏁 Testing basic feature flags..."
+  puts '🏁 Testing basic feature flags...'
   puts "beta-feature for 'distinct_id': #{posthog.is_feature_enabled('beta-feature', 'distinct_id')}"
   puts "beta-feature for 'new_distinct_id': #{posthog.is_feature_enabled('beta-feature', 'new_distinct_id')}"
-  puts "beta-feature with groups: #{posthog.is_feature_enabled('beta-feature', 'distinct_id', groups: { 'company' => 'id:5' })}"
+  puts "beta-feature with groups: #{posthog.is_feature_enabled('beta-feature', 'distinct_id',
+                                                               groups: { 'company' => 'id:5' })}"
 
   puts "\n🌍 Testing location-based flags..."
   # Assume test-flag has `City Name = Sydney` as a person property set
-  puts "Sydney user: #{posthog.is_feature_enabled('test-flag', 'random_id_12345', person_properties: { '$geoip_city_name' => 'Sydney' })}"
-  
-  puts "Sydney user (local only): #{posthog.is_feature_enabled('test-flag', 'distinct_id_random_22', person_properties: { '$geoip_city_name' => 'Sydney' }, only_evaluate_locally: true)}"
+  puts "Sydney user: #{posthog.is_feature_enabled('test-flag', 'random_id_12345',
+                                                  person_properties: { '$geoip_city_name' => 'Sydney' })}"
+
+  puts "Sydney user (local only): #{posthog.is_feature_enabled('test-flag', 'distinct_id_random_22',
+                                                               person_properties: { '$geoip_city_name' => 'Sydney' },
+                                                               only_evaluate_locally: true)}"
 
   puts "\n📋 Getting all flags..."
   puts "All flags: #{posthog.get_all_flags('distinct_id_random_22')}"
   puts "All flags (local): #{posthog.get_all_flags('distinct_id_random_22', only_evaluate_locally: true)}"
-  puts "All flags with properties: #{posthog.get_all_flags('distinct_id_random_22', person_properties: { '$geoip_city_name' => 'Sydney' }, only_evaluate_locally: true)}"
+  puts "All flags with properties: #{posthog.get_all_flags('distinct_id_random_22',
+                                                           person_properties: { '$geoip_city_name' => 'Sydney' },
+                                                           only_evaluate_locally: true)}"
 
 when 3
-  puts "\n" + "="*60
-  puts "COMPLEX COHORT EVALUATION EXAMPLES"
-  puts "="*60
-  puts "🧩 Testing complex cohort with nested logic..."
-  puts "   Cohort structure: (verified @example.com users) OR (PostHog team members)"
-  puts ""
+  puts "\n#{'=' * 60}"
+  puts 'COMPLEX COHORT EVALUATION EXAMPLES'
+  puts '=' * 60
+  puts '🧩 Testing complex cohort with nested logic...'
+  puts '   Cohort structure: (verified @example.com users) OR (PostHog team members)'
+  puts ''
   puts "📋 Required setup (if 'test-complex-cohort-flag' doesn't exist):"
   puts "   1. Create a cohort named 'complex-cohort' with these conditions:"
-  puts "      - Type: OR"
+  puts '      - Type: OR'
   puts "      - Group 1 (AND): email contains '@example.com' AND is_email_verified = 'true'"
-  puts "      - Group 2 (OR): User belongs to another cohort with @posthog.com emails"
+  puts '      - Group 2 (OR): User belongs to another cohort with @posthog.com emails'
   puts "   2. Create feature flag 'test-complex-cohort-flag':"
   puts "      - Condition: User belongs to cohort 'complex-cohort'"
-  puts "      - Rollout: 100%"
-  puts ""
+  puts '      - Rollout: 100%'
+  puts ''
 
   posthog.logger.level = Logger::INFO
 
-  # Test verified @example.com user (matches first AND condition)  
+  # Test verified @example.com user (matches first AND condition)
   result1 = posthog.is_feature_enabled(
     'test-complex-cohort-flag',
     'verified_user',
-    person_properties: { 
-      'email' => 'user@example.com', 
-      'is_email_verified' => 'true' 
+    person_properties: {
+      'email' => 'user@example.com',
+      'is_email_verified' => 'true'
     },
     only_evaluate_locally: true
   )
@@ -238,7 +245,7 @@ when 3
   # Test @posthog.com user (matches nested cohort reference)
   result2 = posthog.is_feature_enabled(
     'test-complex-cohort-flag',
-    'posthog_user', 
+    'posthog_user',
     person_properties: { 'email' => 'dev@posthog.com' },
     only_evaluate_locally: true
   )
@@ -255,68 +262,75 @@ when 3
 
   puts "\n🎯 Results Summary:"
   puts "   - Complex nested cohorts evaluated locally: #{result1 || result2 ? '✅ YES' : '❌ NO'}"
-  puts "   - Zero API calls needed: ✅ YES (all evaluated locally)"
-  puts "   - Ruby SDK now has cohort parity: ✅ YES"
+  puts '   - Zero API calls needed: ✅ YES (all evaluated locally)'
+  puts '   - Ruby SDK now has cohort parity: ✅ YES'
 
 when 4
-  puts "\n" + "="*60
-  puts "FEATURE FLAG PAYLOAD EXAMPLES"
-  puts "="*60
+  puts "\n#{'=' * 60}"
+  puts 'FEATURE FLAG PAYLOAD EXAMPLES'
+  puts '=' * 60
 
   posthog.logger.level = Logger::DEBUG
 
-  puts "📦 Testing feature flag payloads..."
+  puts '📦 Testing feature flag payloads...'
   puts "test-flag payload: #{posthog.get_feature_flag_payload('test-flag', 'distinct_id')}"
-  puts "test-flag payload (match=true): #{posthog.get_feature_flag_payload('test-flag', 'distinct_id', match_value: true)}"
+  puts "test-flag payload (match=true): #{posthog.get_feature_flag_payload('test-flag', 'distinct_id',
+                                                                           match_value: true)}"
   puts "All flags and payloads: #{posthog.get_all_flags_and_payloads('distinct_id')}"
   puts "Remote config payload: #{posthog.get_remote_config_payload('secret-encrypted-flag')}"
 
 when 5
   puts "\n🔄 Running all examples..."
-  
+
   # Run example 1
-  puts "\n" + "🔸" * 20 + " IDENTIFY AND CAPTURE " + "🔸" * 20
+  puts "\n#{'🔸' * 20} IDENTIFY AND CAPTURE #{'🔸' * 20}"
   posthog.logger.level = Logger::DEBUG
-  puts "📊 Capturing events..."
-  posthog.capture({ distinct_id: 'distinct_id', event: 'event', properties: { 'property1' => 'value', 'property2' => 'value' }, send_feature_flags: true })
-  puts "🔗 Creating alias..."
+  puts '📊 Capturing events...'
+  posthog.capture({ distinct_id: 'distinct_id', event: 'event',
+                    properties: { 'property1' => 'value', 'property2' => 'value' }, send_feature_flags: true })
+  puts '🔗 Creating alias...'
   posthog.alias(distinct_id: 'distinct_id', alias: 'new_distinct_id')
-  puts "👤 Identifying user..."
+  puts '👤 Identifying user...'
   posthog.identify(distinct_id: 'new_distinct_id', properties: { 'email' => 'something@something.com' })
-  
-  # Run example 2 
-  puts "\n" + "🔸" * 20 + " FEATURE FLAGS " + "🔸" * 20
-  puts "🏁 Testing basic feature flags..."
+
+  # Run example 2
+  puts "\n#{'🔸' * 20} FEATURE FLAGS #{'🔸' * 20}"
+  puts '🏁 Testing basic feature flags...'
   puts "beta-feature: #{posthog.is_feature_enabled('beta-feature', 'distinct_id')}"
-  puts "Sydney user: #{posthog.is_feature_enabled('test-flag', 'random_id_12345', person_properties: { '$geoip_city_name' => 'Sydney' })}"
-  
+  puts "Sydney user: #{posthog.is_feature_enabled('test-flag', 'random_id_12345',
+                                                  person_properties: { '$geoip_city_name' => 'Sydney' })}"
+
   # Run example 3
-  puts "\n" + "🔸" * 20 + " COMPLEX COHORTS " + "🔸" * 20  
+  puts "\n#{'🔸' * 20} COMPLEX COHORTS #{'🔸' * 20}"
   posthog.logger.level = Logger::INFO
-  puts "🧩 Testing complex cohort evaluation..."
-  result1 = posthog.is_feature_enabled('test-complex-cohort-flag', 'verified_user', person_properties: { 'email' => 'user@example.com', 'is_email_verified' => 'true' }, only_evaluate_locally: true)
-  result2 = posthog.is_feature_enabled('test-complex-cohort-flag', 'posthog_user', person_properties: { 'email' => 'dev@posthog.com' }, only_evaluate_locally: true)
+  puts '🧩 Testing complex cohort evaluation...'
+  result1 = posthog.is_feature_enabled('test-complex-cohort-flag', 'verified_user',
+                                       person_properties: { 'email' => 'user@example.com',
+                                                            'is_email_verified' => 'true' },
+                                       only_evaluate_locally: true)
+  result2 = posthog.is_feature_enabled('test-complex-cohort-flag', 'posthog_user',
+                                       person_properties: { 'email' => 'dev@posthog.com' }, only_evaluate_locally: true)
   puts "✅ Verified user: #{result1}, PostHog user: #{result2}"
-  
+
   # Run example 4
-  puts "\n" + "🔸" * 20 + " PAYLOADS " + "🔸" * 20
-  posthog.logger.level = Logger::DEBUG  
-  puts "📦 Testing payloads..."
+  puts "\n#{'🔸' * 20} PAYLOADS #{'🔸' * 20}"
+  posthog.logger.level = Logger::DEBUG
+  puts '📦 Testing payloads...'
   puts "Payload: #{posthog.get_feature_flag_payload('test-flag', 'distinct_id')}"
 
 when 6
-  puts "👋 Goodbye!"
+  puts '👋 Goodbye!'
   posthog.shutdown
   exit
 
 else
-  puts "❌ Invalid choice. Please run again and select 1-6."
+  puts '❌ Invalid choice. Please run again and select 1-6.'
   posthog.shutdown
   exit
 end
 
-puts "\n" + "="*60
-puts "✅ Example completed!"
-puts "="*60
+puts "\n#{'=' * 60}"
+puts '✅ Example completed!'
+puts '=' * 60
 
 posthog.shutdown

@@ -565,7 +565,7 @@ module PostHog
               ]
             },
             {
-              'type' => 'AND', 
+              'type' => 'AND',
               'values' => [
                 { 'key' => 'country', 'operator' => 'exact', 'value' => 'CA' },
                 { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
@@ -573,7 +573,7 @@ module PostHog
             }
           ]
         }
-        
+
         # Should match the second condition (CA, 19)
         property_values = { country: 'CA', age: 19 }
         result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
@@ -594,7 +594,7 @@ module PostHog
             { 'key' => 'age', 'operator' => 'gte', 'value' => 21 }
           ]
         }
-        
+
         property_values = { country: 'US', premium: true, age: 25 }
         cohort_properties = {
           'us_users' => {
@@ -618,7 +618,7 @@ module PostHog
             { 'key' => 'age', 'operator' => 'gte', 'value' => 18 }
           ]
         }
-        
+
         # Should match because country is NOT US and age >= 18
         property_values = { country: 'CA', age: 25 }
         result = PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
@@ -638,7 +638,7 @@ module PostHog
             { 'type' => 'cohort', 'value' => 'premium_users' }
           ]
         }
-        
+
         property_values = { country: 'CA', subscription: 'premium' }
         cohort_properties = {
           'us_users' => {
@@ -667,9 +667,9 @@ module PostHog
             { 'key' => 'country', 'operator' => 'exact', 'value' => 'US' }
           ]
         }
-        
+
         property_values = { country: 'US' }
-        
+
         expect do
           PostHog::FeatureFlagsPoller.match_property_group(property_group, property_values, {})
         end.to raise_error(PostHog::InconclusiveMatchError, 'Unknown property group type: XOR')
