@@ -31,7 +31,7 @@ POSTHOG_API_KEY=phc_your_project_key_here
 POSTHOG_PERSONAL_API_KEY=phx_your_personal_key_here
 
 # PostHog host URL
-POSTHOG_HOST=https://app.posthog.com  # or your self-hosted URL
+POSTHOG_HOST=https://us.posthog.com  # or https://eu.posthog.com for EU, or your self-hosted URL
 ```
 
 ### 2. Complex Cohort Example Setup
