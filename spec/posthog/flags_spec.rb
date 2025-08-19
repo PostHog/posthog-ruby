@@ -743,4 +743,877 @@ module PostHog
       end
     end
   end
+
+  describe 'FeatureFlagsPoller.matches_dependency_value' do
+    it 'matches string exactly (case-sensitive)' do
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('control', 'control')).to be true
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('Control', 'Control')).to be true
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('control', 'Control')).to be false
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('Control', 'CONTROL')).to be false
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('control', 'test')).to be false
+    end
+
+    it 'matches string variant with boolean true (any variant is truthy)' do
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(true, 'control')).to be true
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(true, 'test')).to be true
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(false, 'control')).to be false
+    end
+
+    it 'matches boolean exactly' do
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(true, true)).to be true
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(false, false)).to be true
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(false, true)).to be false
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(true, false)).to be false
+    end
+
+    it 'does not match empty string' do
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(true, '')).to be false
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('control', '')).to be false
+    end
+
+    it 'does not match type mismatches' do
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value(123, 'control')).to be false
+      expect(PostHog::FeatureFlagsPoller.matches_dependency_value('control', true)).to be false
+    end
+  end
+
+  describe 'Flag dependencies' do
+    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
+    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
+    let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+
+    before do
+      # Stub the initial feature flag definitions request
+      stub_request(:get, feature_flag_endpoint)
+        .with(
+          headers: {
+            'Accept' => '*/*',
+            'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
+            'Authorization' => 'Bearer testsecret',
+            'Host' => 'app.posthog.com',
+            'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
+          }
+        )
+        .to_return(status: 200, body: { flags: [] }.to_json)
+    end
+
+    it 'evaluates simple flag dependency' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Base Flag',
+                             key: 'base-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Dependent Flag',
+                             key: 'dependent-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'base-flag',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['base-flag']
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      result, locally_evaluated = poller.get_feature_flag('dependent-flag', 'test-user', {}, {}, {}, true)
+      expect(result).to be true
+      expect(locally_evaluated).to be true
+    end
+
+    it 'handles circular dependencies correctly' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Flag A',
+                             key: 'flag-a',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'flag-b',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: []  # Empty chain indicates circular dependency
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Flag B',
+                             key: 'flag-b',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'flag-a',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: []  # Empty chain indicates circular dependency
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # Should return [nil, false] due to circular dependency falling back to remote (but no remote call made)
+      result, locally_evaluated = poller.get_feature_flag('flag-a', 'test-user', {}, {}, {}, true)
+      expect(result).to be_nil
+      expect(locally_evaluated).to be false
+
+      result, locally_evaluated = poller.get_feature_flag('flag-b', 'test-user', {}, {}, {}, true)
+      expect(result).to be_nil
+      expect(locally_evaluated).to be false
+    end
+
+    it 'handles missing flag dependency' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Flag A',
+                             key: 'flag-a',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'non-existent-flag',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['non-existent-flag']
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # Should return [nil, false] because dependency doesn't exist (falls back to remote)
+      result, locally_evaluated = poller.get_feature_flag('flag-a', 'test-user', {}, {}, {}, true)
+      expect(result).to be_nil
+      expect(locally_evaluated).to be false
+    end
+
+    it 'evaluates complex dependency chains' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Flag A',
+                             key: 'flag-a',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Flag B',
+                             key: 'flag-b',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 3,
+                             name: 'Flag C',
+                             key: 'flag-c',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'flag-a',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['flag-a']
+                                     },
+                                     {
+                                       key: 'flag-b',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['flag-b']
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 4,
+                             name: 'Flag D',
+                             key: 'flag-d',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'flag-c',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: %w[flag-a flag-b flag-c]
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # All dependencies satisfied - should return True
+      result, locally_evaluated = poller.get_feature_flag('flag-d', 'test-user', {}, {}, {}, true)
+      expect(result).to be true
+      expect(locally_evaluated).to be true
+
+      # Make flag-a inactive - should break the chain
+      flags = poller.instance_variable_get(:@feature_flags)
+      flags[0][:active] = false
+      poller.instance_variable_set(:@feature_flags, flags)
+
+      result, locally_evaluated = poller.get_feature_flag('flag-d', 'test-user', {}, {}, {}, true)
+      expect(result).to be false
+      expect(locally_evaluated).to be true
+    end
+
+    it 'handles mixed conditions with flag dependency and property conditions' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Base Flag',
+                             key: 'base-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Mixed Flag',
+                             key: 'mixed-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'base-flag',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['base-flag']
+                                     },
+                                     {
+                                       key: 'email',
+                                       operator: 'icontains',
+                                       value: '@example.com',
+                                       type: 'person'
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # Both flag dependency and email condition satisfied
+      result, locally_evaluated = poller.get_feature_flag('mixed-flag', 'test-user',
+                                                          {}, { 'email' => 'test@example.com' }, {}, true)
+      expect(result).to be true
+      expect(locally_evaluated).to be true
+
+      # Flag dependency satisfied but email condition not satisfied
+      result, locally_evaluated = poller.get_feature_flag('mixed-flag', 'test-user-2',
+                                                          {}, { 'email' => 'test@other.com' }, {}, true)
+      expect(result).to be false
+      expect(locally_evaluated).to be true
+
+      # Email condition satisfied but flag dependency not satisfied (base-flag inactive)
+      flags = poller.instance_variable_get(:@feature_flags)
+      flags[0][:active] = false
+      poller.instance_variable_set(:@feature_flags, flags)
+
+      result, locally_evaluated = poller.get_feature_flag('mixed-flag', 'test-user-3',
+                                                          {}, { 'email' => 'test@example.com' }, {}, true)
+      expect(result).to be false
+      expect(locally_evaluated).to be true
+    end
+
+    it 'handles malformed dependency chains' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Base Flag',
+                             key: 'base-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Missing Chain Flag',
+                             key: 'missing-chain-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'base-flag',
+                                       operator: 'exact',
+                                       value: true,
+                                       type: 'flag'
+                                       # No dependency_chain property - should handle gracefully
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # Should return [nil, false] when dependency_chain is missing (falls back to remote)
+      result, locally_evaluated = poller.get_feature_flag('missing-chain-flag', 'test-user', {}, {}, {}, true)
+      expect(result).to be_nil
+      expect(locally_evaluated).to be false
+    end
+
+    it 'handles inactive flags in dependency chain' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Inactive Base Flag',
+                             key: 'inactive-base-flag',
+                             active: false, # This flag is inactive
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Dependent Flag',
+                             key: 'dependent-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'inactive-base-flag',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['inactive-base-flag']
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # Should return false because dependency is inactive
+      result, locally_evaluated = poller.get_feature_flag('dependent-flag', 'test-user', {}, {}, {}, true)
+      expect(result).to be false
+      expect(locally_evaluated).to be true
+    end
+
+    it 'evaluates multiple flag dependencies in AND condition' do
+      stub_feature_flags([
+                           {
+                             id: 1,
+                             name: 'Flag A',
+                             key: 'flag-a',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 2,
+                             name: 'Flag B',
+                             key: 'flag-b',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           },
+                           {
+                             id: 3,
+                             name: 'Multi Dependency Flag',
+                             key: 'multi-dependency-flag',
+                             active: true,
+                             filters: {
+                               groups: [
+                                 {
+                                   properties: [
+                                     {
+                                       key: 'flag-a',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['flag-a']
+                                     },
+                                     {
+                                       key: 'flag-b',
+                                       operator: 'flag_evaluates_to',
+                                       value: true,
+                                       type: 'flag',
+                                       dependency_chain: ['flag-b']
+                                     }
+                                   ],
+                                   rollout_percentage: 100
+                                 }
+                               ]
+                             }
+                           }
+                         ])
+
+      # Both dependencies satisfied
+      result, locally_evaluated = poller.get_feature_flag('multi-dependency-flag', 'test-user', {}, {}, {}, true)
+      expect(result).to be true
+      expect(locally_evaluated).to be true
+
+      # Make one dependency inactive - should fail AND condition
+      flags = poller.instance_variable_get(:@feature_flags)
+      flags[0][:active] = false # Make flag-a inactive
+      poller.instance_variable_set(:@feature_flags, flags)
+
+      result, locally_evaluated = poller.get_feature_flag('multi-dependency-flag', 'test-user', {}, {}, {}, true)
+      expect(result).to be false
+      expect(locally_evaluated).to be true
+    end
+
+    it 'evaluates production-style multivariate dependency chain' do
+      flags = [
+        {
+          id: 451,
+          name: 'Multivariate Leaf Flag (Base)',
+          key: 'multivariate-leaf-flag',
+          active: true,
+          filters: {
+            multivariate: {
+              variants: [
+                { key: 'pineapple', rollout_percentage: 25 },
+                { key: 'mango', rollout_percentage: 25 },
+                { key: 'papaya', rollout_percentage: 25 },
+                { key: 'kiwi', rollout_percentage: 25 }
+              ]
+            },
+            groups: [
+              {
+                variant: 'pineapple',
+                properties: [
+                  {
+                    key: 'email',
+                    type: 'person',
+                    value: ['pineapple@example.com'],
+                    operator: 'exact'
+                  }
+                ],
+                rollout_percentage: 100
+              },
+              {
+                variant: 'mango',
+                properties: [
+                  {
+                    key: 'email',
+                    type: 'person',
+                    value: ['mango@example.com'],
+                    operator: 'exact'
+                  }
+                ],
+                rollout_percentage: 100
+              },
+              {
+                variant: 'papaya',
+                properties: [
+                  {
+                    key: 'email',
+                    type: 'person',
+                    value: ['papaya@example.com'],
+                    operator: 'exact'
+                  }
+                ],
+                rollout_percentage: 100
+              },
+              {
+                variant: 'kiwi',
+                properties: [
+                  {
+                    key: 'email',
+                    type: 'person',
+                    value: ['kiwi@example.com'],
+                    operator: 'exact'
+                  }
+                ],
+                rollout_percentage: 100
+              },
+              {
+                properties: [],
+                rollout_percentage: 0 # Force default to false for unknown emails
+              }
+            ]
+          }
+        },
+        {
+          id: 467,
+          name: 'Multivariate Intermediate Flag (Depends on fruit)',
+          key: 'multivariate-intermediate-flag',
+          active: true,
+          filters: {
+            multivariate: {
+              variants: [
+                { key: 'blue', rollout_percentage: 100 }, # Force blue when dependency satisfied
+                { key: 'red', rollout_percentage: 0 },
+                { key: 'green', rollout_percentage: 0 },
+                { key: 'black', rollout_percentage: 0 }
+              ]
+            },
+            groups: [
+              {
+                variant: 'blue',
+                properties: [
+                  {
+                    key: 'multivariate-leaf-flag',
+                    type: 'flag',
+                    value: 'pineapple',
+                    operator: 'flag_evaluates_to',
+                    dependency_chain: ['multivariate-leaf-flag']
+                  }
+                ],
+                rollout_percentage: 100
+              },
+              {
+                variant: 'red',
+                properties: [
+                  {
+                    key: 'multivariate-leaf-flag',
+                    type: 'flag',
+                    value: 'mango',
+                    operator: 'flag_evaluates_to',
+                    dependency_chain: ['multivariate-leaf-flag']
+                  }
+                ],
+                rollout_percentage: 100
+              }
+            ]
+          }
+        },
+        {
+          id: 468,
+          name: 'Multivariate Root Flag (Depends on color)',
+          key: 'multivariate-root-flag',
+          active: true,
+          filters: {
+            multivariate: {
+              variants: [
+                { key: 'breaking-bad', rollout_percentage: 100 }, # Force breaking-bad when dependency satisfied
+                { key: 'the-wire', rollout_percentage: 0 },
+                { key: 'game-of-thrones', rollout_percentage: 0 },
+                { key: 'the-expanse', rollout_percentage: 0 }
+              ]
+            },
+            groups: [
+              {
+                variant: 'breaking-bad',
+                properties: [
+                  {
+                    key: 'multivariate-intermediate-flag',
+                    type: 'flag',
+                    value: 'blue',
+                    operator: 'flag_evaluates_to',
+                    dependency_chain: %w[multivariate-leaf-flag multivariate-intermediate-flag]
+                  }
+                ],
+                rollout_percentage: 100
+              },
+              {
+                variant: 'the-wire',
+                properties: [
+                  {
+                    key: 'multivariate-intermediate-flag',
+                    type: 'flag',
+                    value: 'red',
+                    operator: 'flag_evaluates_to',
+                    dependency_chain: %w[multivariate-leaf-flag multivariate-intermediate-flag]
+                  }
+                ],
+                rollout_percentage: 100
+              }
+            ]
+          }
+        }
+      ]
+
+      stub_feature_flags(flags)
+
+      # Test successful pineapple -> blue -> breaking-bad chain
+      leaf_result, leaf_locally_evaluated = poller.get_feature_flag(
+        'multivariate-leaf-flag', 'test-user',
+        {}, { email: 'pineapple@example.com' },
+        {}, true
+      )
+
+      intermediate_result, intermediate_locally_evaluated = poller.get_feature_flag(
+        'multivariate-intermediate-flag', 'test-user',
+        {}, { email: 'pineapple@example.com' },
+        {}, true
+      )
+      root_result, root_locally_evaluated = poller.get_feature_flag(
+        'multivariate-root-flag', 'test-user',
+        {}, { email: 'pineapple@example.com' },
+        {}, true
+      )
+
+      expect(leaf_result).to eq('pineapple')
+      expect(leaf_locally_evaluated).to be true
+      expect(intermediate_result).to eq('blue')
+      expect(intermediate_locally_evaluated).to be true
+      expect(root_result).to eq('breaking-bad')
+      expect(root_locally_evaluated).to be true
+
+      # Test successful mango -> red -> the-wire chain
+      mango_leaf_result, mango_leaf_locally_evaluated = poller.get_feature_flag(
+        'multivariate-leaf-flag', 'test-user',
+        {}, { email: 'mango@example.com' },
+        {}, true
+      )
+      mango_intermediate_result, mango_intermediate_locally_evaluated = poller.get_feature_flag(
+        'multivariate-intermediate-flag', 'test-user',
+        {}, { email: 'mango@example.com' },
+        {}, true
+      )
+      mango_root_result, mango_root_locally_evaluated = poller.get_feature_flag(
+        'multivariate-root-flag', 'test-user',
+        {}, { email: 'mango@example.com' },
+        {}, true
+      )
+
+      expect(mango_leaf_result).to eq('mango')
+      expect(mango_leaf_locally_evaluated).to be true
+      expect(mango_intermediate_result).to eq('red')
+      expect(mango_intermediate_locally_evaluated).to be true
+      expect(mango_root_result).to eq('the-wire')
+      expect(mango_root_locally_evaluated).to be true
+
+      # Test broken chain - user without matching email gets default/false results
+      unknown_leaf_result, unknown_leaf_locally_evaluated = poller.get_feature_flag(
+        'multivariate-leaf-flag', 'test-user',
+        {}, { email: 'unknown@example.com' },
+        {}, true
+      )
+      unknown_intermediate_result, unknown_intermediate_locally_evaluated = poller.get_feature_flag(
+        'multivariate-intermediate-flag', 'test-user',
+        {}, { email: 'unknown@example.com' },
+        {}, true
+      )
+      unknown_root_result, unknown_root_locally_evaluated = poller.get_feature_flag(
+        'multivariate-root-flag', 'test-user',
+        {}, { email: 'unknown@example.com' },
+        {}, true
+      )
+
+      expect(unknown_leaf_result).to be false # No matching email -> null variant -> false
+      expect(unknown_leaf_locally_evaluated).to be true
+      expect(unknown_intermediate_result).to be false # Dependency not satisfied
+      expect(unknown_intermediate_locally_evaluated).to be true
+      expect(unknown_root_result).to be false # Chain broken
+      expect(unknown_root_locally_evaluated).to be true
+    end
+
+    def stub_feature_flags(flags)
+      poller.instance_variable_set(:@feature_flags, flags)
+      flags_by_key = {}
+      flags.each { |flag| flags_by_key[flag[:key]] = flag }
+      poller.instance_variable_set(:@feature_flags_by_key, flags_by_key)
+      poller.instance_variable_get(:@loaded_flags_successfully_once).make_true
+    end
+  end
+
+  describe 'FeatureFlagsPoller#is_condition_match' do
+    let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
+    let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+    let(:flag) { { key: 'test-flag' } }
+    let(:distinct_id) { 'test-user' }
+    let(:properties) { { email: 'test@example.com' } }
+    let(:evaluation_cache) { {} }
+    let(:cohort_properties) { {} }
+
+    before do
+      # Stub the initial feature flag definitions request
+      stub_request(:get, 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true')
+        .to_return(status: 200, body: { flags: [] }.to_json)
+    end
+
+    context 'when rollout_percentage is 0' do
+      let(:condition) { { properties: [], rollout_percentage: 0 } }
+
+      it 'returns false' do
+        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+                             cohort_properties)
+        expect(result).to be false
+      end
+    end
+
+    context 'when rollout_percentage is nil and no properties' do
+      let(:condition) { { properties: [], rollout_percentage: nil } }
+
+      it 'returns true' do
+        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+                             cohort_properties)
+        expect(result).to be true
+      end
+    end
+
+    context 'when rollout_percentage is nil and properties exist' do
+      let(:condition) do
+        {
+          properties: [{ key: 'email', value: 'test@example.com', operator: 'exact' }],
+          rollout_percentage: nil
+        }
+      end
+
+      before do
+        allow(PostHog::FeatureFlagsPoller).to receive(:match_property).and_return(true)
+      end
+
+      it 'returns true when all properties match' do
+        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+                             cohort_properties)
+        expect(result).to be true
+      end
+    end
+
+    context 'when properties exist but not all match' do
+      let(:condition) do
+        {
+          properties: [{ key: 'email', value: 'other@example.com', operator: 'exact' }],
+          rollout_percentage: nil
+        }
+      end
+
+      before do
+        allow(PostHog::FeatureFlagsPoller).to receive(:match_property).and_return(false)
+      end
+
+      it 'returns false' do
+        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+                             cohort_properties)
+        expect(result).to be false
+      end
+    end
+
+    context 'when rollout_percentage is 50' do
+      let(:condition) { { properties: [], rollout_percentage: 50 } }
+
+      context 'when hash is below threshold' do
+        before do
+          allow(poller).to receive(:_hash).and_return(0.3)
+        end
+
+        it 'returns true' do
+          result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+                               cohort_properties)
+          expect(result).to be true
+        end
+      end
+
+      context 'when hash is above threshold' do
+        before do
+          allow(poller).to receive(:_hash).and_return(0.7)
+        end
+
+        it 'returns false' do
+          result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+                               cohort_properties)
+          expect(result).to be false
+        end
+      end
+    end
+  end
 end
