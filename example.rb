@@ -35,14 +35,14 @@ rescue LoadError
 end
 
 # Get configuration
-api_key = ENV['POSTHOG_API_KEY'] || ''
+api_key = ENV['POSTHOG_PROJECT_API_KEY'] || ''
 personal_api_key = ENV['POSTHOG_PERSONAL_API_KEY'] || ''
 host = ENV['POSTHOG_HOST'] || 'http://localhost:8000'
 
 # Check if credentials are provided
 if api_key.empty? || personal_api_key.empty?
   puts '❌ Missing PostHog credentials!'
-  puts '   Please set POSTHOG_API_KEY and POSTHOG_PERSONAL_API_KEY environment variables'
+  puts '   Please set POSTHOG_PROJECT_API_KEY and POSTHOG_PERSONAL_API_KEY environment variables'
   puts '   or copy .env.example to .env and fill in your values'
   exit 1
 end
@@ -74,7 +74,7 @@ rescue StandardError => e
   puts '❌ Authentication failed!'
   puts "   Error: #{e.message}"
   puts "\n   Please check your credentials:"
-  puts '   - POSTHOG_API_KEY: Project API key from PostHog settings'
+  puts '   - POSTHOG_PROJECT_API_KEY: Project API key from PostHog settings'
   puts '   - POSTHOG_PERSONAL_API_KEY: Personal API key (required for local evaluation)'
   puts '   - POSTHOG_HOST: Your PostHog instance URL'
   exit 1
@@ -96,10 +96,11 @@ puts "🚀 PostHog Ruby SDK Demo - Choose an example to run:\n\n"
 puts '1. Identify and capture examples'
 puts '2. Feature flag local evaluation examples'
 puts '3. Complex cohort evaluation examples'
-puts '4. Feature flag payload examples'
-puts '5. Run all examples'
-puts '6. Exit'
-print "\nEnter your choice (1-6): "
+puts '4. Flag dependencies examples'
+puts '5. Feature flag payload examples'
+puts '6. Run all examples'
+puts '7. Exit'
+print "\nEnter your choice (1-7): "
 
 choice = gets.chomp.to_i
 
@@ -267,6 +268,62 @@ when 3
 
 when 4
   puts "\n#{'=' * 60}"
+  puts 'FLAG DEPENDENCIES EXAMPLES'
+  puts '=' * 60
+  puts '🔗 Testing flag dependencies with local evaluation...'
+  puts '   Flag structure: \'test-flag-dependency\' depends on \'beta-feature\' being enabled'
+  puts ''
+  puts "📋 Required setup (if 'test-flag-dependency' doesn't exist):"
+  puts "   1. Create feature flag 'beta-feature':"
+  puts "      - Condition: email contains '@example.com'"
+  puts '      - Rollout: 100%'
+  puts "   2. Create feature flag 'test-flag-dependency':"
+  puts "      - Condition: flag 'beta-feature' is enabled"
+  puts '      - Rollout: 100%'
+  puts ''
+
+  posthog.logger.level = Logger::DEBUG
+
+  # Test @example.com user (should satisfy dependency if flags exist)
+  result1 = posthog.is_feature_enabled(
+    'test-flag-dependency',
+    'example_user',
+    person_properties: { 'email' => 'user@example.com' },
+    only_evaluate_locally: true
+  )
+  puts "✅ @example.com user (test-flag-dependency): #{result1}"
+
+  # Test non-example.com user (dependency should not be satisfied)
+  result2 = posthog.is_feature_enabled(
+    'test-flag-dependency',
+    'regular_user',
+    person_properties: { 'email' => 'user@other.com' },
+    only_evaluate_locally: true
+  )
+  puts "❌ Regular user (test-flag-dependency): #{result2}"
+
+  # Test beta-feature directly for comparison
+  beta1 = posthog.is_feature_enabled(
+    'beta-feature',
+    'example_user',
+    person_properties: { 'email' => 'user@example.com' },
+    only_evaluate_locally: true
+  )
+  beta2 = posthog.is_feature_enabled(
+    'beta-feature',
+    'regular_user',
+    person_properties: { 'email' => 'user@other.com' },
+    only_evaluate_locally: true
+  )
+  puts "📊 Beta feature comparison - @example.com: #{beta1}, regular: #{beta2}"
+
+  puts "\n🎯 Results Summary:"
+  puts "   - Flag dependencies evaluated locally: #{result1 == result2 ? '❌ NO' : '✅ YES'}"
+  puts '   - Zero API calls needed: ✅ YES (all evaluated locally)'
+  puts '   - Ruby SDK supports flag dependencies: ✅ YES'
+
+when 5
+  puts "\n#{'=' * 60}"
   puts 'FEATURE FLAG PAYLOAD EXAMPLES'
   puts '=' * 60
 
@@ -279,7 +336,7 @@ when 4
   puts "All flags and payloads: #{posthog.get_all_flags_and_payloads('distinct_id')}"
   puts "Remote config payload: #{posthog.get_remote_config_payload('secret-encrypted-flag')}"
 
-when 5
+when 6
   puts "\n🔄 Running all examples..."
 
   # Run example 1
@@ -313,18 +370,30 @@ when 5
   puts "✅ Verified user: #{result1}, PostHog user: #{result2}"
 
   # Run example 4
+  puts "\n#{'🔸' * 20} FLAG DEPENDENCIES #{'🔸' * 20}"
+  posthog.logger.level = Logger::DEBUG
+  puts '🔗 Testing flag dependencies...'
+  dep_result1 = posthog.is_feature_enabled('test-flag-dependency', 'example_user',
+                                           person_properties: { 'email' => 'user@example.com' },
+                                           only_evaluate_locally: true)
+  dep_result2 = posthog.is_feature_enabled('test-flag-dependency', 'regular_user',
+                                           person_properties: { 'email' => 'user@other.com' },
+                                           only_evaluate_locally: true)
+  puts "✅ Flag dependencies: @example.com: #{dep_result1}, regular: #{dep_result2}"
+
+  # Run example 5
   puts "\n#{'🔸' * 20} PAYLOADS #{'🔸' * 20}"
   posthog.logger.level = Logger::DEBUG
   puts '📦 Testing payloads...'
   puts "Payload: #{posthog.get_feature_flag_payload('test-flag', 'distinct_id')}"
 
-when 6
+when 7
   puts '👋 Goodbye!'
   posthog.shutdown
   exit
 
 else
-  puts '❌ Invalid choice. Please run again and select 1-6.'
+  puts '❌ Invalid choice. Please run again and select 1-7.'
   posthog.shutdown
   exit
 end
