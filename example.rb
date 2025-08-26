@@ -317,6 +317,34 @@ when 4
   )
   puts "📊 Beta feature comparison - @example.com: #{beta1}, regular: #{beta2}"
 
+  # Test pineapple -> blue -> breaking-bad chain
+  dependent_result3 = posthog.get_feature_flag(
+    'multivariate-root-flag',
+    'regular_user',
+    person_properties: { 'email' => 'pineapple@example.com' },
+    only_evaluate_locally: true
+  )
+  if dependent_result3.to_s == 'breaking-bad'
+    puts "✅ 'multivariate-root-flag' with email pineapple@example.com succeeded"
+  else
+    puts "     ❌ Something went wrong evaluating 'multivariate-root-flag' with pineapple@example.com. " \
+         "Expected 'breaking-bad', got '#{dependent_result3}'"
+  end
+
+  # Test mango -> red -> the-wire chain
+  dependent_result4 = posthog.get_feature_flag(
+    'multivariate-root-flag',
+    'regular_user',
+    person_properties: { 'email' => 'mango@example.com' },
+    only_evaluate_locally: true
+  )
+  if dependent_result4.to_s == 'the-wire'
+    puts "✅ 'multivariate-root-flag' with email mango@example.com succeeded"
+  else
+    puts '     ❌ Something went wrong evaluating multivariate-root-flag with mango@example.com. ' \
+         "Expected 'the-wire', got '#{dependent_result4}'"
+  end
+
   puts "\n🎯 Results Summary:"
   puts "   - Flag dependencies evaluated locally: #{result1 == result2 ? '❌ NO' : '✅ YES'}"
   puts '   - Zero API calls needed: ✅ YES (all evaluated locally)'
@@ -380,6 +408,15 @@ when 6
                                            person_properties: { 'email' => 'user@other.com' },
                                            only_evaluate_locally: true)
   puts "✅ Flag dependencies: @example.com: #{dep_result1}, regular: #{dep_result2}"
+
+  # Test multivariate dependency chains
+  mv_result1 = posthog.get_feature_flag('multivariate-root-flag', 'regular_user',
+                                        person_properties: { 'email' => 'pineapple@example.com' },
+                                        only_evaluate_locally: true)
+  mv_result2 = posthog.get_feature_flag('multivariate-root-flag', 'regular_user',
+                                        person_properties: { 'email' => 'mango@example.com' },
+                                        only_evaluate_locally: true)
+  puts "✅ Multivariate chains: pineapple->#{mv_result1}, mango->#{mv_result2}"
 
   # Run example 5
   puts "\n#{'🔸' * 20} PAYLOADS #{'🔸' * 20}"
