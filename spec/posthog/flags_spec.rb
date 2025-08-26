@@ -1515,7 +1515,7 @@ module PostHog
     end
   end
 
-  describe 'FeatureFlagsPoller#is_condition_match' do
+  describe 'FeatureFlagsPoller#condition_match' do
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
     let(:flag) { { key: 'test-flag' } }
@@ -1534,7 +1534,7 @@ module PostHog
       let(:condition) { { properties: [], rollout_percentage: 0 } }
 
       it 'returns false' do
-        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+        result = poller.send(:condition_match, flag, distinct_id, condition, properties, evaluation_cache,
                              cohort_properties)
         expect(result).to be false
       end
@@ -1544,7 +1544,7 @@ module PostHog
       let(:condition) { { properties: [], rollout_percentage: nil } }
 
       it 'returns true' do
-        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+        result = poller.send(:condition_match, flag, distinct_id, condition, properties, evaluation_cache,
                              cohort_properties)
         expect(result).to be true
       end
@@ -1563,7 +1563,7 @@ module PostHog
       end
 
       it 'returns true when all properties match' do
-        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+        result = poller.send(:condition_match, flag, distinct_id, condition, properties, evaluation_cache,
                              cohort_properties)
         expect(result).to be true
       end
@@ -1582,7 +1582,7 @@ module PostHog
       end
 
       it 'returns false' do
-        result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+        result = poller.send(:condition_match, flag, distinct_id, condition, properties, evaluation_cache,
                              cohort_properties)
         expect(result).to be false
       end
@@ -1597,7 +1597,7 @@ module PostHog
         end
 
         it 'returns true' do
-          result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+          result = poller.send(:condition_match, flag, distinct_id, condition, properties, evaluation_cache,
                                cohort_properties)
           expect(result).to be true
         end
@@ -1609,7 +1609,7 @@ module PostHog
         end
 
         it 'returns false' do
-          result = poller.send(:is_condition_match, flag, distinct_id, condition, properties, evaluation_cache,
+          result = poller.send(:condition_match, flag, distinct_id, condition, properties, evaluation_cache,
                                cohort_properties)
           expect(result).to be false
         end

@@ -745,7 +745,7 @@ module PostHog
       # NOTE: This NEEDS to be `each` because `each_key` breaks
       # This is not a hash, it's just an array with 2 entries
       sorted_flag_conditions.each do |condition, _idx| # rubocop:disable Style/HashEachMethods
-        if is_condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties)
+        if condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties)
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
           flag_variants = flag_multivariate[:variants] || []
@@ -771,9 +771,7 @@ module PostHog
       false
     end
 
-    # TODO: Rename to `condition_match?` in future version
-    # rubocop:disable Naming/PredicateName
-    def is_condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
+    def condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
@@ -794,7 +792,6 @@ module PostHog
 
       true
     end
-    # rubocop:enable Naming/PredicateName
 
     # This function takes a distinct_id and a feature flag key and returns a float between 0 and 1.
     # Given the same distinct_id and key, it'll always return the same float. These floats are
