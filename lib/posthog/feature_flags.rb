@@ -550,18 +550,15 @@ module PostHog
       group_type == 'AND'
     end
 
+    # Evaluates a flag dependency property according to the dependency chain algorithm.
+    #
+    # @param property [Hash] Flag property with type="flag" and dependency_chain
+    # @param evaluation_cache [Hash] Cache for storing evaluation results
+    # @param distinct_id [String] The distinct ID being evaluated
+    # @param properties [Hash] Person properties for evaluation
+    # @param cohort_properties [Hash] Cohort properties for evaluation
+    # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
     def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties)
-      # Evaluate a flag dependency property according to the dependency chain algorithm.
-      #
-      # Args:
-      #   property: Flag property with type="flag" and dependency_chain
-      #   evaluation_cache: Cache for storing evaluation results
-      #   distinct_id: The distinct ID being evaluated
-      #   properties: Person properties for evaluation
-      #   cohort_properties: Cohort properties for evaluation
-      #
-      # Returns:
-      #   bool: True if all dependencies in the chain evaluate to True, False otherwise
       if property[:operator] != 'flag_evaluates_to'
         # Should never happen, but just in case
         raise InconclusiveMatchError, "Operator #{property[:operator]} not supported for flag dependencies"
