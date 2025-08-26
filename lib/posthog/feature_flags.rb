@@ -186,7 +186,8 @@ module PostHog
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
-          flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties, false, true)
+          flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties,
+                                                  only_evaluate_locally, true)
           if flags_data.key?(:featureFlags)
             flags = stringify_keys(flags_data[:featureFlags] || {})
             request_id = flags_data[:requestId]
@@ -526,8 +527,8 @@ module PostHog
 
       properties.each do |prop|
         PostHog::Utils.symbolize_keys!(prop)
-        matches = evaluate_property_match(prop, property_values, cohort_properties)
-        next if matches.nil? # Skip flag dependencies
+
+        matches = match_property(prop, property_values, cohort_properties)
 
         negated = prop[:negation] || false
         final_result = negated ? !matches : matches
@@ -549,37 +550,144 @@ module PostHog
       group_type == 'AND'
     end
 
-    def self.evaluate_property_match(prop, property_values, cohort_properties)
-      prop_type = extract_value(prop, :type)
-
-      case prop_type
-      when 'cohort'
-        match_cohort(prop, property_values, cohort_properties)
-      when 'flag'
-        PostHog::Logging.logger&.warn(
-          '[FEATURE FLAGS] Flag dependency filters are not supported in local evaluation. ' \
-          "Skipping condition with dependency on flag '#{prop[:key]}'"
-        )
-        nil # Signal to skip this property
-      else
-        match_property(prop, property_values, cohort_properties)
+    # Evaluates a flag dependency property according to the dependency chain algorithm.
+    #
+    # @param property [Hash] Flag property with type="flag" and dependency_chain
+    # @param evaluation_cache [Hash] Cache for storing evaluation results
+    # @param distinct_id [String] The distinct ID being evaluated
+    # @param properties [Hash] Person properties for evaluation
+    # @param cohort_properties [Hash] Cohort properties for evaluation
+    # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
+    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties)
+      if property[:operator] != 'flag_evaluates_to'
+        # Should never happen, but just in case
+        raise InconclusiveMatchError, "Operator #{property[:operator]} not supported for flag dependencies"
       end
+
+      if @feature_flags_by_key.nil? || evaluation_cache.nil?
+        # Cannot evaluate flag dependencies without required context
+        raise InconclusiveMatchError,
+              "Cannot evaluate flag dependency on '#{property[:key] || 'unknown'}' " \
+              'without feature flags loaded or evaluation_cache'
+      end
+
+      # Check if dependency_chain is present - it should always be provided for flag dependencies
+      unless property.key?(:dependency_chain)
+        # Missing dependency_chain indicates malformed server data
+        raise InconclusiveMatchError,
+              "Flag dependency property for '#{property[:key] || 'unknown'}' " \
+              "is missing required 'dependency_chain' field"
+      end
+
+      dependency_chain = property[:dependency_chain]
+
+      # Handle circular dependency (empty chain means circular)
+      if dependency_chain.empty?
+        PostHog::Logging.logger&.debug("Circular dependency detected for flag: #{property[:key]}")
+        raise InconclusiveMatchError,
+              "Circular dependency detected for flag '#{property[:key] || 'unknown'}'"
+      end
+
+      # Evaluate all dependencies in the chain order
+      dependency_chain.each do |dep_flag_key|
+        unless evaluation_cache.key?(dep_flag_key)
+          # Need to evaluate this dependency first
+          dep_flag = @feature_flags_by_key[dep_flag_key]
+          if dep_flag.nil?
+            # Missing flag dependency - cannot evaluate locally
+            evaluation_cache[dep_flag_key] = nil
+            raise InconclusiveMatchError,
+                  "Cannot evaluate flag dependency '#{dep_flag_key}' - flag not found in local flags"
+          elsif !dep_flag[:active]
+            # Check if the flag is active (same check as in _compute_flag_locally)
+            evaluation_cache[dep_flag_key] = false
+          else
+            # Recursively evaluate the dependency using existing instance method
+            begin
+              dep_result = match_feature_flag_properties(
+                dep_flag,
+                distinct_id,
+                properties,
+                evaluation_cache,
+                cohort_properties
+              )
+              evaluation_cache[dep_flag_key] = dep_result
+            rescue InconclusiveMatchError => e
+              # If we can't evaluate a dependency, store nil and propagate the error
+              evaluation_cache[dep_flag_key] = nil
+              raise InconclusiveMatchError,
+                    "Cannot evaluate flag dependency '#{dep_flag_key}': #{e.message}"
+            end
+          end
+        end
+
+        # Check the cached result
+        cached_result = evaluation_cache[dep_flag_key]
+        if cached_result.nil?
+          # Previously inconclusive - raise error again
+          raise InconclusiveMatchError,
+                "Flag dependency '#{dep_flag_key}' was previously inconclusive"
+        elsif !cached_result
+          # Definitive False result - dependency failed
+          return false
+        end
+      end
+
+      # Get the expected value of the immediate dependency and the actual value
+      expected_value = property[:value]
+      # The flag we want to evaluate is defined by :key which should ALSO be the last key in the dependency chain
+      actual_value = evaluation_cache[property[:key]]
+
+      self.class.matches_dependency_value(expected_value, actual_value)
+    end
+
+    def self.matches_dependency_value(expected_value, actual_value)
+      # Check if the actual flag value matches the expected dependency value.
+      #
+      # - String variant case: check for exact match or boolean true
+      # - Boolean case: must match expected boolean value
+      #
+      # @param expected_value [Object] The expected value from the property
+      # @param actual_value [Object] The actual value returned by the flag evaluation
+      # @return [Boolean] True if the values match according to flag dependency rules
+
+      # String variant case - check for exact match or boolean true
+      if actual_value.is_a?(String) && !actual_value.empty?
+        if expected_value.is_a?(TrueClass) || expected_value.is_a?(FalseClass)
+          # Any variant matches boolean true
+          return expected_value
+        elsif expected_value.is_a?(String)
+          # variants are case-sensitive, hence our comparison is too
+          return actual_value == expected_value
+        else
+          return false
+        end
+
+      # Boolean case - must match expected boolean value
+      elsif actual_value.is_a?(TrueClass) || actual_value.is_a?(FalseClass)
+        return actual_value == expected_value if expected_value.is_a?(TrueClass) || expected_value.is_a?(FalseClass)
+      end
+
+      # Default case
+      false
     end
 
     private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
-                         :match_nested_property_group, :match_regular_property_group, :evaluate_property_match
+                         :match_nested_property_group, :match_regular_property_group
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
       raise InconclusiveMatchError, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
 
       return false unless flag[:active]
 
+      # Create evaluation cache for flag dependencies
+      evaluation_cache = {}
+
       flag_filters = flag[:filters] || {}
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
       if aggregation_group_type_index.nil?
-        return match_feature_flag_properties(flag, distinct_id, person_properties,
-                                             @cohorts)
+        return match_feature_flag_properties(flag, distinct_id, person_properties, evaluation_cache, @cohorts)
       end
 
       group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
@@ -602,7 +710,8 @@ module PostHog
       end
 
       focused_group_properties = group_properties[group_name_symbol]
-      match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties, @cohorts)
+      match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties, evaluation_cache,
+                                    @cohorts)
     end
 
     def _compute_flag_payload_locally(key, match_value)
@@ -617,7 +726,7 @@ module PostHog
       response
     end
 
-    def match_feature_flag_properties(flag, distinct_id, properties, cohort_properties = {})
+    def match_feature_flag_properties(flag, distinct_id, properties, evaluation_cache, cohort_properties = {})
       flag_filters = flag[:filters] || {}
 
       flag_conditions = flag_filters[:groups] || []
@@ -633,7 +742,7 @@ module PostHog
       # NOTE: This NEEDS to be `each` because `each_key` breaks
       # This is not a hash, it's just an array with 2 entries
       sorted_flag_conditions.each do |condition, _idx| # rubocop:disable Style/HashEachMethods
-        if is_condition_match(flag, distinct_id, condition, properties, cohort_properties)
+        if condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties)
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
           flag_variants = flag_multivariate[:variants] || []
@@ -659,26 +768,21 @@ module PostHog
       false
     end
 
-    # TODO: Rename to `condition_match?` in future version
-    def is_condition_match(flag, distinct_id, condition, properties, cohort_properties = {}) # rubocop:disable Naming/PredicateName
+    def condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
-        if !condition[:properties].all? do |prop|
-          # Skip flag dependencies as they are not supported in local evaluation
+        unless condition[:properties].all? do |prop|
           if prop[:type] == 'flag'
-            logger.warn(
-              '[FEATURE FLAGS] Flag dependency filters are not supported in local evaluation. ' \
-              "Skipping condition for flag '#{flag[:key]}' with dependency on flag '#{prop[:key]}'"
-            )
-            next true
+            evaluate_flag_dependency(prop, evaluation_cache, distinct_id, properties, cohort_properties)
+          else
+            FeatureFlagsPoller.match_property(prop, properties, cohort_properties)
           end
-          FeatureFlagsPoller.match_property(prop, properties, cohort_properties)
         end
           return false
-        elsif rollout_percentage.nil?
-          return true
         end
+
+        return true if rollout_percentage.nil?
       end
 
       return false if !rollout_percentage.nil? && (_hash(flag[:key], distinct_id) > (rollout_percentage.to_f / 100))
