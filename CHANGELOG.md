@@ -1,3 +1,7 @@
+## 3.2.0
+
+1. feat: Add support for local evaluation of flags that depend on other flags ([#75](https://github.com/PostHog/posthog-ruby/pull/75))
+
 ## 3.1.2
 
 1. fix: Add cohort evaluation support for local feature flag evaluation ([#74](https://github.com/PostHog/posthog-ruby/pull/74))
