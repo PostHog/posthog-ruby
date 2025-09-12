@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'posthog/logging'
+require 'posthog/exception_formatter'
 
 module PostHog
   class FieldParser
@@ -109,6 +110,65 @@ module PostHog
               { distinct_id: distinct_id, alias: alias_field }.merge(
                 common[:properties] || {}
               )
+          }
+        )
+      end
+
+      # In addition to the common fields, exception accepts:
+      #
+      # - "exception" (Exception object or Hash)
+      # - "exception_fingerprint" (optional custom grouping identifier)  
+      # - "tags" (optional additional tags)
+      # - "extra" (optional additional context)
+      def parse_for_exception(fields)
+        common = parse_common_fields(fields)
+
+        exception = fields[:exception]
+        exception_fingerprint = fields[:exception_fingerprint]
+        tags = fields[:tags] || {}
+        extra = fields[:extra] || {}
+
+        check_presence!(exception, 'exception')
+        check_is_hash!(tags, 'tags') if tags
+        check_is_hash!(extra, 'extra') if extra
+
+        # Handle both Exception objects and pre-formatted exception hashes
+        exception_data = if exception.is_a?(Exception)
+                           ExceptionFormatter.format_exception(exception, fields)
+                         else
+                           exception
+                         end
+
+        # Generate or use provided fingerprint
+        fingerprint = if exception.is_a?(Exception)
+                        ExceptionFormatter.generate_fingerprint(exception, exception_fingerprint)
+                      else
+                        exception_fingerprint
+                      end
+
+        # Build properties with exception data
+        properties = {
+          '$exception_list' => [exception_data]
+        }
+
+        properties['$exception_fingerprint'] = fingerprint if fingerprint
+        
+        # Merge tags and extra into properties
+        if tags && !tags.empty?
+          isoify_dates! tags
+          properties.merge!(tags)
+        end
+        
+        if extra && !extra.empty?
+          isoify_dates! extra
+          properties.merge!(extra)
+        end
+
+        common.merge(
+          {
+            type: 'capture',
+            event: '$exception',
+            properties: (common[:properties] || {}).merge(properties)
           }
         )
       end

@@ -1163,16 +1163,16 @@ module PostHog
     end
 
     describe '#capture_exception' do
-      before do
-        allow($stderr).to receive(:puts)
-      end
-
-      it 'captures exception' do
+      let(:exception) do
         begin
           raise StandardError, 'Test exception'
         rescue StandardError => e
-          client.capture_exception(e, 'user-123', { 'user_agent' => 'Test Agent', 'request_id' => 'req-123' })
+          e
         end
+      end
+
+      it 'captures exception with distinct_id and additional properties' do
+        client.capture_exception(exception, 'user-123', { 'user_agent' => 'Test Agent', 'request_id' => 'req-123' })
 
         message = client.dequeue_last_message
 
@@ -1188,11 +1188,7 @@ module PostHog
       end
 
       it 'generates UUID as distinct_id when none was provided' do
-        begin
-          raise StandardError, 'Test error'
-        rescue StandardError => e
-          client.capture_exception(e)
-        end
+        client.capture_exception(exception)
 
         message = client.dequeue_last_message
 
