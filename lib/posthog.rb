@@ -1,6 +1,7 @@
 require 'posthog/version'
 require 'posthog/defaults'
 require 'posthog/utils'
+require 'posthog/exception_formatter'
 require 'posthog/field_parser'
 require 'posthog/client'
 require 'posthog/send_worker'
