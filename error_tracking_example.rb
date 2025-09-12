@@ -3,16 +3,52 @@
 
 # Error Tracking Example for PostHog Ruby Client
 #
-# This example demonstrates how to use the PostHog Ruby client for error tracking.
+# This example demonstrates how to use the PostHog Ruby client for both 
+# automatic and manual error tracking.
 # Make sure to install the gem first:
 #   gem install posthog
 
 require 'posthog'
 
-# Initialize PostHog client
+# AUTOMATIC ERROR TRACKING SETUP
+# This is the recommended approach for most applications
+puts "=== AUTOMATIC ERROR TRACKING SETUP ==="
+
+PostHog.configure do |config|
+  config.api_key = 'your_api_key_here'  # Replace with your actual API key  
+  config.host = 'https://us.i.posthog.com'  # Use your PostHog instance URL
+  config.auto_capture_exceptions = true  # Enable automatic capture
+  config.test_mode = true  # For this example
+  
+  # Optional: Customize ignored exceptions
+  config.ignored_exceptions = [
+    'ActionController::RoutingError',
+    /test_error/  # Ignore our test errors
+  ]
+end
+
+puts "PostHog configured for automatic error tracking!"
+
+# Example: Automatic capture in action
+puts "\n=== AUTOMATIC CAPTURE EXAMPLES ==="
+
+# Any uncaught exception will now be automatically sent to PostHog
+begin
+  raise StandardError, "This error will be automatically captured!"
+rescue StandardError => e
+  puts "Caught: #{e.message}"
+  # The exception was automatically captured before we caught it
+end
+
+# MANUAL ERROR TRACKING EXAMPLES  
+# Use these for handled exceptions or custom reporting
+puts "\n=== MANUAL ERROR TRACKING EXAMPLES ==="
+
+# Initialize client for manual examples (automatic config is also available as PostHog.capture_exception)
 posthog = PostHog::Client.new(
   api_key: 'your_api_key_here',  # Replace with your actual API key
-  host: 'https://us.i.posthog.com'  # Use your PostHog instance URL
+  host: 'https://us.i.posthog.com',  # Use your PostHog instance URL
+  test_mode: true
 )
 
 # Example 1: Basic exception tracking
@@ -64,33 +100,44 @@ custom_exception = {
 
 posthog.capture_exception(custom_exception)
 
-# Example 4: Integration with Rails-style error handling
+# Example 4: Rails Integration (AUTOMATIC - Recommended)
+puts "\n=== RAILS AUTOMATIC INTEGRATION ==="
+
+# In config/initializers/posthog.rb
+# PostHog.configure do |config|
+#   config.api_key = ENV['POSTHOG_API_KEY']
+#   config.auto_capture_exceptions = true  # Automatic capture for Rails
+#   
+#   # All Rails exceptions are now automatically captured with context:
+#   # - Controller name and action
+#   # - Request parameters (filtered)
+#   # - User agent, IP, URL
+#   # - User identification (if available)
+#   # - Environment info
+# end
+
+# Rails Controller with automatic capture and helper methods
 class ApplicationController < ActionController::Base
-  rescue_from StandardError, with: :handle_error
-
-  private
-
-  def handle_error(exception)
-    # Log to PostHog with user and request context
-    posthog.capture_exception(exception, {
-      distinct_id: current_user&.id || 'anonymous',
-      tags: {
-        controller: controller_name,
-        action: action_name,
-        environment: Rails.env
-      },
-      extra: {
-        params: params.except(:password, :token).to_unsafe_h,
-        user_agent: request.user_agent,
-        ip_address: request.remote_ip,
-        url: request.url,
-        method: request.method
-      },
-      timestamp: Time.current
-    })
-
-    # Re-raise in development, show error page in production
-    Rails.env.development? ? raise : render_error_page
+  # No rescue_from needed! Automatic capture handles uncaught exceptions
+  
+  # Use helper methods for manual tracking
+  def create_payment
+    begin
+      PaymentService.charge(params[:amount])
+    rescue PaymentError => e
+      # Manual capture for handled exceptions with extra context
+      posthog_capture_exception(e, {
+        tags: { payment_method: params[:method] },
+        extra: { amount: params[:amount], currency: 'USD' }
+      })
+      render json: { error: 'Payment failed' }, status: 422
+    end
+  end
+  
+  # Track user actions
+  def user_signed_up
+    posthog_capture('user_signed_up', { plan: params[:plan] })
+    posthog_identify({ name: current_user.name, email: current_user.email })
   end
 end
 
