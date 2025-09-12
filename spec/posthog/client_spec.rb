@@ -805,6 +805,134 @@ class PostHog
       end
     end
 
+    describe '#capture_exception' do
+      let(:exception) do
+        begin
+          raise ArgumentError, "Test error message"
+        rescue ArgumentError => e
+          e
+        end
+      end
+
+      it 'captures an exception with minimal attributes' do
+        expect { client.capture_exception(exception, distinct_id: 'user_123') }.to_not raise_error
+        
+        msg = client.dequeue_last_message
+        expect(msg[:event]).to eq('$exception')
+        expect(msg[:distinct_id]).to eq('user_123')
+        expect(msg[:properties]).to have_key('$exception_list')
+        expect(msg[:properties]['$exception_list']).to be_an(Array)
+        expect(msg[:properties]['$exception_list'].length).to eq(1)
+        
+        exception_data = msg[:properties]['$exception_list'].first
+        expect(exception_data[:type]).to eq('ArgumentError')
+        expect(exception_data[:value]).to eq('Test error message')
+      end
+
+      it 'captures an exception using hash format' do
+        attrs = {
+          distinct_id: 'user_456',
+          exception: exception,
+          tags: { component: 'payment' },
+          extra: { amount: 100 }
+        }
+
+        expect { client.capture_exception(attrs) }.to_not raise_error
+        
+        msg = client.dequeue_last_message
+        expect(msg[:distinct_id]).to eq('user_456')
+        expect(msg[:properties][:component]).to eq('payment')
+        expect(msg[:properties][:amount]).to eq(100)
+      end
+
+      it 'includes exception fingerprint' do
+        client.capture_exception(exception, distinct_id: 'user_789')
+        
+        msg = client.dequeue_last_message
+        expect(msg[:properties]).to have_key('$exception_fingerprint')
+        expect(msg[:properties]['$exception_fingerprint']).to be_a(String)
+        expect(msg[:properties]['$exception_fingerprint'].length).to eq(64) # SHA256 hex
+      end
+
+      it 'uses custom exception fingerprint when provided' do
+        custom_fingerprint = 'custom_error_group_123'
+        client.capture_exception(exception, {
+          distinct_id: 'user_999',
+          exception_fingerprint: custom_fingerprint
+        })
+        
+        msg = client.dequeue_last_message
+        expect(msg[:properties]['$exception_fingerprint']).to eq(custom_fingerprint)
+      end
+
+      it 'preserves timestamp when provided' do
+        time = Time.parse('1990-07-16 13:30:00.123 UTC')
+        client.capture_exception(exception, {
+          distinct_id: 'user_time',
+          timestamp: time
+        })
+        
+        msg = client.dequeue_last_message
+        expect(Time.parse(msg[:timestamp])).to eq(time)
+      end
+
+      it 'includes posthog library properties' do
+        client.capture_exception(exception, distinct_id: 'user_lib')
+        
+        msg = client.dequeue_last_message
+        expect(msg[:properties]['$lib']).to eq('posthog-ruby')
+        expect(msg[:properties]['$lib_version']).to eq(PostHog::VERSION.to_s)
+      end
+
+      it 'handles exception with stacktrace' do
+        client.capture_exception(exception, distinct_id: 'user_stack')
+        
+        msg = client.dequeue_last_message
+        exception_data = msg[:properties]['$exception_list'].first
+        
+        expect(exception_data).to have_key(:stacktrace)
+        expect(exception_data[:stacktrace]).to have_key(:frames)
+        expect(exception_data[:stacktrace][:type]).to eq('resolved')
+      end
+
+      it 'errors without distinct_id' do
+        expect { client.capture_exception(exception) }.to raise_error(ArgumentError, 'distinct_id must be given')
+      end
+
+      it 'errors with invalid tags' do
+        expect { 
+          client.capture_exception(exception, {
+            distinct_id: 'user_bad',
+            tags: 'invalid'
+          })
+        }.to raise_error(ArgumentError, 'tags must be a Hash')
+      end
+
+      it 'errors with invalid extra' do
+        expect { 
+          client.capture_exception(exception, {
+            distinct_id: 'user_bad',
+            extra: ['invalid']
+          })
+        }.to raise_error(ArgumentError, 'extra must be a Hash')
+      end
+
+      it 'handles Date and Time objects in extra context' do
+        client.capture_exception(exception, {
+          distinct_id: 'user_dates',
+          extra: {
+            occurred_at: Time.parse('2023-01-01 12:00:00 UTC'),
+            scheduled_date: Date.parse('2023-01-02')
+          }
+        })
+        
+        msg = client.dequeue_last_message
+        # Should be converted to ISO8601 format  
+        expect(msg[:properties][:occurred_at]).to match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
+        expect(msg[:properties][:scheduled_date]).to match(/^\d{4}-\d{2}-\d{2}/)
+      end
+    end
+
     context 'common' do
       check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
 
