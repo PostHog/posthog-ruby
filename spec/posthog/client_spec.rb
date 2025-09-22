@@ -1200,6 +1200,20 @@ module PostHog
         expect(message[:distinct_id].length).to eq(36)
         expect(message[:properties]['$process_person_profile']).to be false
       end
+
+      it 'raises ArgumentError when passed other invalid types' do
+        expect do
+          client.capture_exception({ error: 'hash' }, 'user-123')
+        end.to raise_error(ArgumentError, 'First argument must be an Exception, got Hash')
+
+        expect do
+          client.capture_exception(123, 'user-123')
+        end.to raise_error(ArgumentError, 'First argument must be an Exception, got Integer')
+
+        expect do
+          client.capture_exception('This is just a string', 'user-123')
+        end.to raise_error(ArgumentError, 'First argument must be an Exception, got String')
+      end
     end
 
     context 'common' do

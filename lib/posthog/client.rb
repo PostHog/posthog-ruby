@@ -152,6 +152,10 @@ module PostHog
     # @param [String] distinct_id The ID for the user (optional, defaults to a generated UUID)
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
     def capture_exception(exception, distinct_id = nil, additional_properties = {})
+      unless exception.is_a?(Exception)
+        raise ArgumentError, "First argument must be an Exception, got #{exception.class}"
+      end
+
       no_distinct_id_was_provided = distinct_id.nil?
       distinct_id ||= SecureRandom.uuid
 
