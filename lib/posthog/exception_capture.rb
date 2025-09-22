@@ -1,7 +1,12 @@
 # Portions of this file are derived from getsentry/sentry-ruby by Software, Inc. dba Sentry
 # Licensed under the MIT License
+# - sentry-ruby/lib/sentry/interfaces/single_exception.rb
+# - sentry-ruby/lib/sentry/interfaces/stacktrace_builder.rb
+# - sentry-ruby/lib/sentry/backtrace.rb
+# - sentry-ruby/lib/sentry/interfaces/stacktrace.rb
+# - sentry-ruby/lib/sentry/linecache.rb
 
-# 💖open source (under MIT License)
+# 💖 open source (under MIT License)
 
 require 'json'
 
