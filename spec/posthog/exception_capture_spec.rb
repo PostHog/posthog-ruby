@@ -97,9 +97,9 @@ module PostHog
       rescue StandardError => e
         properties = described_class.build_exception_properties(e)
 
-        expect(properties['$exception_type']).to eq('StandardError')
-        expect(properties['$exception_value']).to eq('Test error message')
         expect(properties['$exception_list']).to be_an(Array)
+        expect(properties['$exception_list'].first['type']).to eq('StandardError')
+        expect(properties['$exception_list'].first['value']).to eq('Test error message')
         expect(properties['$exception_list'].first['stacktrace']['type']).to eq('raw')
       end
     end

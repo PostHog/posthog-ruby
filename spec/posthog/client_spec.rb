@@ -1178,9 +1178,8 @@ module PostHog
         
         expect(message[:event]).to eq('$exception')
         expect(message[:distinct_id]).to eq('user-123')
-        expect(message[:properties]['$exception_type']).to eq('StandardError')
-        expect(message[:properties]['$exception_value']).to eq('Test exception')
-        expect(message[:properties]['$exception_personURL']).to include('user-123')
+        expect(message[:properties]['$exception_list'].first['type']).to eq('StandardError')
+        expect(message[:properties]['$exception_list'].first['value']).to eq('Test exception')
 
         expect(message[:properties]).not_to have_key('$process_person_profile')
 
