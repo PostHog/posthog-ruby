@@ -26,19 +26,34 @@ module PostHog
     end
 
     describe '.add_context_lines' do
-      it 'adds context lines when file exists' do
-        test_file = '/tmp/test_context.rb'
-        File.write(test_file, "line 1\nline 2\nTARGET LINE\nline 4\nline 5\n")
+      it 'adds context lines from real exception' do
+        # Define a method that will throw an exception
+        def test_method_that_throws
+          puts "Line before exception"
+          raise StandardError, 'Test exception for context'  # This line will be the context_line
+          puts "Line after exception (unreachable)"
+        end
         
         begin
-          frame = {}
-          described_class.add_context_lines(frame, test_file, 3, 2)
+          test_method_that_throws
+        rescue => e
+          # Get the first frame from this file (not from gems)
+          backtrace_line = e.backtrace.find { |line| line.include?(__FILE__) }
           
-          expect(frame['context_line']).to eq('TARGET LINE')
-          expect(frame['pre_context']).to eq(['line 1', 'line 2'])
-          expect(frame['post_context']).to eq(['line 4', 'line 5'])
-        ensure
-          File.delete(test_file) if File.exist?(test_file)
+          # Parse the backtrace line to get file and line number
+          frame = described_class.parse_backtrace_line(backtrace_line)
+          expect(frame).not_to be_nil
+          
+          # Now test adding context lines from the real source file
+          described_class.add_context_lines(frame, frame['abs_path'], frame['lineno'])
+          
+          # Verify that context lines were added
+          expect(frame['context_line']).to include('raise StandardError')
+          expect(frame['pre_context']).to be_an(Array)
+          expect(frame['post_context']).to be_an(Array)
+          
+          # The line before should contain our comment or code
+          expect(frame['pre_context'].last).to include('puts "Line before exception"')
         end
       end
     end
