@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'ostruct'
 
 module PostHog
   flags_endpoint = 'https://app.posthog.com/flags/?v=2'

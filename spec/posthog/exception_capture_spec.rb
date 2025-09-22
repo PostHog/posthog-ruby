@@ -104,57 +104,6 @@ module PostHog
       end
     end
 
-    describe '#coerce_exception_input' do
-      it 'handles string input' do
-        title, message, backtrace = described_class.coerce_exception_input('Simple error message')
-        
-        expect(title).to eq('Error')
-        expect(message).to eq('Simple error message')
-        expect(backtrace).to be_nil
-      end
-
-      it 'handles exception objects' do
-        begin
-          raise StandardError, 'Test exception'
-        rescue StandardError => e
-          title, message, backtrace = described_class.coerce_exception_input(e)
-          
-          expect(title).to eq('StandardError')
-          expect(message).to eq('Test exception')
-          expect(backtrace).to be_an(Array)
-        end
-      end
-
-      it 'handles exception-like objects' do
-        require 'ostruct'
-        exception_like = OpenStruct.new(
-          message: 'Custom error message',
-          backtrace: ['line1.rb:10:in method', 'line2.rb:20:in another_method']
-        )
-        
-        title, message, backtrace = described_class.coerce_exception_input(exception_like)
-        
-        expect(title).to eq('OpenStruct')
-        expect(message).to eq('Custom error message')
-        expect(backtrace).to eq(['line1.rb:10:in method', 'line2.rb:20:in another_method'])
-      end
-
-      it 'returns nil for invalid input types' do
-        title, message, backtrace = described_class.coerce_exception_input({ error: 'hash' })
-        
-        expect(title).to be_nil
-        expect(message).to be_nil
-        expect(backtrace).to be_nil
-      end
-
-      it 'returns nil for numbers' do
-        title, message, backtrace = described_class.coerce_exception_input(123)
-        
-        expect(title).to be_nil
-        expect(message).to be_nil
-        expect(backtrace).to be_nil
-      end
-    end
 
     describe '#build_parsed_exception' do
       it 'builds exception info from string' do
@@ -178,13 +127,33 @@ module PostHog
           expect(exception_info['mechanism']['type']).to eq('generic')
           expect(exception_info['mechanism']['handled']).to be true
           expect(exception_info['stacktrace']).not_to be_nil
+          expect(exception_info['stacktrace']['type']).to eq('raw')
         end
       end
 
-      it 'returns nil for invalid input' do
-        exception_info = described_class.build_parsed_exception({ invalid: 'object' })
+      it 'builds exception info from exception-like objects' do
+        exception_like = Object.new
+        def exception_like.message
+          'Custom error message'
+        end
+        def exception_like.backtrace
+          ['line1.rb:10:in method', 'line2.rb:20:in another_method']
+        end
         
-        expect(exception_info).to be_nil
+        exception_info = described_class.build_parsed_exception(exception_like)
+        
+        expect(exception_info['type']).to eq('Object')
+        expect(exception_info['value']).to eq('Custom error message')
+        expect(exception_info['mechanism']['type']).to eq('generic')
+        expect(exception_info['mechanism']['handled']).to be true
+        expect(exception_info['stacktrace']).not_to be_nil
+        expect(exception_info['stacktrace']['frames']).to be_an(Array)
+      end
+
+      it 'returns nil for invalid input types' do
+        expect(described_class.build_parsed_exception({ invalid: 'object' })).to be_nil
+        expect(described_class.build_parsed_exception(123)).to be_nil
+        expect(described_class.build_parsed_exception(nil)).to be_nil
       end
     end
   end
