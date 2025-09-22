@@ -49,7 +49,6 @@ module PostHog
       @worker_thread = nil
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
-      @host = opts[:host]
 
       check_api_key!
 
@@ -156,8 +155,8 @@ module PostHog
       no_distinct_id_was_provided = distinct_id.nil?
       distinct_id ||= SecureRandom.uuid
 
-      properties = ExceptionCapture.build_exception_properties(exception, additional_properties)
-
+      properties = ExceptionCapture.build_exception_properties(exception)
+      properties.merge!(additional_properties) if additional_properties && !additional_properties.empty?
       properties['$process_person_profile'] = false if no_distinct_id_was_provided
 
       event_data = {

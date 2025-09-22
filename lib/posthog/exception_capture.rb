@@ -18,18 +18,12 @@ module PostHog
         (?: :in\s('|`)(?:([\w:]+)\#)?([^']+)')?$
       /x
 
-    def self.build_exception_properties(exception, additional_properties = {})
+    def self.build_exception_properties(exception)
       exception_info = build_single_exception(exception)
 
-      properties = {
-        '$exception_type' => exception_info['type'],
-        '$exception_value' => exception_info['value'],
+      {
         '$exception_list' => [exception_info]
       }
-
-      properties.merge!(additional_properties) if additional_properties
-
-      properties
     end
 
     def self.build_single_exception(exception)
@@ -63,7 +57,6 @@ module PostHog
 
       file = match[1]
       lineno = match[2].to_i
-      match[4] # Optional module/class name
       method_name = match[5]
 
       frame = {
