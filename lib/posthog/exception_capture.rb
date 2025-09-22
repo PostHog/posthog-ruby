@@ -18,12 +18,11 @@ module PostHog
         (?: :in\s('|`)(?:([\w:]+)\#)?([^']+)')?$
       /x
 
-    def self.build_exception_properties(exception)
-      exception_info = build_single_exception(exception)
+    def self.build_parsed_exception(value)
+      title, message, backtrace = coerce_exception_input(value)
+      return nil if title.nil?
 
-      {
-        '$exception_list' => [exception_info]
-      }
+      build_single_exception_from_data(title, message, backtrace)
     end
 
     def self.build_single_exception(exception)
@@ -35,6 +34,18 @@ module PostHog
           'handled' => true
         },
         'stacktrace' => build_stacktrace(exception.backtrace)
+      }
+    end
+
+    def self.build_single_exception_from_data(title, message, backtrace)
+      {
+        'type' => title,
+        'value' => message || '',
+        'mechanism' => {
+          'type' => 'generic',
+          'handled' => true
+        },
+        'stacktrace' => build_stacktrace(backtrace)
       }
     end
 
@@ -96,6 +107,22 @@ module PostHog
       frame['post_context'] = lines[lineno...(post_context_end)].map(&:chomp) if post_context_end > lineno
     rescue StandardError
       # Silently ignore file read errors
+    end
+
+    def self.coerce_exception_input(value)
+      if value.is_a?(String)
+        title = "Error"
+        message = value
+        backtrace = nil
+      elsif value.respond_to?(:backtrace) && value.respond_to?(:message)
+        title = value.class.to_s
+        message = value.message || ''
+        backtrace = value.backtrace
+      else
+        return [nil, nil, nil]
+      end
+
+      [title, message, backtrace]
     end
   end
 end

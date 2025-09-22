@@ -103,6 +103,90 @@ module PostHog
         expect(properties['$exception_list'].first['stacktrace']['type']).to eq('raw')
       end
     end
+
+    describe '#coerce_exception_input' do
+      it 'handles string input' do
+        title, message, backtrace = described_class.coerce_exception_input('Simple error message')
+        
+        expect(title).to eq('Error')
+        expect(message).to eq('Simple error message')
+        expect(backtrace).to be_nil
+      end
+
+      it 'handles exception objects' do
+        begin
+          raise StandardError, 'Test exception'
+        rescue StandardError => e
+          title, message, backtrace = described_class.coerce_exception_input(e)
+          
+          expect(title).to eq('StandardError')
+          expect(message).to eq('Test exception')
+          expect(backtrace).to be_an(Array)
+        end
+      end
+
+      it 'handles exception-like objects' do
+        require 'ostruct'
+        exception_like = OpenStruct.new(
+          message: 'Custom error message',
+          backtrace: ['line1.rb:10:in method', 'line2.rb:20:in another_method']
+        )
+        
+        title, message, backtrace = described_class.coerce_exception_input(exception_like)
+        
+        expect(title).to eq('OpenStruct')
+        expect(message).to eq('Custom error message')
+        expect(backtrace).to eq(['line1.rb:10:in method', 'line2.rb:20:in another_method'])
+      end
+
+      it 'returns nil for invalid input types' do
+        title, message, backtrace = described_class.coerce_exception_input({ error: 'hash' })
+        
+        expect(title).to be_nil
+        expect(message).to be_nil
+        expect(backtrace).to be_nil
+      end
+
+      it 'returns nil for numbers' do
+        title, message, backtrace = described_class.coerce_exception_input(123)
+        
+        expect(title).to be_nil
+        expect(message).to be_nil
+        expect(backtrace).to be_nil
+      end
+    end
+
+    describe '#build_parsed_exception' do
+      it 'builds exception info from string' do
+        exception_info = described_class.build_parsed_exception('Simple error')
+        
+        expect(exception_info['type']).to eq('Error')
+        expect(exception_info['value']).to eq('Simple error')
+        expect(exception_info['mechanism']['type']).to eq('generic')
+        expect(exception_info['mechanism']['handled']).to be true
+        expect(exception_info['stacktrace']).to be_nil
+      end
+
+      it 'builds exception info from exception object' do
+        begin
+          raise StandardError, 'Test exception'
+        rescue StandardError => e
+          exception_info = described_class.build_parsed_exception(e)
+          
+          expect(exception_info['type']).to eq('StandardError')
+          expect(exception_info['value']).to eq('Test exception')
+          expect(exception_info['mechanism']['type']).to eq('generic')
+          expect(exception_info['mechanism']['handled']).to be true
+          expect(exception_info['stacktrace']).not_to be_nil
+        end
+      end
+
+      it 'returns nil for invalid input' do
+        exception_info = described_class.build_parsed_exception({ invalid: 'object' })
+        
+        expect(exception_info).to be_nil
+      end
+    end
   end
 end
 # rubocop:enable Layout/LineLength
