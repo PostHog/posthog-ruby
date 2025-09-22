@@ -94,7 +94,7 @@ module PostHog
     describe '#build_parsed_exception' do
       it 'builds exception info from string' do
         exception_info = described_class.build_parsed_exception('Simple error')
-        
+
         expect(exception_info['type']).to eq('Error')
         expect(exception_info['value']).to eq('Simple error')
         expect(exception_info['mechanism']['type']).to eq('generic')
@@ -103,18 +103,16 @@ module PostHog
       end
 
       it 'builds exception info from exception object' do
-        begin
-          raise StandardError, 'Test exception'
-        rescue StandardError => e
-          exception_info = described_class.build_parsed_exception(e)
-          
-          expect(exception_info['type']).to eq('StandardError')
-          expect(exception_info['value']).to eq('Test exception')
-          expect(exception_info['mechanism']['type']).to eq('generic')
-          expect(exception_info['mechanism']['handled']).to be true
-          expect(exception_info['stacktrace']).not_to be_nil
-          expect(exception_info['stacktrace']['type']).to eq('raw')
-        end
+        raise StandardError, 'Test exception'
+      rescue StandardError => e
+        exception_info = described_class.build_parsed_exception(e)
+
+        expect(exception_info['type']).to eq('StandardError')
+        expect(exception_info['value']).to eq('Test exception')
+        expect(exception_info['mechanism']['type']).to eq('generic')
+        expect(exception_info['mechanism']['handled']).to be true
+        expect(exception_info['stacktrace']).not_to be_nil
+        expect(exception_info['stacktrace']['type']).to eq('raw')
       end
 
       it 'builds exception info from exception-like objects' do
@@ -122,12 +120,13 @@ module PostHog
         def exception_like.message
           'Custom error message'
         end
+
         def exception_like.backtrace
           ['line1.rb:10:in method', 'line2.rb:20:in another_method']
         end
-        
+
         exception_info = described_class.build_parsed_exception(exception_like)
-        
+
         expect(exception_info['type']).to eq('Object')
         expect(exception_info['value']).to eq('Custom error message')
         expect(exception_info['mechanism']['type']).to eq('generic')

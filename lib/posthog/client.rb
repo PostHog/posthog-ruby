@@ -153,7 +153,7 @@ module PostHog
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
     def capture_exception(exception, distinct_id = nil, additional_properties = {})
       exception_info = ExceptionCapture.build_parsed_exception(exception)
-      
+
       return if exception_info.nil?
 
       no_distinct_id_was_provided = distinct_id.nil?

@@ -99,7 +99,7 @@ module PostHog
 
     def self.coerce_exception_input(value)
       if value.is_a?(String)
-        title = "Error"
+        title = 'Error'
         message = value
         backtrace = nil
       elsif value.respond_to?(:backtrace) && value.respond_to?(:message)
