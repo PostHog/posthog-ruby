@@ -104,6 +104,5 @@ module PostHog
       end
     end
   end
-
 end
 # rubocop:enable Layout/LineLength

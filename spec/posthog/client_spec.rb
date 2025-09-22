@@ -1175,7 +1175,7 @@ module PostHog
         end
 
         message = client.dequeue_last_message
-        
+
         expect(message[:event]).to eq('$exception')
         expect(message[:distinct_id]).to eq('user-123')
         expect(message[:properties]['$exception_list'].first['type']).to eq('StandardError')
