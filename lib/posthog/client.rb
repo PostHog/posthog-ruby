@@ -9,6 +9,7 @@ require 'posthog/send_worker'
 require 'posthog/noop_worker'
 require 'posthog/feature_flags'
 require 'posthog/send_feature_flags_options'
+require 'posthog/exception_capture'
 
 module PostHog
   class Client
@@ -34,7 +35,7 @@ module PostHog
       symbolize_keys!(opts)
 
       opts[:host] ||= 'https://app.posthog.com'
-
+      
       @queue = Queue.new
       @api_key = opts[:api_key]
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
@@ -47,6 +48,7 @@ module PostHog
       @worker_thread = nil
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
+      @host = opts[:host]
 
       check_api_key!
 
@@ -142,6 +144,29 @@ module PostHog
       end
 
       enqueue(FieldParser.parse_for_capture(attrs))
+    end
+
+    # Captures an exception as an event
+    #
+    # @param [Exception] exception The exception to capture
+    # @param [String] distinct_id The ID for the user (optional, defaults to 'ruby-exception')
+    # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
+    def capture_exception(exception, distinct_id = nil, additional_properties = {})
+      distinct_id ||= 'ruby-exception'
+      
+      properties = ExceptionCapture.build_exception_properties(exception, additional_properties)
+      
+      host_without_slash = @host.chomp('/')
+      properties['$exception_personURL'] = "#{host_without_slash}/project/#{@api_key}/person/#{distinct_id}"
+      
+      event_data = {
+        distinct_id: distinct_id,
+        event: '$exception',
+        properties: properties,
+        timestamp: Time.now
+      }
+      
+      capture(event_data)
     end
 
     # Identifies a user
