@@ -1162,6 +1162,43 @@ module PostHog
       end
     end
 
+    describe '#capture_exception' do
+      before do
+        allow($stderr).to receive(:puts)
+      end
+
+      it 'generates UUID as distinct_id when none provided' do
+        begin
+          raise StandardError, 'Test error'
+        rescue StandardError => e
+          client.capture_exception(e)
+        end
+
+        message = client.dequeue_last_message
+
+        expect(message[:distinct_id]).to be_a(String)
+        expect(message[:distinct_id].length).to eq(36)
+        expect(message[:properties]['$process_person_profile']).to be false
+      end
+
+      it 'captures exception with provided distinct_id' do
+        begin
+          raise StandardError, 'Test exception'
+        rescue StandardError => e
+          client.capture_exception(e, 'user-123')
+        end
+
+        message = client.dequeue_last_message
+        
+        expect(message[:event]).to eq('$exception')
+        expect(message[:distinct_id]).to eq('user-123')
+        expect(message[:properties]['$exception_type']).to eq('StandardError')
+        expect(message[:properties]['$exception_value']).to eq('Test exception')
+        expect(message[:properties]['$exception_personURL']).to include('user-123')
+        expect(message[:properties]).not_to have_key('$process_person_profile')
+      end
+    end
+
     context 'common' do
       check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
 

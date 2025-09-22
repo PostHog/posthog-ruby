@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'securerandom'
 
 require 'posthog/defaults'
 require 'posthog/logging'
@@ -149,15 +150,15 @@ module PostHog
     # Captures an exception as an event
     #
     # @param [Exception] exception The exception to capture
-    # @param [String] distinct_id The ID for the user (optional, defaults to 'ruby-exception')
+    # @param [String] distinct_id The ID for the user (optional, defaults to a generated UUID)
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
     def capture_exception(exception, distinct_id = nil, additional_properties = {})
-      distinct_id ||= 'ruby-exception'
+      no_distinct_id_was_provided = distinct_id.nil?
+      distinct_id ||= SecureRandom.uuid
 
       properties = ExceptionCapture.build_exception_properties(exception, additional_properties)
 
-      host_without_slash = @host.chomp('/')
-      properties['$exception_personURL'] = "#{host_without_slash}/project/#{@api_key}/person/#{distinct_id}"
+      properties['$process_person_profile'] = false if no_distinct_id_was_provided
 
       event_data = {
         distinct_id: distinct_id,
