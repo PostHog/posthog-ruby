@@ -35,7 +35,7 @@ module PostHog
       symbolize_keys!(opts)
 
       opts[:host] ||= 'https://app.posthog.com'
-      
+
       @queue = Queue.new
       @api_key = opts[:api_key]
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
@@ -153,19 +153,19 @@ module PostHog
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
     def capture_exception(exception, distinct_id = nil, additional_properties = {})
       distinct_id ||= 'ruby-exception'
-      
+
       properties = ExceptionCapture.build_exception_properties(exception, additional_properties)
-      
+
       host_without_slash = @host.chomp('/')
       properties['$exception_personURL'] = "#{host_without_slash}/project/#{@api_key}/person/#{distinct_id}"
-      
+
       event_data = {
         distinct_id: distinct_id,
         event: '$exception',
         properties: properties,
         timestamp: Time.now
       }
-      
+
       capture(event_data)
     end
 
