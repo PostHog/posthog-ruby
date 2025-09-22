@@ -25,18 +25,6 @@ module PostHog
       build_single_exception_from_data(title, message, backtrace)
     end
 
-    def self.build_single_exception(exception)
-      {
-        'type' => exception.class.to_s,
-        'value' => exception.message || '',
-        'mechanism' => {
-          'type' => 'generic',
-          'handled' => true
-        },
-        'stacktrace' => build_stacktrace(exception.backtrace)
-      }
-    end
-
     def self.build_single_exception_from_data(title, message, backtrace)
       {
         'type' => title,

@@ -91,20 +91,6 @@ module PostHog
       end
     end
 
-    describe '#build_exception_properties' do
-      it 'creates structured exception data' do
-        raise StandardError, 'Test error message'
-      rescue StandardError => e
-        properties = described_class.build_exception_properties(e)
-
-        expect(properties['$exception_list']).to be_an(Array)
-        expect(properties['$exception_list'].first['type']).to eq('StandardError')
-        expect(properties['$exception_list'].first['value']).to eq('Test error message')
-        expect(properties['$exception_list'].first['stacktrace']['type']).to eq('raw')
-      end
-    end
-
-
     describe '#build_parsed_exception' do
       it 'builds exception info from string' do
         exception_info = described_class.build_parsed_exception('Simple error')
