@@ -8,8 +8,6 @@
 
 # 💖 open source (under MIT License)
 
-require 'json'
-
 module PostHog
   module ExceptionCapture
     RUBY_INPUT_FORMAT = /
@@ -27,9 +25,6 @@ module PostHog
         '$exception_list' => [exception_info]
       }
       
-      $stderr.puts "\n[PostHog::ExceptionCapture] Exception properties:"
-      $stderr.puts JSON.pretty_generate(properties)
-
       properties.merge!(additional_properties) if additional_properties
 
       properties
