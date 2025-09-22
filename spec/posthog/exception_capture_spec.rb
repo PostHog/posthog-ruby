@@ -6,7 +6,7 @@ module PostHog
   describe ExceptionCapture do
     describe '#parse_backtrace_line' do
       it 'parses stacktrace line into frame with correct details' do
-        line = '/path/to/project/app/models/user.rb:42:in \'validate_email\''
+        line = '/path/to/project/app/models/user.rb:42:in `validate_email\''
         frame = described_class.parse_backtrace_line(line)
 
         expect(frame['filename']).to eq('user.rb')
@@ -18,7 +18,7 @@ module PostHog
       end
 
       it 'identifies gem files correctly' do
-        gem_line = '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/some_gem/lib/some_gem.rb:10:in \'gem_method\''
+        gem_line = '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/some_gem/lib/some_gem.rb:10:in `gem_method\''
         frame = described_class.parse_backtrace_line(gem_line)
 
         expect(frame['in_app']).to be false
@@ -75,8 +75,8 @@ module PostHog
     describe '#build_stacktrace' do
       it 'converts backtrace array to structured frames' do
         backtrace = [
-          '/path/to/project/app/models/user.rb:42:in \'validate_email\'',
-          '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/actionpack-7.0.0/lib/action_controller.rb:123:in '\dispatch\''
+          '/path/to/project/app/models/user.rb:42:in `validate_email\'',
+          '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/actionpack-7.0.0/lib/action_controller.rb:123:in `dispatch\''
         ]
         
         stacktrace = described_class.build_stacktrace(backtrace)
