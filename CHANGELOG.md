@@ -1,3 +1,7 @@
+## 3.3.0
+
+1. feat: add exception capture ([#77](https://github.com/PostHog/posthog-ruby/pull/77))
+
 ## 3.2.0
 
 1. feat: Add support for local evaluation of flags that depend on other flags ([#75](https://github.com/PostHog/posthog-ruby/pull/75))
@@ -20,11 +24,11 @@
 
 ## 3.0.0 - 2025-05-20
 
-1. Drops support for Ruby 2.x ([#63](https://github.com/PostHog/posthog-ruby/pull/63)) 
+1. Drops support for Ruby 2.x ([#63](https://github.com/PostHog/posthog-ruby/pull/63))
 
 Version 3.0 of the Ruby SDK drops support for Ruby 2.x. The minimum supported version is now Ruby 3.2.
 
-In previous version `FeatureFlags` was added as a top-level class and was causing conflicts for other folk's applications. 
+In previous version `FeatureFlags` was added as a top-level class and was causing conflicts for other folk's applications.
 
 In this change we have properly namespaced all classes within a `PostHog` module. See [#60](https://github.com/PostHog/posthog-ruby/issues/60)
 
