@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'securerandom'
 
 require 'posthog/defaults'
 require 'posthog/logging'
@@ -9,6 +10,7 @@ require 'posthog/send_worker'
 require 'posthog/noop_worker'
 require 'posthog/feature_flags'
 require 'posthog/send_feature_flags_options'
+require 'posthog/exception_capture'
 
 module PostHog
   class Client
@@ -142,6 +144,33 @@ module PostHog
       end
 
       enqueue(FieldParser.parse_for_capture(attrs))
+    end
+
+    # Captures an exception as an event
+    #
+    # @param [Exception, String, Object] exception The exception to capture, a string message, or exception-like object
+    # @param [String] distinct_id The ID for the user (optional, defaults to a generated UUID)
+    # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
+    def capture_exception(exception, distinct_id = nil, additional_properties = {})
+      exception_info = ExceptionCapture.build_parsed_exception(exception)
+
+      return if exception_info.nil?
+
+      no_distinct_id_was_provided = distinct_id.nil?
+      distinct_id ||= SecureRandom.uuid
+
+      properties = { '$exception_list' => [exception_info] }
+      properties.merge!(additional_properties) if additional_properties && !additional_properties.empty?
+      properties['$process_person_profile'] = false if no_distinct_id_was_provided
+
+      event_data = {
+        distinct_id: distinct_id,
+        event: '$exception',
+        properties: properties,
+        timestamp: Time.now
+      }
+
+      capture(event_data)
     end
 
     # Identifies a user
