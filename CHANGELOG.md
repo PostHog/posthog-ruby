@@ -1,7 +1,3 @@
-## 3.3.0
-
-1. feat: add exception capture ([#77](https://github.com/PostHog/posthog-ruby/pull/77))
-
 ## 3.2.0
 
 1. feat: Add support for local evaluation of flags that depend on other flags ([#75](https://github.com/PostHog/posthog-ruby/pull/75))
