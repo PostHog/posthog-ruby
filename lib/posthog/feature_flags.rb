@@ -733,15 +733,8 @@ module PostHog
       is_inconclusive = false
       result = nil
 
-      # Stable sort conditions with variant overrides to the top. This ensures that if overrides are present, they are
-      # evaluated first, and the variant override is applied to the first matching condition.
-      sorted_flag_conditions = flag_conditions.each_with_index.sort_by do |condition, idx|
-        [condition[:variant].nil? ? 1 : -1, idx]
-      end
-
       # NOTE: This NEEDS to be `each` because `each_key` breaks
-      # This is not a hash, it's just an array with 2 entries
-      sorted_flag_conditions.each do |condition, _idx| # rubocop:disable Style/HashEachMethods
+      flag_conditions.each do |condition| # rubocop:disable Style/HashEachMethods
         if condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties)
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
