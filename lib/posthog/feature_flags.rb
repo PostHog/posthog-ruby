@@ -734,7 +734,7 @@ module PostHog
       result = nil
 
       # NOTE: This NEEDS to be `each` because `each_key` breaks
-      flag_conditions.each do |condition| # rubocop:disable Style/HashEachMethods
+      flag_conditions.each do |condition|
         if condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties)
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
