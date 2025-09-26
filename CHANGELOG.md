@@ -1,3 +1,8 @@
+## 3.3.1
+
+1. fix: don't sort condition sets with variant overrides to top ([#78](https://github.com/PostHog/posthog-ruby/pull/78))
+
+
 ## 3.3.0
 
 1. feat: add exception capture ([#77](https://github.com/PostHog/posthog-ruby/pull/77))
