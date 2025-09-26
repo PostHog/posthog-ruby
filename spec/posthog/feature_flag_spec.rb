@@ -1103,57 +1103,65 @@ module PostHog
       assert_not_requested :post, flags_endpoint
     end
 
-    it 'gets feature flag with multiple variant overrides' do
+    it 'evaluates condition sets in original order' do
       api_feature_flag_res = {
         'flags' => [
           {
             'id' => 1,
-            'name' => 'Beta Feature',
-            'key' => 'beta-feature',
+            'name' => 'Order Test',
+            'key' => 'order-test',
             'is_simple_flag' => false,
             'active' => true,
-            'rollout_percentage' => 100,
             'filters' => {
               'groups' => [
                 {
                   'rollout_percentage' => 100
-                  # The override applies even if the first condition matches all and gives everyone their default group
                 },
                 {
                   'properties' => [
-                    { 'key' => 'email', 'type' => 'person', 'value' => 'test@posthog.com', 'operator' => 'exact' }
+                    {
+                      'key' => 'email',
+                      'type' => 'person',
+                      'value' => '@vip.com',
+                      'operator' => 'icontains'
+                    }
                   ],
-                  'rollout_percentage' => 100,
-                  'variant' => 'second-variant'
-                },
-                { 'rollout_percentage' => 50, 'variant' => 'third-variant' }
+                  'variant' => 'vip-variant'
+                }
               ],
               'multivariate' => {
                 'variants' => [
-                  { 'key' => 'first-variant', 'name' => 'First Variant', 'rollout_percentage' => 50 },
-                  { 'key' => 'second-variant', 'name' => 'Second Variant', 'rollout_percentage' => 25 },
-                  { 'key' => 'third-variant', 'name' => 'Third Variant', 'rollout_percentage' => 25 }
+                  {
+                    'key' => 'control',
+                    'name' => 'Control',
+                    'rollout_percentage' => 100
+                  },
+                  {
+                    'key' => 'vip-variant',
+                    'name' => 'VIP Variant',
+                    'rollout_percentage' => 0
+                  }
                 ]
               }
             }
           }
         ]
       }
+
       stub_request(
         :get,
         'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
-      stub_request(:post, flags_endpoint)
-        .to_return(status: 200, body: { 'featureFlags' => { 'beta-feature' => 'variant-1',
-                                                            'beta-feature2' => 'variant-2' } }.to_json)
+      stub_request(:post, flags_endpoint).to_return(status: 400)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      expect(c.get_feature_flag('beta-feature', 'test_id',
-                                person_properties: { 'email' => 'test@posthog.com' })).to eq('second-variant')
-      expect(c.get_feature_flag('beta-feature', 'example_id')).to eq('third-variant')
-      expect(c.get_feature_flag('beta-feature', 'another_id')).to eq('second-variant')
+      # Even for a user with a VIP email, the first condition (with 100% rollout) is evaluated,
+      # resulting in the "control" variant, rather than sorting conditions with variant overrides to the top
+      result = c.get_feature_flag('order-test', 'user123', person_properties: { 'email' => 'user@vip.com' })
+      expect(result).to eq('control')
+
       assert_not_requested :post, flags_endpoint
     end
   end
