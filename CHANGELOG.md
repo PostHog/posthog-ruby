@@ -1,4 +1,4 @@
-## 3.3.1
+## 3.3.2
 
 1. fix: don't sort condition sets with variant overrides to top ([#78](https://github.com/PostHog/posthog-ruby/pull/78))
 
