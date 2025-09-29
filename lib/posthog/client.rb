@@ -209,6 +209,57 @@ module PostHog
       enqueue(FieldParser.parse_for_alias(attrs))
     end
 
+    # Captures an exception for error tracking
+    #
+    # @param [Exception, Hash] exception_or_attrs The exception to capture, or a hash of attributes
+    # @param [Hash] attrs Additional attributes when first parameter is an Exception
+    #
+    # @option attrs [Exception] :exception The exception to capture (when using hash format)
+    # @option attrs [String] :exception_fingerprint Custom grouping identifier (optional)
+    # @option attrs [Hash] :tags Additional tags for categorization (optional)
+    # @option attrs [Hash] :extra Additional context data (optional)  
+    # @option attrs [Boolean] :handled Whether the exception was handled (default: true)
+    # @option attrs [String] :mechanism_type The mechanism type (default: 'generic')
+    # @macro common_attrs
+    #
+    # @example Capture an exception object directly
+    #   begin
+    #     risky_operation()
+    #   rescue StandardError => e
+    #     client.capture_exception(e, distinct_id: 'user_123')
+    #   end
+    #
+    # @example Capture with additional context
+    #   begin
+    #     process_payment(amount)
+    #   rescue PaymentError => e
+    #     client.capture_exception(e, {
+    #       distinct_id: 'user_123',
+    #       tags: { payment_method: 'stripe' },
+    #       extra: { amount: amount, currency: 'USD' }
+    #     })
+    #   end
+    #
+    # @example Capture using hash format
+    #   client.capture_exception({
+    #     distinct_id: 'user_123',
+    #     exception: StandardError.new('Something went wrong'),
+    #     exception_fingerprint: 'custom_group_123',
+    #     handled: false
+    #   })
+    def capture_exception(exception_or_attrs, attrs = {})
+      if exception_or_attrs.is_a?(Exception)
+        # Handle the case where first argument is an Exception
+        attrs[:exception] = exception_or_attrs
+      else
+        # Handle the case where first argument is already a hash of attributes
+        attrs = exception_or_attrs
+      end
+
+      symbolize_keys! attrs
+      enqueue(FieldParser.parse_for_exception(attrs))
+    end
+
     # @return [Hash] pops the last message from the queue
     def dequeue_last_message
       @queue.pop
