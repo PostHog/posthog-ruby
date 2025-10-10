@@ -1,25 +1,28 @@
-## 3.3.2
+## 3.3.2 - 2025-09-26
 
 1. fix: don't sort condition sets with variant overrides to top ([#78](https://github.com/PostHog/posthog-ruby/pull/78))
 
+## 3.3.1 - 2025-09-26
 
-## 3.3.0
+Not used
+
+## 3.3.0 - 2025-09-23
 
 1. feat: add exception capture ([#77](https://github.com/PostHog/posthog-ruby/pull/77))
 
-## 3.2.0
+## 3.2.0 - 2025-08-26
 
 1. feat: Add support for local evaluation of flags that depend on other flags ([#75](https://github.com/PostHog/posthog-ruby/pull/75))
 
-## 3.1.2
+## 3.1.2 - 2025-08-26
 
 1. fix: Add cohort evaluation support for local feature flag evaluation ([#74](https://github.com/PostHog/posthog-ruby/pull/74))
 
-## 3.1.1
+## 3.1.1 - 2025-08-06
 
 1. fix: Pass project API key in `remote_config` requests ([#72](https://github.com/PostHog/posthog-ruby/pull/72))
 
-## 3.1.0
+## 3.1.0 - 2025-08-06
 
 1. feat: make the `send_feature_flags` parameter more declarative and ergonomic
 
