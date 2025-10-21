@@ -4462,5 +4462,63 @@ module PostHog
       # Should return the API result (set-1), not local evaluation result (set-8)
       expect(result).to eq('set-1')
     end
+
+    it 'falls back to API in get_feature_flag_payload when flag has static cohort' do
+      # Test that get_feature_flag_payload falls back to API when evaluating
+      # a flag with static cohorts, similar to get_feature_flag behavior.
+
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'key' => 'multi-condition-flag',
+            'filters' => {
+              'groups' => [
+                {
+                  'properties' => [
+                    { 'key' => 'id', 'value' => 999, 'type' => 'cohort' }
+                  ],
+                  'rollout_percentage' => 100,
+                  'variant' => 'variant-1'
+                }
+              ],
+              'multivariate' => {
+                'variants' => [
+                  { 'key' => 'variant-1', 'rollout_percentage' => 100 }
+                ]
+              },
+              'payloads' => {
+                'variant-1' => '{"message": "local-payload"}'
+              }
+            },
+            'active' => true
+          }
+        ],
+        'cohorts' => {} # NOTE: cohort 999 is NOT here (it's a static cohort)
+      }
+
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      # Mock API response - user is in the static cohort
+      stub_request(:post, 'https://app.posthog.com/flags/?v=2')
+        .to_return(status: 200, body: {
+          'featureFlags' => { 'multi-condition-flag' => 'variant-1' },
+          'featureFlagPayloads' => { 'multi-condition-flag' => '{"message": "from-api"}' }
+        }.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      # Call get_feature_flag_payload without match_value to trigger evaluation
+      result = c.get_feature_flag_payload(
+        'multi-condition-flag',
+        'test-distinct-id'
+      )
+
+      # Should return the API payload, not local payload
+      expect(result).to eq('{"message": "from-api"}')
+    end
   end
 end
