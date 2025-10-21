@@ -12,6 +12,13 @@ module PostHog
   class InconclusiveMatchError < StandardError
   end
 
+  # RequiresServerEvaluation is raised when feature flag evaluation requires
+  # server-side data that is not available locally (e.g., static cohorts,
+  # experience continuity). This error should propagate immediately to trigger
+  # API fallback, unlike InconclusiveMatchError which allows trying other conditions.
+  class RequiresServerEvaluation < StandardError
+  end
+
   class FeatureFlagsPoller
     include PostHog::Logging
     include PostHog::Utils
@@ -173,7 +180,7 @@ module PostHog
         begin
           response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties)
           logger.debug "Successfully computed flag locally: #{key} -> #{response}"
-        rescue InconclusiveMatchError => e
+        rescue RequiresServerEvaluation, InconclusiveMatchError => e
           logger.debug "Failed to compute flag #{key} locally: #{e}"
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")}")
@@ -251,7 +258,7 @@ module PostHog
         flags[flag[:key]] = match_value
         match_payload = _compute_flag_payload_locally(flag[:key], match_value)
         payloads[flag[:key]] = match_payload if match_payload
-      rescue InconclusiveMatchError
+      rescue RequiresServerEvaluation, InconclusiveMatchError
         fallback_to_server = true
       rescue StandardError => e
         @on_error.call(-1, "Error computing flag locally: #{e}. #{e.backtrace.join("\n")} ")
@@ -461,7 +468,10 @@ module PostHog
       cohort_id = extract_value(property, :value).to_s
       property_group = find_cohort_property(cohort_properties, cohort_id)
 
-      raise InconclusiveMatchError, "can't match cohort without a given cohort property value" unless property_group
+      unless property_group
+        raise RequiresServerEvaluation,
+              "cohort #{cohort_id} not found in local cohorts - likely a static cohort that requires server evaluation"
+      end
 
       match_property_group(property_group, property_values, cohort_properties)
     end
@@ -539,6 +549,9 @@ module PostHog
         elsif final_result # group_type == 'OR'
           return true
         end
+      rescue RequiresServerEvaluation
+        # Immediately propagate - this condition requires server-side data
+        raise
       rescue InconclusiveMatchError => e
         PostHog::Logging.logger&.debug("Failed to compute property #{prop} locally: #{e}")
         error_matching_locally = true
@@ -676,7 +689,7 @@ module PostHog
                          :match_nested_property_group, :match_regular_property_group
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
-      raise InconclusiveMatchError, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
+      raise RequiresServerEvaluation, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
 
       return false unless flag[:active]
 
@@ -747,7 +760,12 @@ module PostHog
           result = variant || true
           break
         end
+      rescue RequiresServerEvaluation
+        # Static cohort or other missing server-side data - must fallback to API
+        raise
       rescue InconclusiveMatchError
+        # Evaluation error (bad regex, invalid date, missing property, etc.)
+        # Track that we had an inconclusive match, but try other conditions
         is_inconclusive = true
       end
 

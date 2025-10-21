@@ -460,14 +460,16 @@ module PostHog
         expect(result).to be true
       end
 
-      it 'raises InconclusiveMatchError when cohort not found' do
+      it 'raises RequiresServerEvaluation when cohort not found' do
         property = { type: 'cohort', value: 'non_existent_cohort' }
         property_values = { country: 'US' }
         cohort_properties = {}
 
         expect do
           PostHog::FeatureFlagsPoller.match_cohort(property, property_values, cohort_properties)
-        end.to raise_error(PostHog::InconclusiveMatchError, "can't match cohort without a given cohort property value")
+        end.to raise_error(PostHog::RequiresServerEvaluation,
+                           'cohort non_existent_cohort not found in local cohorts - ' \
+                           'likely a static cohort that requires server evaluation')
       end
 
       it 'handles empty cohort definitions gracefully' do
