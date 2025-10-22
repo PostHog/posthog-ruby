@@ -1,3 +1,7 @@
+## 3.3.3 - 2025-10-22
+
+1. fix: fallback to API for multi-condition flags with static cohorts ([#80](https://github.com/PostHog/posthog-ruby/pull/80))
+
 ## 3.3.2 - 2025-09-26
 
 1. fix: don't sort condition sets with variant overrides to top ([#78](https://github.com/PostHog/posthog-ruby/pull/78))
