@@ -41,8 +41,8 @@ module PostHog
         return @logger if @logger
 
         base_logger =
-          if defined?(Rails)
-            Rails.logger
+          if defined?(::Rails)
+            ::Rails.logger
           else
             logger = Logger.new $stdout
             logger.progname = 'PostHog'

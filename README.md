@@ -11,6 +11,10 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 >
 > All 2.x versions of the PostHog Ruby library are compatible with Ruby 2.0 and above if you need Ruby 2.0 support.
 
+## Rails Integration
+
+**Using Rails?** Check out [posthog-rails](posthog-rails/README.md) for automatic exception tracking, ActiveJob instrumentation, and Rails-specific features.
+
 ## Developing Locally
 
 1. Install `asdf` to manage your Ruby version: `brew install asdf`
