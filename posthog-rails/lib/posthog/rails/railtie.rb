@@ -4,13 +4,13 @@ module PostHog
   module Rails
     class Railtie < ::Rails::Railtie
       # Add PostHog module methods for accessing Rails-specific client
-      initializer 'posthog.set_configs' do |app|
+      initializer 'posthog.set_configs' do |_app|
         PostHog.class_eval do
           class << self
             attr_accessor :rails_config, :client
 
             # Initialize PostHog client with a block configuration
-            def init(options = {}, &block)
+            def init(options = {})
               @rails_config ||= PostHog::Rails::Configuration.new
 
               # If block given, yield to configuration
@@ -50,7 +50,9 @@ module PostHog
               client.group_identify(*args, **kwargs)
             end
 
-            def is_feature_enabled(*args, **kwargs)
+            # NOTE: Method name matches the underlying PostHog Ruby Client for consistency.
+            # TODO: Rename to feature_flag_enabled? when the client method is updated.
+            def is_feature_enabled(*args, **kwargs) # rubocop:disable Naming/PredicateName
               ensure_initialized!
               client.is_feature_enabled(*args, **kwargs)
             end
@@ -72,9 +74,9 @@ module PostHog
             private
 
             def ensure_initialized!
-              unless initialized?
-                raise 'PostHog is not initialized. Call PostHog.init in an initializer.'
-              end
+              return if initialized?
+
+              raise 'PostHog is not initialized. Call PostHog.init in an initializer.'
             end
           end
         end
@@ -104,7 +106,7 @@ module PostHog
       end
 
       # After initialization, set up remaining integrations
-      config.after_initialize do |app|
+      config.after_initialize do |_app|
         next unless PostHog.initialized?
 
         # Register with Rails error reporter (Rails 7.0+)
@@ -118,14 +120,11 @@ module PostHog
         end
       end
 
-      private
-
       def self.register_error_subscriber
         return unless PostHog.rails_config&.auto_capture_exceptions
 
         subscriber = PostHog::Rails::ErrorSubscriber.new
         ::Rails.error.subscribe(subscriber)
-
       rescue StandardError => e
         PostHog::Logging.logger.warn("Failed to register error subscriber: #{e.message}")
         PostHog::Logging.logger.warn("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")

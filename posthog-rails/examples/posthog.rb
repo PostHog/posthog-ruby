@@ -10,7 +10,7 @@ PostHog.init do |config|
 
   # Your PostHog project API key (required)
   # Get this from: PostHog Project Settings > API Keys
-  config.api_key = ENV['POSTHOG_API_KEY']
+  config.api_key = ENV.fetch('POSTHOG_API_KEY', nil)
 
   # ============================================================================
   # CORE POSTHOG CONFIGURATION
@@ -21,7 +21,7 @@ PostHog.init do |config|
 
   # Personal API key (optional, but required for local feature flag evaluation)
   # Get this from: PostHog Settings > Personal API Keys
-  config.personal_api_key = ENV['POSTHOG_PERSONAL_API_KEY']
+  config.personal_api_key = ENV.fetch('POSTHOG_PERSONAL_API_KEY', nil)
 
   # Maximum number of events to queue before dropping (default: 10000)
   config.max_queue_size = 10_000
@@ -82,9 +82,7 @@ PostHog.init do |config|
   # ============================================================================
 
   # Disable in test environment
-  if Rails.env.test?
-    config.test_mode = true
-  end
+  config.test_mode = true if Rails.env.test?
 
   # Optional: Disable in development
   # if Rails.env.development?

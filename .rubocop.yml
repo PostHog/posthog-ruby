@@ -7,6 +7,10 @@ AllCops:
 Style/Documentation:
   Enabled: false
 
+Naming/FileName:
+  Exclude:
+    - 'posthog-rails/lib/posthog-rails.rb'
+
 # Modern Ruby 3.0+ specific cops
 Style/HashTransformKeys:
   Enabled: true

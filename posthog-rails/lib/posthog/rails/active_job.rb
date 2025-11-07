@@ -10,9 +10,9 @@ module PostHog
 
       def perform_now
         super
-      rescue StandardError => exception
+      rescue StandardError => e
         # Capture the exception with job context
-        capture_job_exception(exception)
+        capture_job_exception(e)
         raise
       end
 
@@ -34,9 +34,7 @@ module PostHog
         }
 
         # Add serialized job arguments (be careful with sensitive data)
-        if arguments.present?
-          properties['$job_arguments'] = sanitize_job_arguments(arguments)
-        end
+        properties['$job_arguments'] = sanitize_job_arguments(arguments) if arguments.present?
 
         PostHog.capture_exception(exception, distinct_id, properties)
       rescue StandardError => e

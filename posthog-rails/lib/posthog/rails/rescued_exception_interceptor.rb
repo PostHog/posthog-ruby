@@ -12,12 +12,10 @@ module PostHog
 
       def call(env)
         @app.call(env)
-      rescue StandardError => exception
+      rescue StandardError => e
         # Store the exception so CaptureExceptions middleware can report it
-        if should_intercept?
-          env['posthog.rescued_exception'] = exception
-        end
-        raise exception
+        env['posthog.rescued_exception'] = e if should_intercept?
+        raise e
       end
 
       private

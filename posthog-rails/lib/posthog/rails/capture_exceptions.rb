@@ -18,14 +18,12 @@ module PostHog
         # Check if there was an exception that Rails handled
         exception = collect_exception(env)
 
-        if exception && should_capture?(exception)
-          capture_exception(exception, env)
-        end
+        capture_exception(exception, env) if exception && should_capture?(exception)
 
         response
-      rescue StandardError => exception
+      rescue StandardError => e
         # Capture unhandled exceptions
-        capture_exception(exception, env) if should_capture?(exception)
+        capture_exception(e, env) if should_capture?(e)
         raise
       end
 
@@ -33,11 +31,9 @@ module PostHog
 
       def collect_exception(env)
         # Rails stores exceptions in these env keys
-        exception = env['action_dispatch.exception'] ||
+        env['action_dispatch.exception'] ||
           env['rack.exception'] ||
           env['posthog.rescued_exception']
-
-        exception
       end
 
       def should_capture?(exception)
@@ -80,6 +76,7 @@ module PostHog
         return user['id'] if user.respond_to?(:[]) && user['id']
         return user.uuid if user.respond_to?(:uuid)
         return user['uuid'] if user.respond_to?(:[]) && user['uuid']
+
         user.to_s
       end
 
@@ -116,7 +113,7 @@ module PostHog
       def filter_sensitive_params(params)
         # Use Rails' configured filter_parameters to filter sensitive data
         # This respects the app's config.filter_parameters setting
-        filtered = super(params)
+        filtered = super
 
         # Also truncate long values
         filtered.transform_values do |value|

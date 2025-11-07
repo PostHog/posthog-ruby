@@ -20,7 +20,7 @@ module PostHog
         # Add context information
         if context.present?
           context.each do |key, value|
-            properties["$context_#{key}"] = value unless key.in?([:user_id, :distinct_id])
+            properties["$context_#{key}"] = value unless key.in?(%i[user_id distinct_id])
           end
         end
 
