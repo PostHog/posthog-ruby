@@ -1,0 +1,44 @@
+{
+  "actionabilityScore": 0.35,
+  "context": "The task requests adding 'fish' to the README.md of the PostHog Ruby SDK. However, the term 'fish' is ambiguous—it could refer to the fish shell, an ASCII art graphic, a new feature called 'fish', or documentation content. No existing references to 'fish' exist in the codebase, making this a clarification-dependent task.",
+  "keyFiles": [
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "blockers": [
+    "Task description is too vague to determine implementation intent",
+    "No context clues in codebase about what 'fish' refers to",
+    "No existing patterns or prior work related to 'fish' feature",
+    "Unclear what section of README should be modified or if a new section is needed"
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "question": "What does 'fish' refer to in this context?",
+      "options": [
+        "Add a reference to the fish shell in the development setup section (e.g., 'supports fish shell for asdf configuration')",
+        "Add a fish emoji or ASCII art graphic for visual enhancement",
+        "Add content about a new feature or capability called 'fish' (requires description of what this feature does)"
+      ]
+    },
+    {
+      "id": "q2",
+      "question": "Where should the fish reference be placed in the README?",
+      "options": [
+        "In the 'Developing Locally' section, near the asdf/environment setup instructions",
+        "In a new 'Shell Support' section within the README",
+        "At the top as a badge or emoji in the project header"
+      ]
+    },
+    {
+      "id": "q3",
+      "question": "What action should accompany the README change?",
+      "options": [
+        "Update README only; no version bump or CHANGELOG entry needed",
+        "Update README and add a note to CHANGELOG.md describing the change",
+        "Update README and increment the patch version in version.rb (if this represents a new feature)"
+      ]
+    }
+  ],
+  "answered": false
+}
