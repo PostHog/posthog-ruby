@@ -9,11 +9,11 @@ module PostHog
     let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
-    let(:decide_v3_response) do
-      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v3.json')), symbolize_names: true)
+    let(:flags_v3_response) do
+      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-flags-v3.json')), symbolize_names: true)
     end
-    let(:decide_v4_response) do
-      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true)
+    let(:flags_v4_response) do
+      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-flags-v4.json')), symbolize_names: true)
     end
     before do
       # Stub the initial feature flag definitions request
@@ -30,9 +30,9 @@ module PostHog
         .to_return(status: 200, body: { flags: [] }.to_json)
     end
 
-    shared_examples 'decide response format' do |version|
+    shared_examples 'flags response format' do |version|
       let(:flags_response) do
-        JSON.parse(File.read(File.join(__dir__, 'fixtures', "test-decide-#{version}.json")), symbolize_names: true)
+        JSON.parse(File.read(File.join(__dir__, 'fixtures', "test-flags-#{version}.json")), symbolize_names: true)
       end
 
       it 'correctly parses the response' do
@@ -67,16 +67,16 @@ module PostHog
     end
 
     context 'with v3 response format' do
-      it_behaves_like 'decide response format', 'v3'
+      it_behaves_like 'flags response format', 'v3'
     end
 
     context 'with v4 response format' do
-      it_behaves_like 'decide response format', 'v4'
+      it_behaves_like 'flags response format', 'v4'
     end
 
     it 'transforms v3 response flags into v4 format' do
       stub_request(:post, flags_endpoint)
-        .to_return(status: 200, body: decide_v3_response.to_json)
+        .to_return(status: 200, body: flags_v3_response.to_json)
 
       result = poller.get_flags('test-distinct-id')
 
@@ -135,7 +135,7 @@ module PostHog
 
     it 'transforms v4 response flags into hash of FeatureFlag instances' do
       stub_request(:post, flags_endpoint)
-        .to_return(status: 200, body: decide_v4_response.to_json)
+        .to_return(status: 200, body: flags_v4_response.to_json)
 
       result = poller.get_flags('test-distinct-id')
 
@@ -270,12 +270,12 @@ module PostHog
   end
 
   describe FeatureFlag do
-    let(:decide_v4_response) do
-      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true)
+    let(:flags_v4_response) do
+      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-flags-v4.json')), symbolize_names: true)
     end
 
     it 'transforms v4 response flags into hash of FeatureFlag instances' do
-      json = decide_v4_response[:flags][:'enabled-flag']
+      json = flags_v4_response[:flags][:'enabled-flag']
 
       result = FeatureFlag.new(json)
 
@@ -335,13 +335,13 @@ module PostHog
   describe 'Client#get_feature_flag' do
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: nil, test_mode: true) }
     let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
-    let(:decide_v4_response) do
-      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-decide-v4.json')), symbolize_names: true)
+    let(:flags_v4_response) do
+      JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-flags-v4.json')), symbolize_names: true)
     end
     describe '#get_feature_flag' do
       it 'calls the $feature_flag_called event with additional properties' do
         stub_request(:post, flags_endpoint)
-          .to_return(status: 200, body: decide_v4_response.to_json)
+          .to_return(status: 200, body: flags_v4_response.to_json)
         stub_const('PostHog::VERSION', '2.8.0')
 
         expect(client.get_feature_flag('enabled-flag', 'test-distinct-id')).to eq(true)
@@ -353,6 +353,7 @@ module PostHog
                '$feature_flag' => 'enabled-flag',
                '$feature_flag_response' => true,
                '$feature_flag_request_id' => '42853c54-1431-4861-996e-3a548989fa2c',
+               '$feature_flag_evaluated_at' => 1_704_067_200_000,
                '$lib' => 'posthog-ruby',
                '$lib_version' => '2.8.0',
                '$groups' => {},
