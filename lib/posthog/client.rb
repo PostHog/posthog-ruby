@@ -285,26 +285,31 @@ module PostHog
         person_properties,
         group_properties
       )
-      feature_flag_response, flag_was_locally_evaluated, request_id = @feature_flags_poller.get_feature_flag(
-        key,
-        distinct_id,
-        groups,
-        person_properties,
-        group_properties,
-        only_evaluate_locally
-      )
+      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at =
+        @feature_flags_poller.get_feature_flag(
+          key,
+          distinct_id,
+          groups,
+          person_properties,
+          group_properties,
+          only_evaluate_locally
+        )
 
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
       if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
+        properties = {
+          '$feature_flag' => key,
+          '$feature_flag_response' => feature_flag_response,
+          'locally_evaluated' => flag_was_locally_evaluated
+        }
+        properties['$feature_flag_request_id'] = request_id if request_id
+        properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at
+
         capture(
           {
             distinct_id: distinct_id,
             event: '$feature_flag_called',
-            properties: {
-              '$feature_flag' => key,
-              '$feature_flag_response' => feature_flag_response,
-              'locally_evaluated' => flag_was_locally_evaluated
-            }.merge(request_id ? { '$feature_flag_request_id' => request_id } : {}),
+            properties: properties,
             groups: groups
           }
         )
@@ -385,7 +390,9 @@ module PostHog
         distinct_id, groups, person_properties, group_properties, only_evaluate_locally
       )
 
-      response.delete(:requestId) # remove internal information.
+      # Remove internal information
+      response.delete(:requestId)
+      response.delete(:evaluatedAt)
       response
     end
 

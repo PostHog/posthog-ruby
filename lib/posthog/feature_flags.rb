@@ -140,6 +140,7 @@ module PostHog
           [key, FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
         end
       end
+
       flags_response
     end
 
@@ -190,6 +191,7 @@ module PostHog
       flag_was_locally_evaluated = !response.nil?
 
       request_id = nil
+      evaluated_at = nil
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
@@ -198,6 +200,7 @@ module PostHog
           if flags_data.key?(:featureFlags)
             flags = stringify_keys(flags_data[:featureFlags] || {})
             request_id = flags_data[:requestId]
+            evaluated_at = flags_data[:evaluatedAt]
           else
             logger.debug "Missing feature flags key: #{flags_data.to_json}"
             flags = {}
@@ -211,7 +214,7 @@ module PostHog
         end
       end
 
-      [response, flag_was_locally_evaluated, request_id]
+      [response, flag_was_locally_evaluated, request_id, evaluated_at]
     end
 
     def get_all_flags(
@@ -252,6 +255,7 @@ module PostHog
       payloads = {}
       fallback_to_server = @feature_flags.empty?
       request_id = nil # Only for /flags requests
+      evaluated_at = nil # Only for /flags requests
 
       @feature_flags.each do |flag|
         match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
@@ -282,6 +286,7 @@ module PostHog
             flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
             request_id = flags_and_payloads[:requestId]
+            evaluated_at = flags_and_payloads[:evaluatedAt]
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
@@ -292,7 +297,8 @@ module PostHog
       {
         featureFlags: flags,
         featureFlagPayloads: payloads,
-        requestId: request_id
+        requestId: request_id,
+        evaluatedAt: evaluated_at
       }
     end
 
