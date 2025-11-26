@@ -32,19 +32,22 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 ## How to release
 
 1. Get access to RubyGems from @dmarticus, @daibhin or @mariusandra
-2. Update `lib/posthog/version.rb` with the new version & add to `CHANGELOG.md` making sure to add the current date. Commit the changes:
+2. Install [`gh`](https://cli.github.com/) and authenticate with `gh auth login`
+3. Update `lib/posthog/version.rb` with the new version & add to `CHANGELOG.md` making sure to add the current date. Commit the changes:
 
 ```shell
-git commit -am "Version 1.2.3"
-git tag -a 1.2.3 -m "Version 1.2.3"
+VERSION=1.2.3 # Replace with the new version here
+git commit -am "Version $VERSION"
+git tag -a $VERSION -m "Version $VERSION"
 git push && git push --tags
+gh release create $VERSION --generate-notes --fail-on-no-commits
 ```
 
-3. Run
+4. Run
 
 ```shell
 gem build posthog-ruby.gemspec
-gem push posthog-ruby-1.2.3.gem
+gem push "posthog-ruby-$VERSION.gem"
 ```
 
-3. Authenticate with your RubyGems account and approve the publish!
+5. Authenticate with your RubyGems account and approve the publish!
