@@ -1773,6 +1773,30 @@ module PostHog
         # And flags should be preserved
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
       end
+
+      it 'preserves ETag when server returns an error response' do
+        # Need 3 responses: 1 for client initialization, 2 for the test
+        empty_flags = { flags: [], group_type_mapping: {}, cohorts: {} }
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: empty_flags.to_json },
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"original-etag"' } },
+            { status: 500, body: { error: 'Internal Server Error' }.to_json }
+          )
+
+        poller.load_feature_flags(true)
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
+
+        poller.load_feature_flags(true)
+
+        # ETag should be preserved since the 500 error doesn't contain valid flag data
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
+        # And flags should be preserved from previous successful load
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+        expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('beta-feature')
+      end
     end
 
     describe '_mask_tokens_in_url' do

@@ -848,13 +848,12 @@ module PostHog
       end
 
       # Handle 304 Not Modified - flags haven't changed, skip processing
+      # Only update ETag if the 304 response includes one
       if res[:not_modified]
         @flags_etag.value = res[:etag] if res[:etag]
         logger.debug '[FEATURE FLAGS] Flags not modified (304), using cached data'
         return
       end
-
-      @flags_etag.value = res[:etag]
 
       # Handle quota limits with 402 status
       if res.is_a?(Hash) && res[:status] == 402
@@ -872,6 +871,9 @@ module PostHog
       end
 
       if res.key?(:flags)
+        # Only update ETag on successful responses with flag data
+        @flags_etag.value = res[:etag]
+
         @feature_flags = res[:flags] || []
         @feature_flags_by_key = {}
         @feature_flags.each do |flag|
