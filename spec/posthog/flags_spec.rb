@@ -1638,7 +1638,7 @@ module PostHog
 
         poller.load_feature_flags(true)
 
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"abc123"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"abc123"')
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
       end
 
@@ -1701,11 +1701,11 @@ module PostHog
           )
 
         poller.load_feature_flags(true)
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"etag-v1"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"etag-v1"')
 
         poller.load_feature_flags(true)
 
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"etag-v2"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"etag-v2"')
         expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('flag-v2')
       end
 
@@ -1724,11 +1724,11 @@ module PostHog
           )
 
         poller.load_feature_flags(true)
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"etag-v1"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"etag-v1"')
 
         poller.load_feature_flags(true)
 
-        expect(poller.instance_variable_get(:@flags_etag)).to be_nil
+        expect(poller.instance_variable_get(:@flags_etag).value).to be_nil
         expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('flag-v2')
       end
 
@@ -1746,7 +1746,7 @@ module PostHog
         poller.load_feature_flags(true)
 
         # ETag should be preserved since server returned 304 (even without new ETag)
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"original-etag"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
         # And flags should be preserved
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
       end
@@ -1764,12 +1764,12 @@ module PostHog
           )
 
         poller.load_feature_flags(true)
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"original-etag"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
 
         poller.load_feature_flags(true)
 
         # ETag should be updated to the new value from 304 response
-        expect(poller.instance_variable_get(:@flags_etag)).to eq('"updated-etag"')
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"updated-etag"')
         # And flags should be preserved
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
       end

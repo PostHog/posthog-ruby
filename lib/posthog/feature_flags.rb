@@ -43,7 +43,7 @@ module PostHog
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
-      @flags_etag = nil
+      @flags_etag = Concurrent::AtomicReference.new(nil)
       @task =
         Concurrent::TimerTask.new(
           execution_interval: polling_interval
@@ -841,7 +841,7 @@ module PostHog
 
     def _load_feature_flags
       begin
-        res = _request_feature_flag_definitions(etag: @flags_etag)
+        res = _request_feature_flag_definitions(etag: @flags_etag.value)
       rescue StandardError => e
         @on_error.call(-1, e.to_s)
         return
@@ -849,14 +849,12 @@ module PostHog
 
       # Handle 304 Not Modified - flags haven't changed, skip processing
       if res[:not_modified]
-        # Update ETag if server sent one, otherwise keep the existing value
-        @flags_etag = res[:etag] if res[:etag]
+        @flags_etag.value = res[:etag] if res[:etag]
         logger.debug '[FEATURE FLAGS] Flags not modified (304), using cached data'
         return
       end
 
-      # Update stored ETag (clear if server stops sending one)
-      @flags_etag = res[:etag]
+      @flags_etag.value = res[:etag]
 
       # Handle quota limits with 402 status
       if res.is_a?(Hash) && res[:status] == 402
