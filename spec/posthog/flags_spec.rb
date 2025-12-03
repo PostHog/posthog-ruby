@@ -220,7 +220,7 @@ module PostHog
 
       result = poller.get_flags('test-distinct-id')
 
-      expect(result).to eq({ error: 'Invalid request', status: 400, etag: nil })
+      expect(result).to eq({ error: 'Invalid request', status: 400 })
     end
 
     it 'handles network timeouts' do
@@ -243,7 +243,7 @@ module PostHog
 
       result = poller.get_flags('test-distinct-id')
 
-      expect(result).to eq(quota_limited_response.merge(status: 200, etag: nil))
+      expect(result).to eq(quota_limited_response.merge(status: 200))
     end
 
     it 'handles empty responses' do
@@ -252,7 +252,7 @@ module PostHog
 
       result = poller.get_flags('test-distinct-id')
 
-      expect(result).to eq({ status: 200, etag: nil })
+      expect(result).to eq({ status: 200 })
     end
 
     it 'handles malformed JSON responses' do
@@ -264,8 +264,7 @@ module PostHog
       expect(result).to eq({
                              error: 'Invalid JSON response',
                              body: 'invalid json',
-                             status: 200,
-                             etag: nil
+                             status: 200
                            })
     end
   end

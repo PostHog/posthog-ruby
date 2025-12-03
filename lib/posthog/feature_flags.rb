@@ -896,7 +896,7 @@ module PostHog
       req['Authorization'] = "Bearer #{@personal_api_key}"
       req['If-None-Match'] = etag if etag
 
-      _request(uri, req)
+      _request(uri, req, nil, include_etag: true)
     end
 
     def _request_feature_flag_evaluation(data = {})
@@ -920,7 +920,7 @@ module PostHog
     end
 
     # rubocop:disable Lint/ShadowedException
-    def _request(uri, request_object, timeout = nil)
+    def _request(uri, request_object, timeout = nil, include_etag: false)
       request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
       request_timeout = timeout || 10
 
@@ -933,7 +933,7 @@ module PostHog
         ) do |http|
           res = http.request(request_object)
           status_code = res.code.to_i
-          etag = res['ETag']
+          etag = include_etag ? res['ETag'] : nil
 
           # Handle 304 Not Modified - return special response indicating no change
           if status_code == 304
@@ -944,12 +944,16 @@ module PostHog
           # Parse response body to hash
           begin
             response = JSON.parse(res.body, { symbolize_names: true })
-            # Only add status and etag if response is a hash
-            response = response.merge({ status: status_code, etag: etag }) if response.is_a?(Hash)
+            # Only add status (and etag if requested) if response is a hash
+            extra_fields = { status: status_code }
+            extra_fields[:etag] = etag if include_etag
+            response = response.merge(extra_fields) if response.is_a?(Hash)
             return response
           rescue JSON::ParserError
             # Handle case when response isn't valid JSON
-            return { error: 'Invalid JSON response', body: res.body, status: status_code, etag: etag }
+            error_response = { error: 'Invalid JSON response', body: res.body, status: status_code }
+            error_response[:etag] = etag if include_etag
+            return error_response
           end
         end
       rescue Timeout::Error,
