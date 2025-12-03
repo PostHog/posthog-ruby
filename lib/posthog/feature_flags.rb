@@ -937,7 +937,7 @@ module PostHog
 
           # Handle 304 Not Modified - return special response indicating no change
           if status_code == 304
-            logger.debug("GET #{_mask_tokens_in_url(uri.to_s)} returned 304 Not Modified")
+            logger.debug("#{request_object.method} #{_mask_tokens_in_url(uri.to_s)} returned 304 Not Modified")
             return { not_modified: true, etag: etag, status: status_code }
           end
 
