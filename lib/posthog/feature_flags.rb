@@ -43,6 +43,7 @@ module PostHog
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
+      @flags_etag = Concurrent::AtomicReference.new(nil)
       @task =
         Concurrent::TimerTask.new(
           execution_interval: polling_interval
@@ -840,9 +841,17 @@ module PostHog
 
     def _load_feature_flags
       begin
-        res = _request_feature_flag_definitions
+        res = _request_feature_flag_definitions(etag: @flags_etag.value)
       rescue StandardError => e
         @on_error.call(-1, e.to_s)
+        return
+      end
+
+      # Handle 304 Not Modified - flags haven't changed, skip processing
+      # Only update ETag if the 304 response includes one
+      if res[:not_modified]
+        @flags_etag.value = res[:etag] if res[:etag]
+        logger.debug '[FEATURE FLAGS] Flags not modified (304), using cached data'
         return
       end
 
@@ -862,6 +871,9 @@ module PostHog
       end
 
       if res.key?(:flags)
+        # Only update ETag on successful responses with flag data
+        @flags_etag.value = res[:etag]
+
         @feature_flags = res[:flags] || []
         @feature_flags_by_key = {}
         @feature_flags.each do |flag|
@@ -877,13 +889,14 @@ module PostHog
       end
     end
 
-    def _request_feature_flag_definitions
+    def _request_feature_flag_definitions(etag: nil)
       uri = URI("#{@host}/api/feature_flag/local_evaluation")
       uri.query = URI.encode_www_form([['token', @project_api_key], %w[send_cohorts true]])
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
+      req['If-None-Match'] = etag if etag
 
-      _request(uri, req)
+      _request(uri, req, nil, include_etag: true)
     end
 
     def _request_feature_flag_evaluation(data = {})
@@ -907,7 +920,7 @@ module PostHog
     end
 
     # rubocop:disable Lint/ShadowedException
-    def _request(uri, request_object, timeout = nil)
+    def _request(uri, request_object, timeout = nil, include_etag: false)
       request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
       request_timeout = timeout || 10
 
@@ -919,16 +932,28 @@ module PostHog
           read_timeout: request_timeout
         ) do |http|
           res = http.request(request_object)
+          status_code = res.code.to_i
+          etag = include_etag ? res['ETag'] : nil
+
+          # Handle 304 Not Modified - return special response indicating no change
+          if status_code == 304
+            logger.debug("#{request_object.method} #{_mask_tokens_in_url(uri.to_s)} returned 304 Not Modified")
+            return { not_modified: true, etag: etag, status: status_code }
+          end
 
           # Parse response body to hash
           begin
             response = JSON.parse(res.body, { symbolize_names: true })
-            # Only add status if response is a hash
-            response = response.merge({ status: res.code.to_i }) if response.is_a?(Hash)
+            # Only add status (and etag if requested) if response is a hash
+            extra_fields = { status: status_code }
+            extra_fields[:etag] = etag if include_etag
+            response = response.merge(extra_fields) if response.is_a?(Hash)
             return response
           rescue JSON::ParserError
             # Handle case when response isn't valid JSON
-            return { error: 'Invalid JSON response', body: res.body, status: res.code.to_i }
+            error_response = { error: 'Invalid JSON response', body: res.body, status: status_code }
+            error_response[:etag] = etag if include_etag
+            return error_response
           end
         end
       rescue Timeout::Error,
@@ -945,5 +970,9 @@ module PostHog
       end
     end
     # rubocop:enable Lint/ShadowedException
+
+    def _mask_tokens_in_url(url)
+      url.gsub(/token=([^&]{10})[^&]*/, 'token=\1...')
+    end
   end
 end

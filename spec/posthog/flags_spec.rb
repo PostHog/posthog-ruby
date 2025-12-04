@@ -1619,4 +1619,221 @@ module PostHog
       end
     end
   end
+
+  describe 'FeatureFlagsPoller ETag support' do
+    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
+    let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+
+    describe 'load_feature_flags with ETag support' do
+      it 'stores ETag from initial response' do
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            status: 200,
+            body: { flags: [{ id: 1, key: 'beta-feature', active: true }], group_type_mapping: {},
+                    cohorts: {} }.to_json,
+            headers: { 'ETag' => '"abc123"' }
+          )
+
+        poller.load_feature_flags(true)
+
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"abc123"')
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+      end
+
+      it 'sends If-None-Match header on subsequent requests' do
+        # Use response sequence - first response without If-None-Match check, second with
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: {}, cohorts: {} }
+        new_flags = { flags: [{ id: 1, key: 'new-feature', active: true }],
+                      group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"initial-etag"' } },
+            { status: 200, body: new_flags.to_json, headers: { 'ETag' => '"new-etag"' } }
+          )
+
+        poller.load_feature_flags(true)
+        poller.load_feature_flags(true)
+
+        expect(WebMock).to have_requested(:get, feature_flag_endpoint)
+          .with(headers: { 'If-None-Match' => '"initial-etag"' }).once
+      end
+
+      it 'handles 304 Not Modified response and preserves cached flags' do
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: { '0' => 'company' }, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"test-etag"' } },
+            { status: 304, body: '', headers: { 'ETag' => '"test-etag"' } }
+          )
+
+        poller.load_feature_flags(true)
+
+        # Verify initial flags are loaded
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+        expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('beta-feature')
+        # The JSON parser symbolizes keys, so compare with symbol keys
+        expect(poller.instance_variable_get(:@group_type_mapping)).to eq({ '0': 'company' })
+
+        poller.load_feature_flags(true)
+
+        # Flags should still be the same (not cleared)
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+        expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('beta-feature')
+        expect(poller.instance_variable_get(:@group_type_mapping)).to eq({ '0': 'company' })
+      end
+
+      it 'updates ETag when flags change' do
+        # Need 3 responses: 1 for client initialization, 2 for the test
+        empty_flags = { flags: [], group_type_mapping: {}, cohorts: {} }
+        flag_v1 = { flags: [{ id: 1, key: 'flag-v1', active: true }],
+                    group_type_mapping: {}, cohorts: {} }
+        flag_v2 = { flags: [{ id: 1, key: 'flag-v2', active: true }],
+                    group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: empty_flags.to_json },
+            { status: 200, body: flag_v1.to_json, headers: { 'ETag' => '"etag-v1"' } },
+            { status: 200, body: flag_v2.to_json, headers: { 'ETag' => '"etag-v2"' } }
+          )
+
+        poller.load_feature_flags(true)
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"etag-v1"')
+
+        poller.load_feature_flags(true)
+
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"etag-v2"')
+        expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('flag-v2')
+      end
+
+      it 'clears ETag when server stops sending it' do
+        # Need 3 responses: 1 for client initialization, 2 for the test
+        empty_flags = { flags: [], group_type_mapping: {}, cohorts: {} }
+        flag_v1 = { flags: [{ id: 1, key: 'flag-v1', active: true }],
+                    group_type_mapping: {}, cohorts: {} }
+        flag_v2 = { flags: [{ id: 1, key: 'flag-v2', active: true }],
+                    group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: empty_flags.to_json },
+            { status: 200, body: flag_v1.to_json, headers: { 'ETag' => '"etag-v1"' } },
+            { status: 200, body: flag_v2.to_json }
+          )
+
+        poller.load_feature_flags(true)
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"etag-v1"')
+
+        poller.load_feature_flags(true)
+
+        expect(poller.instance_variable_get(:@flags_etag).value).to be_nil
+        expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('flag-v2')
+      end
+
+      it 'handles 304 without ETag header and preserves existing ETag' do
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"original-etag"' } },
+            { status: 304, body: '' }
+          )
+
+        poller.load_feature_flags(true)
+
+        poller.load_feature_flags(true)
+
+        # ETag should be preserved since server returned 304 (even without new ETag)
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
+        # And flags should be preserved
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+      end
+
+      it 'updates ETag when 304 response includes a new ETag' do
+        # Need 3 responses: 1 for client initialization, 2 for the test
+        empty_flags = { flags: [], group_type_mapping: {}, cohorts: {} }
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: empty_flags.to_json },
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"original-etag"' } },
+            { status: 304, body: '', headers: { 'ETag' => '"updated-etag"' } }
+          )
+
+        poller.load_feature_flags(true)
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
+
+        poller.load_feature_flags(true)
+
+        # ETag should be updated to the new value from 304 response
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"updated-etag"')
+        # And flags should be preserved
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+      end
+
+      it 'preserves ETag when server returns an error response' do
+        # Need 3 responses: 1 for client initialization, 2 for the test
+        empty_flags = { flags: [], group_type_mapping: {}, cohorts: {} }
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: {}, cohorts: {} }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: empty_flags.to_json },
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"original-etag"' } },
+            { status: 500, body: { error: 'Internal Server Error' }.to_json }
+          )
+
+        poller.load_feature_flags(true)
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
+
+        poller.load_feature_flags(true)
+
+        # ETag should be preserved since the 500 error doesn't contain valid flag data
+        expect(poller.instance_variable_get(:@flags_etag).value).to eq('"original-etag"')
+        # And flags should be preserved from previous successful load
+        expect(poller.instance_variable_get(:@feature_flags).length).to eq(1)
+        expect(poller.instance_variable_get(:@feature_flags)[0][:key]).to eq('beta-feature')
+      end
+    end
+
+    describe '_mask_tokens_in_url' do
+      before do
+        # Stub the initial feature flag definitions request made during client initialization
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(status: 200, body: { flags: [] }.to_json)
+      end
+
+      it 'masks token keeping first 10 chars visible' do
+        url = 'https://example.com/api/flags?token=phc_abc123xyz789&send_cohorts'
+        result = poller.send(:_mask_tokens_in_url, url)
+        expect(result).to eq('https://example.com/api/flags?token=phc_abc123...&send_cohorts')
+      end
+
+      it 'masks token at end of URL' do
+        url = 'https://example.com/api/flags?token=phc_abc123xyz789'
+        result = poller.send(:_mask_tokens_in_url, url)
+        expect(result).to eq('https://example.com/api/flags?token=phc_abc123...')
+      end
+
+      it 'leaves URLs without token unchanged' do
+        url = 'https://example.com/api/flags?other=value'
+        result = poller.send(:_mask_tokens_in_url, url)
+        expect(result).to eq('https://example.com/api/flags?other=value')
+      end
+
+      it 'leaves short tokens (<10 chars) unchanged' do
+        url = 'https://example.com/api/flags?token=short'
+        result = poller.send(:_mask_tokens_in_url, url)
+        expect(result).to eq('https://example.com/api/flags?token=short')
+      end
+
+      it 'masks exactly 10 char tokens' do
+        url = 'https://example.com/api/flags?token=1234567890'
+        result = poller.send(:_mask_tokens_in_url, url)
+        expect(result).to eq('https://example.com/api/flags?token=1234567890...')
+      end
+    end
+  end
 end
