@@ -43,11 +43,6 @@ git push && git push --tags
 gh release create $VERSION --generate-notes --fail-on-no-commits
 ```
 
-4. Run
-
-```shell
-gem build posthog-ruby.gemspec
-gem push "posthog-ruby-$VERSION.gem"
-```
+4. [Trigger](https://github.com/PostHog/posthog-ruby/actions) "Publish Release" GitHub Action
 
 5. Authenticate with your RubyGems account and approve the publish!
