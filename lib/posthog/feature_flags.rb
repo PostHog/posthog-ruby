@@ -193,9 +193,11 @@ module PostHog
 
       request_id = nil
       evaluated_at = nil
+      feature_flag_error = nil
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
+          errors = []
           flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties,
                                                   only_evaluate_locally, true)
           if flags_data.key?(:featureFlags)
@@ -207,15 +209,41 @@ module PostHog
             flags = {}
           end
 
+          status = flags_data[:status]
+          if status && status >= 400
+            errors << FeatureFlagError.api_error(status)
+          end
+
+          if flags_data[:errorsWhileComputingFlags]
+            errors << FeatureFlagError::ERRORS_WHILE_COMPUTING
+          end
+
+          if flags_data[:quotaLimited]&.include?('feature_flags')
+            errors << FeatureFlagError::QUOTA_LIMITED
+          end
+
+          unless flags.key?(key.to_s)
+            errors << FeatureFlagError::FLAG_MISSING
+          end
+
           response = flags[key]
           response = false if response.nil?
+          feature_flag_error = errors.join(',') unless errors.empty?
+
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
+        rescue Timeout::Error, Net::ReadTimeout, Net::WriteTimeout
+          @on_error.call(-1, 'Timeout while fetching flags remotely')
+          feature_flag_error = FeatureFlagError::TIMEOUT
+        rescue Errno::ECONNRESET, Errno::ECONNREFUSED, EOFError, SocketError => e
+          @on_error.call(-1, "Connection error while fetching flags remotely: #{e}")
+          feature_flag_error = FeatureFlagError::CONNECTION_ERROR
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}. #{e.backtrace.join("\n")}")
+          feature_flag_error = FeatureFlagError::UNKNOWN_ERROR
         end
       end
 
-      [response, flag_was_locally_evaluated, request_id, evaluated_at]
+      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error]
     end
 
     def get_all_flags(
@@ -270,19 +298,28 @@ module PostHog
         fallback_to_server = true
       end
 
+      errors_while_computing = false
+      quota_limited = nil
+      status_code = nil
+
       if fallback_to_server && !only_evaluate_locally
         begin
           flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties)
+          errors_while_computing = flags_and_payloads[:errorsWhileComputingFlags] || false
+          quota_limited = flags_and_payloads[:quotaLimited]
+          status_code = flags_and_payloads[:status]
 
           unless flags_and_payloads.key?(:featureFlags)
             raise StandardError, "Error flags response: #{flags_and_payloads}"
           end
 
           # Check if feature_flags are quota limited
-          if flags_and_payloads[:quotaLimited]&.include?('feature_flags')
+          if quota_limited&.include?('feature_flags')
             logger.warn '[FEATURE FLAGS] Quota limited for feature flags'
             flags = {}
             payloads = {}
+            request_id = flags_and_payloads[:requestId]
+            evaluated_at = flags_and_payloads[:evaluatedAt]
           else
             flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
@@ -299,7 +336,10 @@ module PostHog
         featureFlags: flags,
         featureFlagPayloads: payloads,
         requestId: request_id,
-        evaluatedAt: evaluated_at
+        evaluatedAt: evaluated_at,
+        errorsWhileComputingFlags: errors_while_computing,
+        quotaLimited: quota_limited,
+        status: status_code
       }
     end
 
