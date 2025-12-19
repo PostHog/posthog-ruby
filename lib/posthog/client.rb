@@ -285,7 +285,7 @@ module PostHog
         person_properties,
         group_properties
       )
-      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at =
+      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error =
         @feature_flags_poller.get_feature_flag(
           key,
           distinct_id,
@@ -304,6 +304,7 @@ module PostHog
         }
         properties['$feature_flag_request_id'] = request_id if request_id
         properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at
+        properties['$feature_flag_error'] = feature_flag_error if feature_flag_error
 
         capture(
           {
