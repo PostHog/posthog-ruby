@@ -210,29 +210,18 @@ module PostHog
           end
 
           status = flags_data[:status]
-          if status && status >= 400
-            errors << FeatureFlagError.api_error(status)
-          end
-
-          if flags_data[:errorsWhileComputingFlags]
-            errors << FeatureFlagError::ERRORS_WHILE_COMPUTING
-          end
-
-          if flags_data[:quotaLimited]&.include?('feature_flags')
-            errors << FeatureFlagError::QUOTA_LIMITED
-          end
-
-          unless flags.key?(key.to_s)
-            errors << FeatureFlagError::FLAG_MISSING
-          end
+          errors << FeatureFlagError.api_error(status) if status && status >= 400
+          errors << FeatureFlagError::ERRORS_WHILE_COMPUTING if flags_data[:errorsWhileComputingFlags]
+          errors << FeatureFlagError::QUOTA_LIMITED if flags_data[:quotaLimited]&.include?('feature_flags')
+          errors << FeatureFlagError::FLAG_MISSING unless flags.key?(key.to_s)
 
           response = flags[key]
           response = false if response.nil?
           feature_flag_error = errors.join(',') unless errors.empty?
 
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
-        rescue Timeout::Error, Net::ReadTimeout, Net::WriteTimeout
-          @on_error.call(-1, 'Timeout while fetching flags remotely')
+        rescue Timeout::Error => e
+          @on_error.call(-1, "Timeout while fetching flags remotely: #{e}")
           feature_flag_error = FeatureFlagError::TIMEOUT
         rescue Errno::ECONNRESET, Errno::ECONNREFUSED, EOFError, SocketError => e
           @on_error.call(-1, "Connection error while fetching flags remotely: #{e}")
@@ -313,18 +302,17 @@ module PostHog
             raise StandardError, "Error flags response: #{flags_and_payloads}"
           end
 
+          request_id = flags_and_payloads[:requestId]
+          evaluated_at = flags_and_payloads[:evaluatedAt]
+
           # Check if feature_flags are quota limited
           if quota_limited&.include?('feature_flags')
             logger.warn '[FEATURE FLAGS] Quota limited for feature flags'
             flags = {}
             payloads = {}
-            request_id = flags_and_payloads[:requestId]
-            evaluated_at = flags_and_payloads[:evaluatedAt]
           else
             flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
-            request_id = flags_and_payloads[:requestId]
-            evaluated_at = flags_and_payloads[:evaluatedAt]
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")

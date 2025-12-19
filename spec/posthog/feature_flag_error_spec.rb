@@ -136,7 +136,7 @@ module PostHog
           stub_request(:post, flags_endpoint)
             .to_return(status: 400, body: { 'featureFlags' => {} }.to_json)
 
-          result = client.get_feature_flag('test-flag', 'test-user')
+          client.get_feature_flag('test-flag', 'test-user')
 
           captured_message = client.dequeue_last_message
           expect(captured_message[:properties]['$feature_flag_error']).to eq('api_error_400,flag_missing')
