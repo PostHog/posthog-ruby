@@ -30,7 +30,7 @@ module PostHog
     # @param status [Integer, String] The HTTP status code
     # @return [String] Error string in format "api_error_STATUS"
     def self.api_error(status)
-      "api_error_#{status}"
+      "api_error_#{status.to_s.downcase}"
     end
   end
 end
