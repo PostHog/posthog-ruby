@@ -43,6 +43,7 @@ module PostHog
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
+      @flags_etag = Concurrent::AtomicReference.new(nil)
       @task =
         Concurrent::TimerTask.new(
           execution_interval: polling_interval
@@ -140,6 +141,7 @@ module PostHog
           [key, FeatureFlag.from_value_and_payload(key, value, flags_response[:featureFlagPayloads][key])]
         end
       end
+
       flags_response
     end
 
@@ -190,28 +192,47 @@ module PostHog
       flag_was_locally_evaluated = !response.nil?
 
       request_id = nil
+      evaluated_at = nil
+      feature_flag_error = nil
 
       if !flag_was_locally_evaluated && !only_evaluate_locally
         begin
+          errors = []
           flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties,
                                                   only_evaluate_locally, true)
           if flags_data.key?(:featureFlags)
             flags = stringify_keys(flags_data[:featureFlags] || {})
             request_id = flags_data[:requestId]
+            evaluated_at = flags_data[:evaluatedAt]
           else
             logger.debug "Missing feature flags key: #{flags_data.to_json}"
             flags = {}
           end
 
+          status = flags_data[:status]
+          errors << FeatureFlagError.api_error(status) if status && status >= 400
+          errors << FeatureFlagError::ERRORS_WHILE_COMPUTING if flags_data[:errorsWhileComputingFlags]
+          errors << FeatureFlagError::QUOTA_LIMITED if flags_data[:quotaLimited]&.include?('feature_flags')
+          errors << FeatureFlagError::FLAG_MISSING unless flags.key?(key.to_s)
+
           response = flags[key]
           response = false if response.nil?
+          feature_flag_error = errors.join(',') unless errors.empty?
+
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
+        rescue Timeout::Error => e
+          @on_error.call(-1, "Timeout while fetching flags remotely: #{e}")
+          feature_flag_error = FeatureFlagError::TIMEOUT
+        rescue Errno::ECONNRESET, Errno::ECONNREFUSED, EOFError, SocketError => e
+          @on_error.call(-1, "Connection error while fetching flags remotely: #{e}")
+          feature_flag_error = FeatureFlagError::CONNECTION_ERROR
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}. #{e.backtrace.join("\n")}")
+          feature_flag_error = FeatureFlagError::UNKNOWN_ERROR
         end
       end
 
-      [response, flag_was_locally_evaluated, request_id]
+      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error]
     end
 
     def get_all_flags(
@@ -252,6 +273,7 @@ module PostHog
       payloads = {}
       fallback_to_server = @feature_flags.empty?
       request_id = nil # Only for /flags requests
+      evaluated_at = nil # Only for /flags requests
 
       @feature_flags.each do |flag|
         match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
@@ -265,23 +287,32 @@ module PostHog
         fallback_to_server = true
       end
 
+      errors_while_computing = false
+      quota_limited = nil
+      status_code = nil
+
       if fallback_to_server && !only_evaluate_locally
         begin
           flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties)
+          errors_while_computing = flags_and_payloads[:errorsWhileComputingFlags] || false
+          quota_limited = flags_and_payloads[:quotaLimited]
+          status_code = flags_and_payloads[:status]
 
           unless flags_and_payloads.key?(:featureFlags)
             raise StandardError, "Error flags response: #{flags_and_payloads}"
           end
 
+          request_id = flags_and_payloads[:requestId]
+          evaluated_at = flags_and_payloads[:evaluatedAt]
+
           # Check if feature_flags are quota limited
-          if flags_and_payloads[:quotaLimited]&.include?('feature_flags')
+          if quota_limited&.include?('feature_flags')
             logger.warn '[FEATURE FLAGS] Quota limited for feature flags'
             flags = {}
             payloads = {}
           else
             flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
-            request_id = flags_and_payloads[:requestId]
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
@@ -292,7 +323,11 @@ module PostHog
       {
         featureFlags: flags,
         featureFlagPayloads: payloads,
-        requestId: request_id
+        requestId: request_id,
+        evaluatedAt: evaluated_at,
+        errorsWhileComputingFlags: errors_while_computing,
+        quotaLimited: quota_limited,
+        status: status_code
       }
     end
 
@@ -834,9 +869,17 @@ module PostHog
 
     def _load_feature_flags
       begin
-        res = _request_feature_flag_definitions
+        res = _request_feature_flag_definitions(etag: @flags_etag.value)
       rescue StandardError => e
         @on_error.call(-1, e.to_s)
+        return
+      end
+
+      # Handle 304 Not Modified - flags haven't changed, skip processing
+      # Only update ETag if the 304 response includes one
+      if res[:not_modified]
+        @flags_etag.value = res[:etag] if res[:etag]
+        logger.debug '[FEATURE FLAGS] Flags not modified (304), using cached data'
         return
       end
 
@@ -856,6 +899,9 @@ module PostHog
       end
 
       if res.key?(:flags)
+        # Only update ETag on successful responses with flag data
+        @flags_etag.value = res[:etag]
+
         @feature_flags = res[:flags] || []
         @feature_flags_by_key = {}
         @feature_flags.each do |flag|
@@ -871,13 +917,14 @@ module PostHog
       end
     end
 
-    def _request_feature_flag_definitions
+    def _request_feature_flag_definitions(etag: nil)
       uri = URI("#{@host}/api/feature_flag/local_evaluation")
       uri.query = URI.encode_www_form([['token', @project_api_key], %w[send_cohorts true]])
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
+      req['If-None-Match'] = etag if etag
 
-      _request(uri, req)
+      _request(uri, req, nil, include_etag: true)
     end
 
     def _request_feature_flag_evaluation(data = {})
@@ -901,7 +948,7 @@ module PostHog
     end
 
     # rubocop:disable Lint/ShadowedException
-    def _request(uri, request_object, timeout = nil)
+    def _request(uri, request_object, timeout = nil, include_etag: false)
       request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
       request_timeout = timeout || 10
 
@@ -913,16 +960,28 @@ module PostHog
           read_timeout: request_timeout
         ) do |http|
           res = http.request(request_object)
+          status_code = res.code.to_i
+          etag = include_etag ? res['ETag'] : nil
+
+          # Handle 304 Not Modified - return special response indicating no change
+          if status_code == 304
+            logger.debug("#{request_object.method} #{_mask_tokens_in_url(uri.to_s)} returned 304 Not Modified")
+            return { not_modified: true, etag: etag, status: status_code }
+          end
 
           # Parse response body to hash
           begin
             response = JSON.parse(res.body, { symbolize_names: true })
-            # Only add status if response is a hash
-            response = response.merge({ status: res.code.to_i }) if response.is_a?(Hash)
+            # Only add status (and etag if requested) if response is a hash
+            extra_fields = { status: status_code }
+            extra_fields[:etag] = etag if include_etag
+            response = response.merge(extra_fields) if response.is_a?(Hash)
             return response
           rescue JSON::ParserError
             # Handle case when response isn't valid JSON
-            return { error: 'Invalid JSON response', body: res.body, status: res.code.to_i }
+            error_response = { error: 'Invalid JSON response', body: res.body, status: status_code }
+            error_response[:etag] = etag if include_etag
+            return error_response
           end
         end
       rescue Timeout::Error,
@@ -939,5 +998,9 @@ module PostHog
       end
     end
     # rubocop:enable Lint/ShadowedException
+
+    def _mask_tokens_in_url(url)
+      url.gsub(/token=([^&]{10})[^&]*/, 'token=\1...')
+    end
   end
 end

@@ -8,6 +8,10 @@
    - Configurable exception exclusion list
    - User context capture from controllers
 
+## 3.4.0 - 2025-12-04
+
+1. feat: Add ETag support for feature flag definitions polling ([#84](https://github.com/PostHog/posthog-ruby/pull/84))
+
 ## 3.3.3 - 2025-10-22
 
 1. fix: fallback to API for multi-condition flags with static cohorts ([#80](https://github.com/PostHog/posthog-ruby/pull/80))
