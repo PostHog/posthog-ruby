@@ -85,9 +85,7 @@ PostHog.init do |config|
   config.test_mode = true if Rails.env.test?
 
   # Optional: Disable in development
-  # if Rails.env.development?
-  #   config.test_mode = true
-  # end
+  # config.test_mode = true if Rails.env.test? || Rails.env.development?
 end
 
 # ============================================================================
