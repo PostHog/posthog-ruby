@@ -132,6 +132,8 @@ module PostHog
           else
             value
           end
+        rescue
+          value
         end
       rescue StandardError
         {} # Return empty hash if filtering fails
