@@ -138,6 +138,8 @@ class EmailJob < ApplicationJob
 end
 ```
 
+> **Note:** Currently only ActiveJob is supported. Support for other job runners (Sidekiq, Resque, Good Job, etc.) is planned for future releases. Contributions are welcome!
+
 ### Feature Flags
 
 Use feature flags in your Rails app:
