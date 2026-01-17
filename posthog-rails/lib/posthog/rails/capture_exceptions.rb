@@ -93,50 +93,32 @@ module PostHog
       def build_properties(request, env)
         properties = {
           '$exception_source' => 'rails',
-          '$request_url' => request.url,
-          '$request_method' => request.method,
-          '$request_path' => request.path
+          '$request_url' => safe_serialize(request.url),
+          '$request_method' => safe_serialize(request.method),
+          '$request_path' => safe_serialize(request.path)
         }
 
         # Add controller and action if available
         if env['action_controller.instance']
           controller = env['action_controller.instance']
-          properties['$controller'] = controller.controller_name
-          properties['$action'] = controller.action_name
+          properties['$controller'] = safe_serialize(controller.controller_name)
+          properties['$action'] = safe_serialize(controller.action_name)
         end
 
         # Add request parameters (be careful with sensitive data)
         if request.params.present?
           filtered_params = filter_sensitive_params(request.params)
-          properties['$request_params'] = filtered_params unless filtered_params.empty?
+          # Safe serialize to handle any complex objects in params
+          properties['$request_params'] = safe_serialize(filtered_params) unless filtered_params.empty?
         end
 
         # Add user agent
-        properties['$user_agent'] = request.user_agent if request.user_agent
+        properties['$user_agent'] = safe_serialize(request.user_agent) if request.user_agent
 
         # Add referrer
-        properties['$referrer'] = request.referrer if request.referrer
+        properties['$referrer'] = safe_serialize(request.referrer) if request.referrer
 
         properties
-      end
-
-      def filter_sensitive_params(params)
-        # Use Rails' configured filter_parameters to filter sensitive data
-        # This respects the app's config.filter_parameters setting
-        filtered = super
-
-        # Also truncate long values
-        filtered.transform_values do |value|
-          if value.is_a?(String) && value.length > 1000
-            "#{value[0..1000]}... (truncated)"
-          else
-            value
-          end
-        rescue StandardError
-          value
-        end
-      rescue StandardError
-        {} # Return empty hash if filtering fails
       end
     end
   end

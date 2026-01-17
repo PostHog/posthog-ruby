@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
+require 'posthog/rails/parameter_filter'
+
 module PostHog
   module Rails
     # Rails 7.0+ error reporter integration
     # This integrates with Rails.error.handle and Rails.error.record
     class ErrorSubscriber
+      include ParameterFilter
+
       def report(error, handled:, severity:, context:, source: nil)
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config&.should_capture_exception?(error)
@@ -14,13 +18,15 @@ module PostHog
         properties = {
           '$exception_source' => source || 'rails_error_reporter',
           '$exception_handled' => handled,
-          '$exception_severity' => severity
+          '$exception_severity' => severity.to_s
         }
 
-        # Add context information
+        # Add context information (safely serialized to avoid circular references)
         if context.present?
           context.each do |key, value|
-            properties["$context_#{key}"] = value unless key.in?(%i[user_id distinct_id])
+            next if key.in?(%i[user_id distinct_id])
+
+            properties["$context_#{key}"] = safe_serialize(value)
           end
         end
 
