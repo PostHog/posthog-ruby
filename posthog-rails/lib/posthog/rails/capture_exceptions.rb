@@ -13,6 +13,10 @@ module PostHog
       end
 
       def call(env)
+        # Signal that we're in a web request context
+        # ErrorSubscriber will skip capture for web requests to avoid duplicates
+        PostHog::Rails.enter_web_request
+
         response = @app.call(env)
 
         # Check if there was an exception that Rails handled
@@ -25,6 +29,8 @@ module PostHog
         # Capture unhandled exceptions
         capture_exception(e, env) if should_capture?(e)
         raise
+      ensure
+        PostHog::Rails.exit_web_request
       end
 
       private

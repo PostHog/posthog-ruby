@@ -11,6 +11,9 @@ module PostHog
   module Rails
     VERSION = PostHog::VERSION
 
+    # Thread-local key for tracking web request context
+    IN_WEB_REQUEST_KEY = :posthog_in_web_request
+
     class << self
       def config
         @config ||= Configuration.new
@@ -20,6 +23,23 @@ module PostHog
 
       def configure
         yield config if block_given?
+      end
+
+      # Mark that we're in a web request context
+      # CaptureExceptions middleware will handle exception capture
+      def enter_web_request
+        Thread.current[IN_WEB_REQUEST_KEY] = true
+      end
+
+      # Clear web request context (called at end of request)
+      def exit_web_request
+        Thread.current[IN_WEB_REQUEST_KEY] = false
+      end
+
+      # Check if we're currently in a web request context
+      # Used by ErrorSubscriber to avoid duplicate captures
+      def in_web_request?
+        Thread.current[IN_WEB_REQUEST_KEY] == true
       end
     end
   end

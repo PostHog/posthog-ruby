@@ -12,6 +12,9 @@ module PostHog
       def report(error, handled:, severity:, context:, source: nil)
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config&.should_capture_exception?(error)
+        # Skip if in a web request - CaptureExceptions middleware will handle it
+        # with richer context (URL, params, controller, etc.)
+        return if PostHog::Rails.in_web_request?
 
         distinct_id = context[:user_id] || context[:distinct_id]
 
