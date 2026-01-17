@@ -35,9 +35,9 @@ PostHog.init do |config|
   config.feature_flag_request_timeout_seconds = 3
 
   # Error callback - called when PostHog encounters an error
-  config.on_error = proc { |status, message|
-    Rails.logger.error("[PostHog] Error #{status}: #{message}")
-  }
+  # config.on_error = proc { |status, message|
+  #   Rails.logger.error("[PostHog] Error #{status}: #{message}")
+  # }
 
   # Before send callback - modify or filter events before sending
   # Return nil to prevent the event from being sent
