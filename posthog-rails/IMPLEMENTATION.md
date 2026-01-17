@@ -60,7 +60,7 @@ The core Rails integration hook that:
 - Extends `PostHog` module with class methods
 - Adds `PostHog.init` configuration block
 - Adds delegation methods (`capture`, `capture_exception`, etc.)
-- Stores singleton `client` and `rails_config`
+- Stores singleton `client` (Rails config accessed via `PostHog::Rails.config`)
 
 #### Middleware Registration
 Inserts two middleware in the Rails stack:

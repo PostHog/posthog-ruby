@@ -7,15 +7,13 @@ module PostHog
       initializer 'posthog.set_configs' do |_app|
         PostHog.class_eval do
           class << self
-            attr_accessor :rails_config, :client
+            attr_accessor :client
 
             # Initialize PostHog client with a block configuration
             def init(options = {})
-              @rails_config ||= PostHog::Rails::Configuration.new
-
               # If block given, yield to configuration
               if block_given?
-                config = PostHog::Rails::InitConfig.new(@rails_config, options)
+                config = PostHog::Rails::InitConfig.new(PostHog::Rails.config, options)
                 yield config
                 options = config.to_client_options
               end
@@ -121,7 +119,7 @@ module PostHog
       end
 
       def self.register_error_subscriber
-        return unless PostHog.rails_config&.auto_capture_exceptions
+        return unless PostHog::Rails.config&.auto_capture_exceptions
 
         subscriber = PostHog::Rails::ErrorSubscriber.new
         ::Rails.error.subscribe(subscriber)

@@ -10,5 +10,13 @@ require 'posthog/rails/railtie'
 module PostHog
   module Rails
     VERSION = PostHog::VERSION
+
+    class << self
+      def config
+        @config ||= Configuration.new
+      end
+
+      attr_writer :config
+    end
   end
 end

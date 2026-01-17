@@ -6,8 +6,8 @@ module PostHog
     # This integrates with Rails.error.handle and Rails.error.record
     class ErrorSubscriber
       def report(error, handled:, severity:, context:, source: nil)
-        return unless PostHog.rails_config&.auto_capture_exceptions
-        return unless PostHog.rails_config&.should_capture_exception?(error)
+        return unless PostHog::Rails.config&.auto_capture_exceptions
+        return unless PostHog::Rails.config&.should_capture_exception?(error)
 
         distinct_id = context[:user_id] || context[:distinct_id]
 

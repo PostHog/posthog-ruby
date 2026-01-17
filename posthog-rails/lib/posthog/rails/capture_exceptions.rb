@@ -37,8 +37,8 @@ module PostHog
       end
 
       def should_capture?(exception)
-        return false unless PostHog.rails_config&.auto_capture_exceptions
-        return false unless PostHog.rails_config&.should_capture_exception?(exception)
+        return false unless PostHog::Rails.config&.auto_capture_exceptions
+        return false unless PostHog::Rails.config&.should_capture_exception?(exception)
 
         true
       end
@@ -58,7 +58,7 @@ module PostHog
         # Try to get user from controller
         if env['action_controller.instance']
           controller = env['action_controller.instance']
-          method_name = PostHog.rails_config&.current_user_method || :current_user
+          method_name = PostHog::Rails.config&.current_user_method || :current_user
 
           if controller.respond_to?(method_name, true)
             user = controller.send(method_name)

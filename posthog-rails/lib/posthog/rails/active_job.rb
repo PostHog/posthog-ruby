@@ -19,7 +19,7 @@ module PostHog
       private
 
       def capture_job_exception(exception)
-        return unless PostHog.rails_config&.auto_instrument_active_job
+        return unless PostHog::Rails.config&.auto_instrument_active_job
 
         # Build distinct_id from job arguments if possible
         distinct_id = extract_distinct_id_from_job

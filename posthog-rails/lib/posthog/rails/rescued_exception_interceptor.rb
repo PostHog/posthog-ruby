@@ -21,7 +21,7 @@ module PostHog
       private
 
       def should_intercept?
-        PostHog.rails_config&.report_rescued_exceptions
+        PostHog::Rails.config&.report_rescued_exceptions
       end
     end
   end
