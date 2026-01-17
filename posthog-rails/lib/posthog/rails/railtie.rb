@@ -9,6 +9,18 @@ module PostHog
           class << self
             attr_accessor :client
 
+            # Methods explicitly delegated to the client
+            DELEGATED_METHODS = %i[
+              capture
+              capture_exception
+              identify
+              alias
+              group_identify
+              is_feature_enabled
+              get_feature_flag
+              get_all_flags
+            ].freeze
+
             # Initialize PostHog client with a block configuration
             def init(options = {})
               # If block given, yield to configuration
@@ -22,52 +34,33 @@ module PostHog
               @client = PostHog::Client.new(options)
             end
 
-            # Delegate common methods to the singleton client
-            def capture(*args, **kwargs)
-              ensure_initialized!
-              client.capture(*args, **kwargs)
-            end
-
-            def capture_exception(*args, **kwargs)
-              ensure_initialized!
-              client.capture_exception(*args, **kwargs)
-            end
-
-            def identify(*args, **kwargs)
-              ensure_initialized!
-              client.identify(*args, **kwargs)
-            end
-
-            def alias(*args, **kwargs)
-              ensure_initialized!
-              client.alias(*args, **kwargs)
-            end
-
-            def group_identify(*args, **kwargs)
-              ensure_initialized!
-              client.group_identify(*args, **kwargs)
-            end
-
-            # NOTE: Method name matches the underlying PostHog Ruby Client for consistency.
-            # TODO: Rename to feature_flag_enabled? when the client method is updated.
-            def is_feature_enabled(*args, **kwargs) # rubocop:disable Naming/PredicateName
-              ensure_initialized!
-              client.is_feature_enabled(*args, **kwargs)
-            end
-
-            def get_feature_flag(*args, **kwargs)
-              ensure_initialized!
-              client.get_feature_flag(*args, **kwargs)
-            end
-
-            def get_all_flags(*args, **kwargs)
-              ensure_initialized!
-              client.get_all_flags(*args, **kwargs)
+            # Define delegated methods using metaprogramming
+            DELEGATED_METHODS.each do |method_name|
+              define_method(method_name) do |*args, **kwargs, &block|
+                ensure_initialized!
+                client.public_send(method_name, *args, **kwargs, &block)
+              end
             end
 
             def initialized?
               !@client.nil?
             end
+
+            # Fallback for any client methods not explicitly defined
+            # rubocop:disable Lint/RedundantSafeNavigation
+            def method_missing(method_name, ...)
+              if client&.respond_to?(method_name)
+                ensure_initialized!
+                client.public_send(method_name, ...)
+              else
+                super
+              end
+            end
+
+            def respond_to_missing?(method_name, include_private = false)
+              client&.respond_to?(method_name) || super
+            end
+            # rubocop:enable Lint/RedundantSafeNavigation
 
             private
 
