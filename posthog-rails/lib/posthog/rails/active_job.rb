@@ -8,6 +8,28 @@ module PostHog
     module ActiveJobExtensions
       include ParameterFilter
 
+      def self.included(base)
+        base.extend(ClassMethods)
+      end
+
+      module ClassMethods
+        # DSL for defining how to extract distinct_id from job arguments
+        # Example:
+        #   class MyJob < ApplicationJob
+        #     posthog_distinct_id ->(user, arg1, arg2) { user.id }
+        #     def perform(user, arg1, arg2)
+        #       # ...
+        #     end
+        #   end
+        def posthog_distinct_id(proc = nil, &block)
+          @posthog_distinct_id_proc = proc || block
+        end
+
+        def posthog_distinct_id_proc
+          @posthog_distinct_id_proc
+        end
+      end
+
       def perform_now
         super
       rescue StandardError => e
@@ -43,11 +65,12 @@ module PostHog
       end
 
       def extract_distinct_id_from_job
-        # Try to find a user ID in job arguments
+        # First, check if the job class defines a custom extractor
+        return self.class.posthog_distinct_id_proc.call(*arguments) if self.class.posthog_distinct_id_proc
+
+        # Fallback: look for explicit user_id in hash arguments only
         arguments.each do |arg|
-          if arg.respond_to?(:id)
-            return arg.id
-          elsif arg.is_a?(Hash) && arg['user_id']
+          if arg.is_a?(Hash) && arg['user_id']
             return arg['user_id']
           elsif arg.is_a?(Hash) && arg[:user_id]
             return arg[:user_id]

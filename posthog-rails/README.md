@@ -148,6 +148,52 @@ class EmailJob < ApplicationJob
 end
 ```
 
+#### Associating Jobs with Users
+
+By default, PostHog tries to extract a `distinct_id` from job arguments by looking for a `user_id` key in hash arguments:
+
+```ruby
+class ProcessOrderJob < ApplicationJob
+  def perform(order_id, options = {})
+    # PostHog will automatically use options[:user_id] or options['user_id']
+    # as the distinct_id if present
+  end
+end
+
+# Call with user context
+ProcessOrderJob.perform_later(order.id, user_id: current_user.id)
+```
+
+#### Custom Distinct ID Extraction
+
+For more control, use the `posthog_distinct_id` class method to define exactly how to extract the user's distinct ID from your job arguments:
+
+```ruby
+class SendWelcomeEmailJob < ApplicationJob
+  posthog_distinct_id ->(user, options) { user.id }
+
+  def perform(user, options = {})
+    UserMailer.welcome(user).deliver_now
+  end
+end
+```
+
+You can also use a block:
+
+```ruby
+class ProcessOrderJob < ApplicationJob
+  posthog_distinct_id do |order, notify_user_id|
+    notify_user_id
+  end
+
+  def perform(order, notify_user_id)
+    # Process the order...
+  end
+end
+```
+
+The proc/block receives the same arguments as `perform`, so you can extract the distinct ID however makes sense for your job.
+
 > **Note:** Currently only ActiveJob is supported. Support for other job runners (Sidekiq, Resque, Good Job, etc.) is planned for future releases. Contributions are welcome!
 
 ### Feature Flags
