@@ -13,7 +13,7 @@ module PostHog
             def init(options = {})
               # If block given, yield to configuration
               if block_given?
-                config = PostHog::Rails::InitConfig.new(PostHog::Rails.config, options)
+                config = PostHog::Rails::InitConfig.new(options)
                 yield config
                 options = config.to_client_options
               end
@@ -135,10 +135,7 @@ module PostHog
 
     # Configuration wrapper for the init block
     class InitConfig
-      attr_reader :rails_config
-
-      def initialize(rails_config, base_options = {})
-        @rails_config = rails_config
+      def initialize(base_options = {})
         @base_options = base_options
       end
 
@@ -177,31 +174,6 @@ module PostHog
 
       def before_send=(value)
         @base_options[:before_send] = value
-      end
-
-      # Rails-specific options
-      def auto_capture_exceptions=(value)
-        @rails_config.auto_capture_exceptions = value
-      end
-
-      def report_rescued_exceptions=(value)
-        @rails_config.report_rescued_exceptions = value
-      end
-
-      def auto_instrument_active_job=(value)
-        @rails_config.auto_instrument_active_job = value
-      end
-
-      def excluded_exceptions=(value)
-        @rails_config.excluded_exceptions = value
-      end
-
-      def capture_user_context=(value)
-        @rails_config.capture_user_context = value
-      end
-
-      def current_user_method=(value)
-        @rails_config.current_user_method = value
       end
 
       def to_client_options

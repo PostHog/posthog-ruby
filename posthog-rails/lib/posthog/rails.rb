@@ -17,6 +17,10 @@ module PostHog
       end
 
       attr_writer :config
+
+      def configure
+        yield config if block_given?
+      end
     end
   end
 end

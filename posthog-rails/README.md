@@ -33,6 +33,20 @@ bundle install
 Create an initializer at `config/initializers/posthog.rb`:
 
 ```ruby
+# Rails-specific configuration
+PostHog::Rails.configure do |config|
+  config.auto_capture_exceptions = true           # Capture exceptions automatically
+  config.report_rescued_exceptions = true         # Report exceptions Rails rescues
+  config.auto_instrument_active_job = true        # Instrument background jobs
+  config.capture_user_context = true              # Include user info in exceptions
+  config.current_user_method = :current_user      # Method to get current user
+  config.user_id_method = nil                     # Method to get ID from user (auto-detect)
+
+  # Add additional exceptions to ignore
+  config.excluded_exceptions = ['MyCustomError']
+end
+
+# Core PostHog client initialization
 PostHog.init do |config|
   # Required: Your PostHog API key
   config.api_key = ENV['POSTHOG_API_KEY']
@@ -43,22 +57,17 @@ PostHog.init do |config|
   # Optional: Personal API key for feature flags
   config.personal_api_key = ENV['POSTHOG_PERSONAL_API_KEY']
 
-  # Rails-specific configuration
-  config.auto_capture_exceptions = true           # Capture exceptions automatically
-  config.report_rescued_exceptions = true         # Report exceptions Rails rescues
-  config.auto_instrument_active_job = true        # Instrument background jobs
-  config.capture_user_context = true              # Include user info in exceptions
-  config.current_user_method = :current_user      # Method to get current user
-  config.user_id_method = nil                     # Method to get ID from user (auto-detect)
-
-  # Add additional exceptions to ignore
-  config.excluded_exceptions = ['MyCustomError']
-
   # Error callback
   config.on_error = proc { |status, msg|
     Rails.logger.error("PostHog error: #{msg}")
   }
 end
+```
+
+You can also configure Rails options directly:
+
+```ruby
+PostHog::Rails.config.auto_capture_exceptions = true
 ```
 
 ### Environment Variables
@@ -174,6 +183,8 @@ Rails.error.record(exception, context: { user_id: current_user.id })
 
 ### Rails-Specific Options
 
+Configure these via `PostHog::Rails.configure` or `PostHog::Rails.config`:
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `auto_capture_exceptions` | Boolean | `true` | Automatically capture exceptions |
@@ -225,7 +236,7 @@ The following exceptions are not reported by default (common 4xx errors):
 - `ActiveRecord::RecordNotFound`
 - `ActiveRecord::RecordNotUnique`
 
-You can add more with `config.excluded_exceptions = ['MyException']`.
+You can add more with `PostHog::Rails.config.excluded_exceptions = ['MyException']`.
 
 ## User Context
 
@@ -243,7 +254,7 @@ end
 If your user method has a different name, configure it:
 
 ```ruby
-config.current_user_method = :logged_in_user
+PostHog::Rails.config.current_user_method = :logged_in_user
 ```
 
 ### User ID Extraction
@@ -260,7 +271,7 @@ By default, PostHog Rails auto-detects the user's distinct ID by trying these me
 
 ```ruby
 # config/initializers/posthog.rb
-config.user_id_method = :email  # or :external_id, :customer_id, etc.
+PostHog::Rails.config.user_id_method = :email  # or :external_id, :customer_id, etc.
 ```
 
 **Option 2: Define a method on your User model**
@@ -356,7 +367,7 @@ PostHog Rails uses the following components:
 
 1. Verify `current_user_method` matches your controller method
 2. Check that the user object responds to one of: `posthog_distinct_id`, `distinct_id`, `id`, `pk`, or `uuid`
-3. If using a custom identifier, set `config.user_id_method = :your_method`
+3. If using a custom identifier, set `PostHog::Rails.config.user_id_method = :your_method`
 4. Enable logging to see what's being captured
 
 ### Feature flags not working

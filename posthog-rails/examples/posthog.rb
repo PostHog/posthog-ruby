@@ -3,6 +3,47 @@
 # PostHog Rails Initializer
 # Place this file in config/initializers/posthog.rb
 
+# ============================================================================
+# RAILS-SPECIFIC CONFIGURATION
+# ============================================================================
+# Configure Rails-specific options via PostHog::Rails.configure
+# These settings control how PostHog integrates with Rails features.
+
+PostHog::Rails.configure do |config|
+  # Automatically capture exceptions (default: true)
+  config.auto_capture_exceptions = true
+
+  # Report exceptions that Rails rescues (e.g., with rescue_from) (default: true)
+  config.report_rescued_exceptions = true
+
+  # Automatically instrument ActiveJob background jobs (default: true)
+  config.auto_instrument_active_job = true
+
+  # Capture user context with exceptions (default: true)
+  config.capture_user_context = true
+
+  # Controller method name to get current user (default: :current_user)
+  # Change this if your app uses a different method name (e.g., :authenticated_user)
+  # When configured, exceptions will include user context (distinct_id, email, name),
+  # making it easier to identify affected users and debug user-specific issues.
+  config.current_user_method = :current_user
+
+  # Additional exception classes to exclude from reporting
+  # These are added to the default excluded exceptions
+  config.excluded_exceptions = [
+    # 'MyCustom404Error',
+    # 'MyCustomValidationError'
+  ]
+end
+
+# You can also configure Rails options directly:
+# PostHog::Rails.config.auto_capture_exceptions = true
+
+# ============================================================================
+# CORE POSTHOG CONFIGURATION
+# ============================================================================
+# Initialize the PostHog client with core SDK options.
+
 PostHog.init do |config|
   # ============================================================================
   # REQUIRED CONFIGURATION
@@ -14,7 +55,7 @@ PostHog.init do |config|
   config.api_key = ENV.fetch('POSTHOG_API_KEY', nil)
 
   # ============================================================================
-  # CORE POSTHOG CONFIGURATION
+  # OPTIONAL CONFIGURATION
   # ============================================================================
 
   # For PostHog Cloud, use: https://us.i.posthog.com or https://eu.i.posthog.com
@@ -51,35 +92,6 @@ PostHog.init do |config|
   #
   #   event
   # }
-
-  # ============================================================================
-  # RAILS-SPECIFIC CONFIGURATION
-  # ============================================================================
-
-  # Automatically capture exceptions (default: true)
-  config.auto_capture_exceptions = true
-
-  # Report exceptions that Rails rescues (e.g., with rescue_from) (default: true)
-  config.report_rescued_exceptions = true
-
-  # Automatically instrument ActiveJob background jobs (default: true)
-  config.auto_instrument_active_job = true
-
-  # Capture user context with exceptions (default: true)
-  config.capture_user_context = true
-
-  # Controller method name to get current user (default: :current_user)
-  # Change this if your app uses a different method name (e.g., :authenticated_user)
-  # When configured, exceptions will include user context (distinct_id, email, name),
-  # making it easier to identify affected users and debug user-specific issues.
-  config.current_user_method = :current_user
-
-  # Additional exception classes to exclude from reporting
-  # These are added to the default excluded exceptions
-  config.excluded_exceptions = [
-    # 'MyCustom404Error',
-    # 'MyCustomValidationError'
-  ]
 
   # ============================================================================
   # ENVIRONMENT-SPECIFIC CONFIGURATION
