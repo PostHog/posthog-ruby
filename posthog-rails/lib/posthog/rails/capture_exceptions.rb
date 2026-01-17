@@ -67,7 +67,7 @@ module PostHog
         end
 
         # Fallback to session ID or nil
-        request.session_options&.dig(:id)
+        request.session&.id
       end
 
       def extract_user_id(user)
@@ -132,7 +132,7 @@ module PostHog
           else
             value
           end
-        rescue
+        rescue StandardError
           value
         end
       rescue StandardError
