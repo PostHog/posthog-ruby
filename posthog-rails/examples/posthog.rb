@@ -17,7 +17,7 @@ PostHog.init do |config|
   # ============================================================================
 
   # For PostHog Cloud, use: https://us.i.posthog.com or https://eu.i.posthog.com
-  config.host = ENV.fetch('POSTHOG_HOST', 'https://app.posthog.com')
+  config.host = ENV.fetch('POSTHOG_HOST', 'https://us.i.posthog.com')
 
   # Personal API key (optional, but required for local feature flag evaluation)
   # Get this from: PostHog Settings > Personal API Keys
