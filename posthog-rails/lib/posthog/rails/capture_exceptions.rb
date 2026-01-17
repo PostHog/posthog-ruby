@@ -71,9 +71,19 @@ module PostHog
       end
 
       def extract_user_id(user)
+        # Use configured method if specified
+        method_name = PostHog::Rails.config&.user_id_method
+        return user.send(method_name) if method_name && user.respond_to?(method_name)
+
+        # Try explicit PostHog method (allows users to customize without config)
+        return user.posthog_distinct_id if user.respond_to?(:posthog_distinct_id)
+        return user.distinct_id if user.respond_to?(:distinct_id)
+
         # Try common ID methods
         return user.id if user.respond_to?(:id)
         return user['id'] if user.respond_to?(:[]) && user['id']
+        return user.pk if user.respond_to?(:pk)
+        return user['pk'] if user.respond_to?(:[]) && user['pk']
         return user.uuid if user.respond_to?(:uuid)
         return user['uuid'] if user.respond_to?(:[]) && user['uuid']
 

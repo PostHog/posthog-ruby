@@ -49,6 +49,7 @@ PostHog.init do |config|
   config.auto_instrument_active_job = true        # Instrument background jobs
   config.capture_user_context = true              # Include user info in exceptions
   config.current_user_method = :current_user      # Method to get current user
+  config.user_id_method = nil                     # Method to get ID from user (auto-detect)
 
   # Add additional exceptions to ignore
   config.excluded_exceptions = ['MyCustomError']
@@ -180,6 +181,7 @@ Rails.error.record(exception, context: { user_id: current_user.id })
 | `auto_instrument_active_job` | Boolean | `true` | Instrument ActiveJob |
 | `capture_user_context` | Boolean | `true` | Include user info |
 | `current_user_method` | Symbol | `:current_user` | Controller method for user |
+| `user_id_method` | Symbol | `nil` | Method to extract ID from user object (auto-detect if nil) |
 | `excluded_exceptions` | Array | `[]` | Additional exceptions to ignore |
 
 ### Understanding Exception Tracking Options
@@ -243,6 +245,39 @@ If your user method has a different name, configure it:
 ```ruby
 config.current_user_method = :logged_in_user
 ```
+
+### User ID Extraction
+
+By default, PostHog Rails auto-detects the user's distinct ID by trying these methods in order:
+
+1. `posthog_distinct_id` - Define this on your User model for full control
+2. `distinct_id` - Common analytics convention
+3. `id` - Standard ActiveRecord primary key
+4. `pk` - Primary key alias
+5. `uuid` - For UUID-based primary keys
+
+**Option 1: Configure a specific method**
+
+```ruby
+# config/initializers/posthog.rb
+config.user_id_method = :email  # or :external_id, :customer_id, etc.
+```
+
+**Option 2: Define a method on your User model**
+
+```ruby
+class User < ApplicationRecord
+  def posthog_distinct_id
+    # Custom logic for your distinct ID
+    "user_#{id}"  # or external_id, or any unique identifier
+  end
+end
+```
+
+This approach is useful when you want to:
+- Use a different identifier than the database ID (e.g., `external_id`)
+- Prefix IDs to distinguish user types
+- Use composite identifiers
 
 ## Sensitive Data Filtering
 
@@ -320,8 +355,9 @@ PostHog Rails uses the following components:
 ### User context not working
 
 1. Verify `current_user_method` matches your controller method
-2. Check that the method returns an object with an `id` attribute
-3. Enable logging to see what's being captured
+2. Check that the user object responds to one of: `posthog_distinct_id`, `distinct_id`, `id`, `pk`, or `uuid`
+3. If using a custom identifier, set `config.user_id_method = :your_method`
+4. Enable logging to see what's being captured
 
 ### Feature flags not working
 

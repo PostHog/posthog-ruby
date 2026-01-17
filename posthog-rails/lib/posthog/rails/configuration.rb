@@ -21,6 +21,10 @@ module PostHog
       # Method name to call on controller to get user ID (default: :current_user)
       attr_accessor :current_user_method
 
+      # Method name to call on user object to get distinct_id (default: auto-detect)
+      # When nil, tries: posthog_distinct_id, distinct_id, id, pk, uuid in order
+      attr_accessor :user_id_method
+
       def initialize
         @auto_capture_exceptions = true
         @report_rescued_exceptions = true
@@ -28,6 +32,7 @@ module PostHog
         @excluded_exceptions = []
         @capture_user_context = true
         @current_user_method = :current_user
+        @user_id_method = nil
       end
 
       # Default exceptions that Rails apps typically don't want to track
