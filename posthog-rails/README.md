@@ -225,6 +225,8 @@ end
 Rails.error.record(exception, context: { user_id: current_user.id })
 ```
 
+PostHog will automatically extract the user's distinct ID from either `user_id` or `distinct_id` in the context hash (checking `user_id` first). Any other context keys are included as properties on the exception event.
+
 ## Configuration Options
 
 ### Core PostHog Options
