@@ -28,9 +28,19 @@ bundle install
 
 **Note:** `posthog-rails` depends on `posthog-ruby`, but it's recommended to explicitly include both gems in your Gemfile for clarity.
 
+### Generate the Initializer
+
+Run the install generator to create the PostHog initializer:
+
+```bash
+rails generate posthog:install
+```
+
+This will create `config/initializers/posthog.rb` with sensible defaults and documentation.
+
 ## Configuration
 
-Create an initializer at `config/initializers/posthog.rb`:
+The generated initializer at `config/initializers/posthog.rb` includes all available options:
 
 ```ruby
 # Rails-specific configuration
