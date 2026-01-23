@@ -169,6 +169,7 @@ module PostHog
       end
 
       response = nil
+      payload = nil
       feature_flag = nil
 
       @feature_flags.each do |flag|
@@ -181,6 +182,7 @@ module PostHog
       unless feature_flag.nil?
         begin
           response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties)
+          payload = _compute_flag_payload_locally(key, response) unless response.nil?
           logger.debug "Successfully computed flag locally: #{key} -> #{response}"
         rescue RequiresServerEvaluation, InconclusiveMatchError => e
           logger.debug "Failed to compute flag #{key} locally: #{e}"
@@ -202,11 +204,13 @@ module PostHog
                                                   only_evaluate_locally, true)
           if flags_data.key?(:featureFlags)
             flags = stringify_keys(flags_data[:featureFlags] || {})
+            payloads = stringify_keys(flags_data[:featureFlagPayloads] || {})
             request_id = flags_data[:requestId]
             evaluated_at = flags_data[:evaluatedAt]
           else
             logger.debug "Missing feature flags key: #{flags_data.to_json}"
             flags = {}
+            payloads = {}
           end
 
           status = flags_data[:status]
@@ -217,6 +221,7 @@ module PostHog
 
           response = flags[key]
           response = false if response.nil?
+          payload = payloads[key]
           feature_flag_error = errors.join(',') unless errors.empty?
 
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
@@ -232,7 +237,7 @@ module PostHog
         end
       end
 
-      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error]
+      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload]
     end
 
     def get_all_flags(
