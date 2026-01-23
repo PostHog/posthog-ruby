@@ -170,14 +170,7 @@ module PostHog
 
       response = nil
       payload = nil
-      feature_flag = nil
-
-      @feature_flags.each do |flag|
-        if key == flag[:key]
-          feature_flag = flag
-          break
-        end
-      end
+      feature_flag = @feature_flags_by_key&.[](key)
 
       unless feature_flag.nil?
         begin
