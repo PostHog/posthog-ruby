@@ -45,9 +45,9 @@ The generated initializer at `config/initializers/posthog.rb` includes all avail
 ```ruby
 # Rails-specific configuration
 PostHog::Rails.configure do |config|
-  config.auto_capture_exceptions = true           # Capture exceptions automatically
-  config.report_rescued_exceptions = true         # Report exceptions Rails rescues
-  config.auto_instrument_active_job = true        # Instrument background jobs
+  config.auto_capture_exceptions = true           # Enable automatic exception capture (default: false)
+  config.report_rescued_exceptions = true         # Report exceptions Rails rescues (default: false)
+  config.auto_instrument_active_job = true        # Instrument background jobs (default: false)
   config.capture_user_context = true              # Include user info in exceptions
   config.current_user_method = :current_user      # Method to get current user
   config.user_id_method = nil                     # Method to get ID from user (auto-detect)
@@ -94,7 +94,7 @@ POSTHOG_PERSONAL_API_KEY=your_personal_api_key  # Optional, for feature flags
 
 ### Automatic Exception Tracking
 
-Once configured, exceptions are automatically captured:
+When `auto_capture_exceptions` is enabled, exceptions are automatically captured:
 
 ```ruby
 class PostsController < ApplicationController
@@ -136,7 +136,7 @@ PostHog.capture_exception(
 
 ### Background Jobs
 
-ActiveJob exceptions are automatically captured:
+When `auto_instrument_active_job` is enabled, ActiveJob exceptions are automatically captured:
 
 ```ruby
 class EmailJob < ApplicationJob
@@ -247,9 +247,9 @@ Configure these via `PostHog::Rails.configure` or `PostHog::Rails.config`:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `auto_capture_exceptions` | Boolean | `true` | Automatically capture exceptions |
-| `report_rescued_exceptions` | Boolean | `true` | Report exceptions Rails rescues |
-| `auto_instrument_active_job` | Boolean | `true` | Instrument ActiveJob |
+| `auto_capture_exceptions` | Boolean | `false` | Automatically capture exceptions |
+| `report_rescued_exceptions` | Boolean | `false` | Report exceptions Rails rescues |
+| `auto_instrument_active_job` | Boolean | `false` | Instrument ActiveJob |
 | `capture_user_context` | Boolean | `true` | Include user info |
 | `current_user_method` | Symbol | `:current_user` | Controller method for user |
 | `user_id_method` | Symbol | `nil` | Method to extract ID from user object (auto-detect if nil) |
@@ -257,15 +257,15 @@ Configure these via `PostHog::Rails.configure` or `PostHog::Rails.config`:
 
 ### Understanding Exception Tracking Options
 
-**`auto_capture_exceptions`** - Master switch for all automatic error tracking
+**`auto_capture_exceptions`** - Master switch for all automatic error tracking (default: `false`)
 - When `true`: All exceptions are automatically captured and sent to PostHog
-- When `false`: No automatic error tracking (you must manually call `PostHog.capture_exception`)
-- **Use case:** Turn off automatic error tracking completely
+- When `false` (default): No automatic error tracking (you must manually call `PostHog.capture_exception`)
+- **Use case:** Enable to get automatic error tracking
 
-**`report_rescued_exceptions`** - Control exceptions that Rails handles gracefully
+**`report_rescued_exceptions`** - Control exceptions that Rails handles gracefully (default: `false`)
 - When `true`: Capture exceptions that Rails rescues and shows error pages for (404s, 500s, etc.)
-- When `false`: Only capture truly unhandled exceptions that crash your app
-- **Use case:** Reduce noise by ignoring errors Rails already handles
+- When `false` (default): Only capture truly unhandled exceptions that crash your app
+- **Use case:** Enable along with `auto_capture_exceptions` for complete error visibility
 
 **Example:**
 
@@ -278,11 +278,11 @@ end
 
 | Configuration | Result |
 |---------------|--------|
-| `auto_capture_exceptions = true`<br>`report_rescued_exceptions = true` | ✅ Exception captured (default behavior) |
+| `auto_capture_exceptions = true`<br>`report_rescued_exceptions = true` | ✅ Exception captured |
 | `auto_capture_exceptions = true`<br>`report_rescued_exceptions = false` | ❌ Not captured (Rails rescued it) |
-| `auto_capture_exceptions = false` | ❌ Not captured (automatic tracking disabled) |
+| `auto_capture_exceptions = false` | ❌ Not captured (automatic tracking disabled, this is the default) |
 
-**Recommendation:** Keep both `true` (default) to get complete visibility into all errors. Set `report_rescued_exceptions = false` only if you want to track just critical crashes.
+**Recommendation:** Enable both options to get complete visibility into all errors. Set `report_rescued_exceptions = false` if you only want to track critical crashes.
 
 ## Excluded Exceptions by Default
 

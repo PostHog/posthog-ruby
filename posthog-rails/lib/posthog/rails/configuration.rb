@@ -26,9 +26,9 @@ module PostHog
       attr_accessor :user_id_method
 
       def initialize
-        @auto_capture_exceptions = true
-        @report_rescued_exceptions = true
-        @auto_instrument_active_job = true
+        @auto_capture_exceptions = false
+        @report_rescued_exceptions = false
+        @auto_instrument_active_job = false
         @excluded_exceptions = []
         @capture_user_context = true
         @current_user_method = :current_user

@@ -10,13 +10,16 @@
 # These settings control how PostHog integrates with Rails features.
 
 PostHog::Rails.configure do |config|
-  # Automatically capture exceptions (default: true)
+  # Automatically capture exceptions (default: false)
+  # Set to true to enable automatic exception tracking
   config.auto_capture_exceptions = true
 
-  # Report exceptions that Rails rescues (e.g., with rescue_from) (default: true)
+  # Report exceptions that Rails rescues (e.g., with rescue_from) (default: false)
+  # Set to true to capture rescued exceptions
   config.report_rescued_exceptions = true
 
-  # Automatically instrument ActiveJob background jobs (default: true)
+  # Automatically instrument ActiveJob background jobs (default: false)
+  # Set to true to enable automatic ActiveJob exception tracking
   config.auto_instrument_active_job = true
 
   # Capture user context with exceptions (default: true)
