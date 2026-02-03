@@ -12,31 +12,31 @@
 PostHog::Rails.configure do |config|
   # Automatically capture exceptions (default: false)
   # Set to true to enable automatic exception tracking
-  config.auto_capture_exceptions = true
+  # config.auto_capture_exceptions = true
 
   # Report exceptions that Rails rescues (e.g., with rescue_from) (default: false)
   # Set to true to capture rescued exceptions
-  config.report_rescued_exceptions = true
+  # config.report_rescued_exceptions = true
 
   # Automatically instrument ActiveJob background jobs (default: false)
   # Set to true to enable automatic ActiveJob exception tracking
-  config.auto_instrument_active_job = true
+  # config.auto_instrument_active_job = true
 
   # Capture user context with exceptions (default: true)
-  config.capture_user_context = true
+  # config.capture_user_context = true
 
   # Controller method name to get current user (default: :current_user)
   # Change this if your app uses a different method name (e.g., :authenticated_user)
   # When configured, exceptions will include user context (distinct_id, email, name),
   # making it easier to identify affected users and debug user-specific issues.
-  config.current_user_method = :current_user
+  # config.current_user_method = :current_user
 
   # Additional exception classes to exclude from reporting
   # These are added to the default excluded exceptions
-  config.excluded_exceptions = [
-    # 'MyCustom404Error',
-    # 'MyCustomValidationError'
-  ]
+  # config.excluded_exceptions = [
+  #   # 'MyCustom404Error',
+  #   # 'MyCustomValidationError'
+  # ]
 end
 
 # You can also configure Rails options directly:
