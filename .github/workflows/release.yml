@@ -1,17 +1,91 @@
-name: Publish Release
+name: "Release"
 
 on:
-  workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Concurrency control: only one release process can run at a time
+# This prevents race conditions if multiple PRs with 'release' label merge simultaneously
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  check-release-label:
+    name: Check for release label
     runs-on: ubuntu-latest
+    # Run when PR with 'release' label is merged to main
+    if: |
+      github.event.pull_request.merged == true
+       && contains(github.event.pull_request.labels.*.name, 'release')
+    outputs:
+      should-release: ${{ steps.check.outputs.should-release }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Check version is new
+        id: check
+        run: |
+          # Extract version from source
+          version=$(grep "VERSION = '" lib/posthog/version.rb | grep -o "'[0-9]\+\.[0-9]\+\.[0-9]\+'" | tr -d "'")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Get currently published version from RubyGems
+          published=$(gem info posthog-ruby --remote 2>/dev/null | grep -o 'posthog-ruby ([0-9.]*' | grep -o '[0-9].*' || echo "none")
+
+          echo "Local version: $version"
+          echo "Published version: $published"
+
+          if [ "$version" = "$published" ]; then
+            echo "Version $version is already published, skipping release"
+            echo "should-release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Ready to release version $version"
+            echo "should-release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  notify-approval-needed:
+    name: Notify Slack - Approval Needed
+    needs: check-release-label
+    if: needs.check-release-label.outputs.should-release == 'true'
+    uses: posthog/.github/.github/workflows/notify-approval-needed.yml@main
+    with:
+      slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
+      slack_user_group_id: ${{ vars.GROUP_CLIENT_LIBRARIES_SLACK_GROUP_ID }}
+    secrets:
+      slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
+      posthog_project_api_key: ${{ secrets.POSTHOG_PROJECT_API_KEY }}
+
+  release:
+    name: Release and publish
+    needs: [check-release-label, notify-approval-needed]
+    runs-on: ubuntu-latest
+    if: always() && needs.check-release-label.outputs.should-release == 'true'
+    environment: "Release" # This will require an approval from a maintainer, they are notified in Slack above
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Notify Slack - Approved
+        if: needs.notify-approval-needed.outputs.slack_ts != ''
+        uses: posthog/.github/.github/actions/slack-thread-reply@main
+        with:
+          slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
+          slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
+          thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
+          message: "✅ Release approved! Publishing v${{ needs.check-release-label.outputs.version }}..."
+          emoji_reaction: "white_check_mark"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
@@ -22,4 +96,73 @@ jobs:
           bundler-cache: true
           ruby-version: ruby
 
-      - uses: rubygems/release-gem@v1
+      - name: Configure trusted publishing credentials
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      # Build and publish posthog-ruby first (posthog-rails depends on it)
+      - name: Build posthog-ruby
+        run: gem build posthog-ruby.gemspec
+
+      - name: Publish posthog-ruby
+        run: gem push posthog-ruby-*.gem
+
+      - name: Wait for posthog-ruby to be available
+        run: gem exec rubygems-await posthog-ruby-*.gem
+
+      # Build and publish posthog-rails
+      - name: Build posthog-rails
+        run: gem build posthog-rails/posthog-rails.gemspec
+
+      - name: Publish posthog-rails
+        run: gem push posthog-rails-*.gem
+
+      - name: Wait for posthog-rails to be available
+        run: gem exec rubygems-await posthog-rails-*.gem
+
+      # Create and push git tag
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ needs.check-release-label.outputs.version }}" -m "Release v${{ needs.check-release-label.outputs.version }}"
+          git push origin "v${{ needs.check-release-label.outputs.version }}"
+
+      # Notify in case of a failure
+      - name: Send failure event to PostHog
+        if: ${{ failure() }}
+        uses: PostHog/posthog-github-action@v0.1
+        with:
+          posthog-token: "${{ secrets.POSTHOG_PROJECT_API_KEY }}"
+          event: "posthog-ruby-github-release-workflow-failure"
+          properties: >-
+            {
+              "commitSha": "${{ github.sha }}",
+              "jobStatus": "${{ job.status }}",
+              "ref": "${{ github.ref }}",
+              "version": "v${{ needs.check-release-label.outputs.version }}"
+            }
+
+      - name: Notify Slack - Failed
+        if: ${{ failure() && needs.notify-approval-needed.outputs.slack_ts != '' }}
+        uses: posthog/.github/.github/actions/slack-thread-reply@main
+        with:
+          slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
+          slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
+          thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
+          message: "❌ Failed to release `posthog-ruby@v${{ needs.check-release-label.outputs.version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
+          emoji_reaction: "x"
+
+  notify-released:
+    name: Notify Slack - Released
+    needs: [check-release-label, notify-approval-needed, release]
+    runs-on: ubuntu-latest
+    if: always() && needs.release.result == 'success' && needs.notify-approval-needed.outputs.slack_ts != ''
+    steps:
+      - name: Notify Slack - Released
+        uses: posthog/.github/.github/actions/slack-thread-reply@main
+        with:
+          slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
+          slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
+          thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
+          message: "🚀 posthog-ruby and posthog-rails v${{ needs.check-release-label.outputs.version }} released successfully!"
+          emoji_reaction: "rocket"

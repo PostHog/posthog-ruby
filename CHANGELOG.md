@@ -1,3 +1,13 @@
+## 3.5.0 - 2026-02-05
+
+1. feat: Add posthog-rails gem for automatic Rails exception tracking
+   - Automatic capture of unhandled exceptions via Rails middleware
+   - Automatic capture of rescued exceptions (configurable)
+   - Automatic instrumentation of ActiveJob failures
+   - Integration with Rails 7.0+ error reporter
+   - Configurable exception exclusion list
+   - User context capture from controllers
+
 ## 3.4.0 - 2025-12-04
 
 1. feat: Add ETag support for feature flag definitions polling ([#84](https://github.com/PostHog/posthog-ruby/pull/84))
