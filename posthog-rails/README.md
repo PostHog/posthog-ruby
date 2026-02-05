@@ -61,8 +61,8 @@ PostHog.init do |config|
   # Required: Your PostHog API key
   config.api_key = ENV['POSTHOG_API_KEY']
 
-  # Optional: Your PostHog instance URL (defaults to https://app.posthog.com)
-  config.host = 'https://app.posthog.com'
+  # Optional: Your PostHog instance URL
+  config.host = 'https://us.i.posthog.com'  # or https://eu.i.posthog.com
 
   # Optional: Personal API key for feature flags
   config.personal_api_key = ENV['POSTHOG_PERSONAL_API_KEY']
@@ -234,7 +234,7 @@ PostHog will automatically extract the user's distinct ID from either `user_id` 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_key` | String | **required** | Your PostHog project API key |
-| `host` | String | `https://app.posthog.com` | PostHog instance URL |
+| `host` | String | `https://us.i.posthog.com` | PostHog instance URL |
 | `personal_api_key` | String | `nil` | For feature flag evaluation |
 | `max_queue_size` | Integer | `10000` | Max events to queue |
 | `test_mode` | Boolean | `false` | Don't send events (for testing) |
@@ -291,7 +291,13 @@ The following exceptions are not reported by default (common 4xx errors):
 - `AbstractController::ActionNotFound`
 - `ActionController::BadRequest`
 - `ActionController::InvalidAuthenticityToken`
+- `ActionController::InvalidCrossOriginRequest`
+- `ActionController::MethodNotAllowed`
+- `ActionController::NotImplemented`
+- `ActionController::ParameterMissing`
 - `ActionController::RoutingError`
+- `ActionController::UnknownFormat`
+- `ActionController::UnknownHttpMethod`
 - `ActionDispatch::Http::Parameters::ParseError`
 - `ActiveRecord::RecordNotFound`
 - `ActiveRecord::RecordNotUnique`
@@ -361,7 +367,7 @@ PostHog Rails automatically filters sensitive parameters:
 - `api_key`
 - `authenticity_token`
 
-Long parameter values are also truncated to 1000 characters.
+Long parameter values are also truncated to 10,000 characters.
 
 ## Testing
 
