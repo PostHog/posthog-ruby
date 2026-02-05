@@ -279,13 +279,47 @@ module PostHog
       only_evaluate_locally: false,
       send_feature_flag_events: true
     )
+      result = get_feature_flag_result(
+        key,
+        distinct_id,
+        groups: groups,
+        person_properties: person_properties,
+        group_properties: group_properties,
+        only_evaluate_locally: only_evaluate_locally,
+        send_feature_flag_events: send_feature_flag_events
+      )
+      result&.value
+    end
+
+    # Returns both the feature flag value and payload in a single call.
+    # This method raises the $feature_flag_called event with the payload included.
+    #
+    # @param [String] key The key of the feature flag
+    # @param [String] distinct_id The distinct id of the user
+    # @param [Hash] groups
+    # @param [Hash] person_properties key-value pairs of properties to associate with the user.
+    # @param [Hash] group_properties
+    # @param [Boolean] only_evaluate_locally
+    # @param [Boolean] send_feature_flag_events
+    #
+    # @return [FeatureFlagResult, nil] A FeatureFlagResult object containing the flag value and payload,
+    #   or nil if the flag evaluation returned nil
+    def get_feature_flag_result(
+      key,
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false,
+      send_feature_flag_events: true
+    )
       person_properties, group_properties = add_local_person_and_group_properties(
         distinct_id,
         groups,
         person_properties,
         group_properties
       )
-      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error =
+      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload =
         @feature_flags_poller.get_feature_flag(
           key,
           distinct_id,
@@ -294,8 +328,8 @@ module PostHog
           group_properties,
           only_evaluate_locally
         )
-
       feature_flag_reported_key = "#{key}_#{feature_flag_response}"
+
       if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
         properties = {
           '$feature_flag' => key,
@@ -307,16 +341,15 @@ module PostHog
         properties['$feature_flag_error'] = feature_flag_error if feature_flag_error
 
         capture(
-          {
-            distinct_id: distinct_id,
-            event: '$feature_flag_called',
-            properties: properties,
-            groups: groups
-          }
+          distinct_id: distinct_id,
+          event: '$feature_flag_called',
+          properties: properties,
+          groups: groups
         )
         @distinct_id_has_sent_flag_calls[distinct_id] << feature_flag_reported_key
       end
-      feature_flag_response
+
+      FeatureFlagResult.from_value_and_payload(key, feature_flag_response, payload)
     end
 
     # Returns all flags for a given user
@@ -341,6 +374,9 @@ module PostHog
     end
 
     # Returns payload for a given feature flag
+    #
+    # @deprecated Use {#get_feature_flag_result} instead, which returns both the flag value and payload
+    #   and properly raises the $feature_flag_called event.
     #
     # @param [String] key The key of the feature flag
     # @param [String] distinct_id The distinct id of the user

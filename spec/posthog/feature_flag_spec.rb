@@ -4521,4 +4521,256 @@ module PostHog
       expect(result).to eq('{"message": "from-api"}')
     end
   end
+
+  describe 'get_feature_flag_result' do
+    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
+
+    it 'returns a FeatureFlagResult with flag value and payload' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Beta Feature',
+            'key' => 'test-flag',
+            'active' => true,
+            'filters' => {
+              'groups' => [{ 'rollout_percentage' => 100 }],
+              'payloads' => { 'true' => '{"discount": 10}' }
+            }
+          }
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      result = c.get_feature_flag_result('test-flag', 'some-distinct-id')
+
+      expect(result).to be_a(FeatureFlagResult)
+      expect(result.key).to eq('test-flag')
+      expect(result.enabled?).to be true
+      expect(result.variant).to be_nil
+      expect(result.payload).to eq({ 'discount' => 10 })
+      expect(result.value).to be true
+    end
+
+    it 'returns a FeatureFlagResult with variant and payload' do
+      multivariate_flag = {
+        'id' => 1,
+        'name' => 'Multivariate Feature',
+        'key' => 'multivariate-flag',
+        'active' => true,
+        'filters' => {
+          'groups' => [{ 'rollout_percentage' => 100 }],
+          'multivariate' => {
+            'variants' => [
+              { 'key' => 'control', 'rollout_percentage' => 100 }
+            ]
+          },
+          'payloads' => { 'control' => '{"theme": "dark"}' }
+        }
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: { 'flags' => [multivariate_flag] }.to_json)
+
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      result = c.get_feature_flag_result('multivariate-flag', 'some-distinct-id')
+
+      expect(result).to be_a(FeatureFlagResult)
+      expect(result.key).to eq('multivariate-flag')
+      expect(result.enabled?).to be true
+      expect(result.variant).to eq('control')
+      expect(result.payload).to eq({ 'theme' => 'dark' })
+      expect(result.value).to eq('control')
+    end
+
+    it 'raises $feature_flag_called event' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Beta Feature',
+            'key' => 'test-flag',
+            'active' => true,
+            'filters' => {
+              'groups' => [{ 'rollout_percentage' => 100 }],
+              'payloads' => { 'true' => '{"discount": 10}' }
+            }
+          }
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+      stub_const('PostHog::VERSION', '2.8.0')
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      c.get_feature_flag_result('test-flag', 'some-distinct-id')
+
+      captured_message = c.dequeue_last_message
+      expect(captured_message[:event]).to eq('$feature_flag_called')
+      expect(captured_message[:properties]['$feature_flag']).to eq('test-flag')
+      expect(captured_message[:properties]['$feature_flag_response']).to be true
+      expect(captured_message[:properties]['locally_evaluated']).to be true
+    end
+
+    it 'does not raise event when send_feature_flag_events is false' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Beta Feature',
+            'key' => 'test-flag',
+            'active' => true,
+            'filters' => {
+              'groups' => [{ 'rollout_percentage' => 100 }],
+              'payloads' => { 'true' => '{"discount": 10}' }
+            }
+          }
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      result = c.get_feature_flag_result('test-flag', 'some-distinct-id', send_feature_flag_events: false)
+
+      expect(result).to be_a(FeatureFlagResult)
+      expect(result.value).to be true
+      expect(c.queued_messages).to eq(0)
+    end
+
+    it 'only sends event once per distinct_id and flag combo' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Beta Feature',
+            'key' => 'test-flag',
+            'active' => true,
+            'filters' => {
+              'groups' => [{ 'rollout_percentage' => 100 }],
+              'payloads' => { 'true' => '{"discount": 10}' }
+            }
+          }
+        ]
+      }
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      # First call should send event
+      c.get_feature_flag_result('test-flag', 'some-distinct-id')
+      expect(c.queued_messages).to eq(1)
+
+      # Second call with same distinct_id should not send event
+      c.get_feature_flag_result('test-flag', 'some-distinct-id')
+      expect(c.queued_messages).to eq(1)
+
+      # Call with different distinct_id should send event
+      c.get_feature_flag_result('test-flag', 'other-distinct-id')
+      expect(c.queued_messages).to eq(2)
+    end
+
+    it 'returns nil when flag evaluation returns nil' do
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: { 'flags' => [] }.to_json)
+
+      stub_request(:post, flags_endpoint)
+        .to_return(status: 200, body: { 'featureFlags' => {} }.to_json)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      result = c.get_feature_flag_result('non-existent-flag', 'some-distinct-id', only_evaluate_locally: true)
+
+      expect(result).to be_nil
+    end
+
+    it 'falls back to remote evaluation when needed' do
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: { 'flags' => [] }.to_json)
+
+      stub_request(:post, flags_endpoint)
+        .to_return(
+          status: 200,
+          body: {
+            'featureFlags' => { 'remote-flag' => 'variant-a' },
+            'featureFlagPayloads' => { 'remote-flag' => '{"remote": "payload"}' },
+            'requestId' => 'test-request-id',
+            'evaluatedAt' => 1_704_067_200_000
+          }.to_json
+        )
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      result = c.get_feature_flag_result('remote-flag', 'some-distinct-id')
+
+      expect(result).to be_a(FeatureFlagResult)
+      expect(result.key).to eq('remote-flag')
+      expect(result.enabled?).to be true
+      expect(result.variant).to eq('variant-a')
+      expect(result.payload).to eq({ 'remote' => 'payload' })
+      expect(result.value).to eq('variant-a')
+    end
+
+    it 'includes request_id and evaluated_at from remote evaluation in event' do
+      stub_request(
+        :get,
+        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: { 'flags' => [] }.to_json)
+
+      stub_request(:post, flags_endpoint)
+        .to_return(
+          status: 200,
+          body: {
+            'featureFlags' => { 'remote-flag' => true },
+            'featureFlagPayloads' => { 'remote-flag' => '{"test": 123}' },
+            'requestId' => 'test-request-id',
+            'evaluatedAt' => 1_704_067_200_000
+          }.to_json
+        )
+
+      stub_const('PostHog::VERSION', '2.8.0')
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      c.get_feature_flag_result('remote-flag', 'some-distinct-id')
+
+      captured_message = c.dequeue_last_message
+      expect(captured_message[:event]).to eq('$feature_flag_called')
+      expect(captured_message[:properties]['$feature_flag']).to eq('remote-flag')
+      expect(captured_message[:properties]['$feature_flag_response']).to be true
+      expect(captured_message[:properties]['$feature_flag_request_id']).to eq('test-request-id')
+      expect(captured_message[:properties]['$feature_flag_evaluated_at']).to eq(1_704_067_200_000)
+      expect(captured_message[:properties]['locally_evaluated']).to be false
+    end
+  end
 end
