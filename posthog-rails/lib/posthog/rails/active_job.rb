@@ -92,7 +92,7 @@ module PostHog
           when Hash
             # Use Rails' filter_parameters to filter sensitive data
             filter_sensitive_params(arg)
-          when ActiveRecord::Base
+          when defined?(ActiveRecord::Base) && ActiveRecord::Base
             { class: arg.class.name, id: arg.id }
           else
             arg.class.name

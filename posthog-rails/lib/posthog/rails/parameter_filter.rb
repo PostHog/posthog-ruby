@@ -42,6 +42,7 @@ module PostHog
       # @return [Hash] Filtered parameters with sensitive data masked
       def filter_sensitive_params(params)
         return EMPTY_HASH unless params.is_a?(Hash)
+        return params unless ::Rails.application
 
         filter_parameters = ::Rails.application.config.filter_parameters
         parameter_filter = ParameterFilter.backend.new(filter_parameters)

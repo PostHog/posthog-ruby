@@ -76,38 +76,47 @@ module PostHog
       # Insert middleware for exception capturing
       initializer 'posthog.insert_middlewares' do |app|
         # Insert after DebugExceptions to catch rescued exceptions
-        app.config.middleware.insert_after(
-          ActionDispatch::DebugExceptions,
+        insert_middleware_after(
+          app, ActionDispatch::DebugExceptions,
           PostHog::Rails::RescuedExceptionInterceptor
         )
 
         # Insert after ShowExceptions to capture all exceptions
-        app.config.middleware.insert_after(
-          ActionDispatch::ShowExceptions,
+        insert_middleware_after(
+          app, ActionDispatch::ShowExceptions,
           PostHog::Rails::CaptureExceptions
         )
       end
 
-      # Hook into ActiveJob before classes are loaded
-      initializer 'posthog.active_job', before: :eager_load! do
-        ActiveSupport.on_load(:active_job) do
-          # Prepend our module to ActiveJob::Base to wrap perform_now
-          prepend PostHog::Rails::ActiveJobExtensions
-        end
-      end
-
       # After initialization, set up remaining integrations
       config.after_initialize do |_app|
+        # Hook into ActiveJob only if enabled
+        if PostHog::Rails.config&.auto_instrument_active_job
+          ActiveSupport.on_load(:active_job) do
+            prepend PostHog::Rails::ActiveJobExtensions
+          end
+        end
+
         next unless PostHog.initialized?
 
         # Register with Rails error reporter (Rails 7.0+)
         register_error_subscriber if rails_version_above_7?
       end
 
-      # Ensure PostHog shuts down gracefully
-      config.to_prepare do
-        at_exit do
-          PostHog.client&.shutdown if PostHog.initialized?
+      # Ensure PostHog shuts down gracefully (register only once)
+      config.after_initialize do
+        next if @posthog_at_exit_registered
+
+        @posthog_at_exit_registered = true
+        at_exit { PostHog.client&.shutdown if PostHog.initialized? }
+      end
+
+      def self.insert_middleware_after(app, target, middleware)
+        if app.config.middleware.include?(target)
+          app.config.middleware.insert_after(target, middleware)
+        else
+          # Fallback: append to stack if target middleware is missing (e.g., API-only apps)
+          app.config.middleware.use(middleware)
         end
       end
 

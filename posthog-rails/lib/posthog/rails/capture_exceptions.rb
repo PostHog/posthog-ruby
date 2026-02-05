@@ -61,8 +61,8 @@ module PostHog
       end
 
       def extract_distinct_id(env, request)
-        # Try to get user from controller
-        if env['action_controller.instance']
+        # Try to get user from controller if capture_user_context is enabled
+        if PostHog::Rails.config&.capture_user_context && env['action_controller.instance']
           controller = env['action_controller.instance']
           method_name = PostHog::Rails.config&.current_user_method || :current_user
 
@@ -73,7 +73,7 @@ module PostHog
         end
 
         # Fallback to session ID or nil
-        request.session&.id
+        request.session&.id&.to_s
       end
 
       def extract_user_id(user)
