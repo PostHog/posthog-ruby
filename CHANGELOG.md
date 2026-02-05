@@ -1,4 +1,4 @@
-## Unreleased
+## 3.5.0 - 2026-02-05
 
 1. feat: Add posthog-rails gem for automatic Rails exception tracking
    - Automatic capture of unhandled exceptions via Rails middleware
