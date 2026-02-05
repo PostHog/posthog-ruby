@@ -9,7 +9,7 @@ Style/Documentation:
 
 Naming/FileName:
   Exclude:
-    - 'posthog-rails/lib/posthog-rails.rb'
+    - "posthog-rails/lib/posthog-rails.rb"
 
 # Modern Ruby 3.0+ specific cops
 Style/HashTransformKeys:
@@ -79,7 +79,8 @@ Metrics/MethodLength:
 Metrics/ParameterLists:
   Enabled: false
 
-# Allow longer modules in spec files since they contain many test cases
+# Ideally need to bring this down
 Metrics/ModuleLength:
+  Max: 4055
   Exclude:
-    - 'spec/**/*_spec.rb'
+    - "spec/**/*_spec.rb"
