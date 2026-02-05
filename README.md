@@ -35,18 +35,22 @@ Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-
 
 ## How to release
 
-1. Get access to RubyGems from @dmarticus, @daibhin or @mariusandra
-2. Install [`gh`](https://cli.github.com/) and authenticate with `gh auth login`
-3. Update `lib/posthog/version.rb` with the new version & add to `CHANGELOG.md` making sure to add the current date. Commit the changes:
+Both `posthog-ruby` and `posthog-rails` are released together with the same version number.
 
-```shell
-VERSION=1.2.3 # Replace with the new version here
-git commit -am "Version $VERSION"
-git tag -a $VERSION -m "Version $VERSION"
-git push && git push --tags
-gh release create $VERSION --generate-notes --fail-on-no-commits
-```
+1. Create a PR that:
+   - Updates `lib/posthog/version.rb` with the new version
+   - Updates `CHANGELOG.md` with the changes and current date
 
-4. [Trigger](https://github.com/PostHog/posthog-ruby/actions) "Publish Release" GitHub Action
+2. Add the `release` label to the PR
 
-5. Authenticate with your RubyGems account and approve the publish!
+3. Merge the PR to `main`
+
+4. The release workflow will:
+   - Notify the Client Libraries team in Slack
+   - Wait for approval via the GitHub `Release` environment
+   - Publish both gems to RubyGems (via trusted publishing)
+   - Create and push a git tag
+
+5. Approve the release in GitHub when prompted
+
+The workflow handles publishing both `posthog-ruby` and `posthog-rails` in the correct order (since `posthog-rails` depends on `posthog-ruby`).
