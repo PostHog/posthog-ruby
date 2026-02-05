@@ -8,7 +8,7 @@ module PostHog
     module ActiveJobExtensions
       include ParameterFilter
 
-      def self.included(base)
+      def self.prepended(base)
         base.extend(ClassMethods)
       end
 
