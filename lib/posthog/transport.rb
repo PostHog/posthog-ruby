@@ -50,7 +50,12 @@ module PostHog
       last_response, exception =
         retry_with_backoff(@retries) do
           status_code, body = send_request(api_key, batch)
-          error = JSON.parse(body)['error']
+          error =
+            begin
+              JSON.parse(body)['error']
+            rescue JSON::ParserError
+              body
+            end
           should_retry = should_retry_request?(status_code, body)
           logger.debug("Response status code: #{status_code}")
           logger.debug("Response error: #{error}") if error
