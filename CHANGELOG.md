@@ -1,3 +1,7 @@
+## 3.5.1 - 2026-02-06
+
+1. Fix `posthog-rails` deployment
+
 ## 3.5.0 - 2026-02-05
 
 1. feat: Add posthog-rails gem for automatic Rails exception tracking
