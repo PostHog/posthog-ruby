@@ -109,15 +109,16 @@ jobs:
       - name: Wait for posthog-ruby to be available
         run: gem exec rubygems-await posthog-ruby-*.gem
 
-      # Build and publish posthog-rails
+      # Build and publish posthog-rails (must build from its directory so Dir.glob resolves correctly)
       - name: Build posthog-rails
-        run: gem build posthog-rails/posthog-rails.gemspec
+        run: gem build posthog-rails.gemspec
+        working-directory: posthog-rails
 
       - name: Publish posthog-rails
-        run: gem push posthog-rails-*.gem
+        run: gem push posthog-rails/posthog-rails-*.gem
 
       - name: Wait for posthog-rails to be available
-        run: gem exec rubygems-await posthog-rails-*.gem
+        run: gem exec rubygems-await posthog-rails/posthog-rails-*.gem
 
       # Create and push git tag
       - name: Create git tag
