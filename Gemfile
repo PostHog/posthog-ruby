@@ -8,6 +8,7 @@ gem 'irb'
 
 group :development, :test do
   gem 'activesupport', '~> 7.1'
+  gem 'railties', '~> 7.1'
   gem 'commander', '~> 5.0'
   gem 'oj', '~> 3.16.10'
   gem 'prettier'
