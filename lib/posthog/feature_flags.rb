@@ -313,11 +313,17 @@ module PostHog
           else
             server_flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
             server_payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
-            # Merge server results into locally-evaluated results so that flags which
-            # failed server-side evaluation (already filtered out by get_flags) don't
-            # overwrite valid locally-evaluated values.
-            flags = stringify_keys(flags).merge(server_flags)
-            payloads = stringify_keys(payloads).merge(server_payloads)
+
+            if errors_while_computing
+              # Merge server results into locally-evaluated results so that flags which
+              # failed server-side evaluation (already filtered out by get_flags) don't
+              # overwrite valid locally-evaluated values.
+              flags = stringify_keys(flags).merge(server_flags)
+              payloads = stringify_keys(payloads).merge(server_payloads)
+            else
+              flags = server_flags
+              payloads = server_payloads
+            end
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
