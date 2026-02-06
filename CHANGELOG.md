@@ -1,3 +1,7 @@
+## 3.5.0 - 2026-02-06
+
+1. fix: Filter out failed flag evaluations to prevent cached values from being overwritten during transient server errors ([#96](https://github.com/PostHog/posthog-ruby/pull/96))
+
 ## 3.4.0 - 2025-12-04
 
 1. feat: Add ETag support for feature flag definitions polling ([#84](https://github.com/PostHog/posthog-ruby/pull/84))
