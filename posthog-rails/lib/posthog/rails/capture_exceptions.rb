@@ -99,7 +99,7 @@ module PostHog
       def build_properties(request, env)
         properties = {
           '$exception_source' => 'rails',
-          '$request_url' => safe_serialize(request.url),
+          '$current_url' => safe_serialize(request.url),
           '$request_method' => safe_serialize(request.method),
           '$request_path' => safe_serialize(request.path)
         }
