@@ -1,6 +1,20 @@
-## 3.5.0 - 2026-02-06
+## 3.5.2 - 2026-02-06
 
 1. fix: Filter out failed flag evaluations to prevent cached values from being overwritten during transient server errors ([#96](https://github.com/PostHog/posthog-ruby/pull/96))
+
+## 3.5.1 - 2026-02-06
+
+1. Fix `posthog-rails` deployment
+
+## 3.5.0 - 2026-02-05
+
+1. feat: Add posthog-rails gem for automatic Rails exception tracking
+   - Automatic capture of unhandled exceptions via Rails middleware
+   - Automatic capture of rescued exceptions (configurable)
+   - Automatic instrumentation of ActiveJob failures
+   - Integration with Rails 7.0+ error reporter
+   - Configurable exception exclusion list
+   - User context capture from controllers
 
 ## 3.4.0 - 2025-12-04
 
