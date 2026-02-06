@@ -128,6 +128,14 @@ jobs:
           git tag -a "v${{ needs.check-release-label.outputs.version }}" -m "Release v${{ needs.check-release-label.outputs.version }}"
           git push origin "v${{ needs.check-release-label.outputs.version }}"
 
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ needs.check-release-label.outputs.version }}" \
+            --title "v${{ needs.check-release-label.outputs.version }}" \
+            --generate-notes
+
       # Notify in case of a failure
       - name: Send failure event to PostHog
         if: ${{ failure() }}
