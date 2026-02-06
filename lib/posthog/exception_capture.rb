@@ -67,7 +67,7 @@ module PostHog
         'platform' => 'ruby'
       }
 
-      add_context_lines(frame, file, lineno) if File.exist?(file)
+      add_context_lines(frame, file, lineno) if frame['in_app'] && File.exist?(file)
 
       frame
     end

@@ -25,6 +25,28 @@ module PostHog
 
         expect(frame['in_app']).to be false
       end
+
+      it 'does not add context lines for non-in_app frames' do
+        # Use a gem-style path that points to this real file so File.exist? would be true
+        # but in_app should be false, so context lines should not be added
+        gem_line = "#{__FILE__}:10:in `gem_method'"
+          .gsub(%r{/spec/}, '/gems/ruby/spec/')
+        frame = described_class.parse_backtrace_line(gem_line)
+
+        expect(frame['in_app']).to be false
+        expect(frame['context_line']).to be_nil
+        expect(frame['pre_context']).to be_nil
+        expect(frame['post_context']).to be_nil
+      end
+
+      it 'adds context lines for in_app frames' do
+        # Use a real in_app path so File.exist? is true and in_app is true
+        app_line = "#{__FILE__}:10:in `app_method'"
+        frame = described_class.parse_backtrace_line(app_line)
+
+        expect(frame['in_app']).to be true
+        expect(frame['context_line']).not_to be_nil
+      end
     end
 
     describe '#add_context_lines' do
