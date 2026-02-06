@@ -3,7 +3,7 @@
 # Represents a feature flag returned by /flags v2
 module PostHog
   class FeatureFlag
-    attr_reader :key, :enabled, :variant, :reason, :metadata
+    attr_reader :key, :enabled, :variant, :reason, :metadata, :failed
 
     def initialize(json)
       json.transform_keys!(&:to_s)
@@ -12,6 +12,7 @@ module PostHog
       @variant = json['variant']
       @reason = json['reason'] ? EvaluationReason.new(json['reason']) : nil
       @metadata = json['metadata'] ? FeatureFlagMetadata.new(json['metadata'].transform_keys(&:to_s)) : nil
+      @failed = json['failed']
     end
 
     # TODO: Rename to `value` in future version

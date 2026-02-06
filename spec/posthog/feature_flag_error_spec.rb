@@ -270,5 +270,218 @@ module PostHog
         expect(FeatureFlagError.api_error(503)).to eq('api_error_503')
       end
     end
+
+    describe 'failed flag filtering' do
+      context 'when a flag has failed=true' do
+        it 'excludes the failed flag even when enabled is true, and preserves non-failed flags' do
+          flags_response = {
+            'flags' => {
+              'my-flag' => {
+                'key' => 'my-flag',
+                'enabled' => true,
+                'variant' => nil,
+                'reason' => { 'code' => 'database_error', 'description' => 'Database connection error' },
+                'metadata' => { 'id' => 1, 'version' => 1, 'payload' => nil },
+                'failed' => true
+              },
+              'good-flag' => {
+                'key' => 'good-flag',
+                'enabled' => true,
+                'variant' => nil,
+                'reason' => { 'code' => 'condition_match', 'description' => 'Matched', 'condition_index' => 0 },
+                'metadata' => { 'id' => 2, 'version' => 1, 'payload' => nil },
+                'failed' => false
+              }
+            },
+            'errorsWhileComputingFlags' => true,
+            'requestId' => 'test-request-id'
+          }
+
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: flags_response.to_json)
+
+          # The failed flag has enabled=true, but should be filtered out and treated as missing.
+          # Without filtering, this would return true.
+          result = client.get_feature_flag('my-flag', 'test-user')
+          expect(result).to eq(false)
+          captured_message = client.dequeue_last_message
+          expect(captured_message[:properties]['$feature_flag_error']).to include(FeatureFlagError::FLAG_MISSING)
+
+          # The non-failed flag should return its value normally
+          good_result = client.get_feature_flag('good-flag', 'test-user')
+          expect(good_result).to eq(true)
+        end
+
+        it 'excludes a failed flag with a variant from the response' do
+          flags_response = {
+            'flags' => {
+              'variant-flag' => {
+                'key' => 'variant-flag',
+                'enabled' => true,
+                'variant' => 'test-variant',
+                'reason' => { 'code' => 'timeout', 'description' => 'Database statement timed out' },
+                'metadata' => { 'id' => 3, 'version' => 1, 'payload' => nil },
+                'failed' => true
+              }
+            },
+            'errorsWhileComputingFlags' => true,
+            'requestId' => 'test-request-id'
+          }
+
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: flags_response.to_json)
+
+          # Without filtering, this would return 'test-variant'.
+          result = client.get_feature_flag('variant-flag', 'test-user')
+          expect(result).to eq(false)
+          captured_message = client.dequeue_last_message
+          expect(captured_message[:properties]['$feature_flag_error']).to include(FeatureFlagError::FLAG_MISSING)
+        end
+
+        it 'excludes failed flags from get_all_flags results' do
+          flags_response = {
+            'flags' => {
+              'failed-flag' => {
+                'key' => 'failed-flag',
+                'enabled' => true,
+                'variant' => nil,
+                'reason' => { 'code' => 'database_error', 'description' => 'Database connection error' },
+                'metadata' => { 'id' => 1, 'version' => 1, 'payload' => nil },
+                'failed' => true
+              },
+              'ok-flag' => {
+                'key' => 'ok-flag',
+                'enabled' => true,
+                'variant' => nil,
+                'reason' => { 'code' => 'condition_match', 'description' => 'Matched', 'condition_index' => 0 },
+                'metadata' => { 'id' => 2, 'version' => 1, 'payload' => nil },
+                'failed' => false
+              }
+            },
+            'errorsWhileComputingFlags' => true,
+            'requestId' => 'test-request-id'
+          }
+
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: flags_response.to_json)
+
+          all_flags = client.get_all_flags('test-user')
+
+          # failed-flag should be excluded despite having enabled=true
+          expect(all_flags).not_to have_key('failed-flag')
+          # ok-flag should be present with its value
+          expect(all_flags['ok-flag']).to eq(true)
+        end
+      end
+
+      context 'when a locally-evaluated flag fails on the server during fallback' do
+        it 'preserves the locally-evaluated true value instead of overwriting with failed false' do
+          # Setup: two flags in local definitions
+          # - beta-feature: simple flag, 100% rollout → evaluates locally to true
+          # - server-only-flag: has experience continuity → requires server evaluation, triggers fallback
+          api_feature_flag_res = {
+            'flags' => [
+              {
+                'id' => 1,
+                'name' => 'Beta Feature',
+                'key' => 'beta-feature',
+                'active' => true,
+                'is_simple_flag' => true,
+                'rollout_percentage' => 100,
+                'filters' => {
+                  'groups' => [
+                    {
+                      'properties' => [],
+                      'rollout_percentage' => 100
+                    }
+                  ]
+                }
+              },
+              {
+                'id' => 2,
+                'name' => 'Server Only Flag',
+                'key' => 'server-only-flag',
+                'active' => true,
+                'is_simple_flag' => false,
+                'ensure_experience_continuity' => true,
+                'filters' => {
+                  'groups' => [
+                    {
+                      'properties' => [],
+                      'rollout_percentage' => 100
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+
+          stub_request(:get, feature_flag_endpoint)
+            .to_return(status: 200, body: api_feature_flag_res.to_json)
+
+          # Server response: beta-feature failed (transient DB error), server-only-flag succeeded
+          flags_response = {
+            'flags' => {
+              'beta-feature' => {
+                'key' => 'beta-feature',
+                'enabled' => false,
+                'variant' => nil,
+                'reason' => { 'code' => 'database_error', 'description' => 'Database connection error' },
+                'metadata' => { 'id' => 1, 'version' => 1, 'payload' => nil },
+                'failed' => true
+              },
+              'server-only-flag' => {
+                'key' => 'server-only-flag',
+                'enabled' => true,
+                'variant' => nil,
+                'reason' => { 'code' => 'condition_match', 'description' => 'Matched', 'condition_index' => 0 },
+                'metadata' => { 'id' => 2, 'version' => 1, 'payload' => nil },
+                'failed' => false
+              }
+            },
+            'errorsWhileComputingFlags' => true,
+            'requestId' => 'test-request-id'
+          }
+
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: flags_response.to_json)
+
+          new_client = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          # get_all_flags triggers local eval for both flags:
+          # - beta-feature evaluates locally to true
+          # - server-only-flag raises RequiresServerEvaluation → triggers server fallback
+          # Server returns beta-feature as failed: true, enabled: false
+          # The locally-evaluated true must be preserved, NOT overwritten by the failed false.
+          all_flags = new_client.get_all_flags('test-user')
+
+          expect(all_flags['beta-feature']).to eq(true)
+          expect(all_flags['server-only-flag']).to eq(true)
+        end
+      end
+
+      context 'when the failed field is absent (backward compatibility)' do
+        it 'includes flags without a failed field normally' do
+          flags_response = {
+            'flags' => {
+              'legacy-flag' => {
+                'key' => 'legacy-flag',
+                'enabled' => true,
+                'variant' => nil,
+                'reason' => { 'code' => 'condition_match', 'description' => 'Matched', 'condition_index' => 0 },
+                'metadata' => { 'id' => 1, 'version' => 1, 'payload' => nil }
+              }
+            },
+            'requestId' => 'test-request-id'
+          }
+
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: flags_response.to_json)
+
+          result = client.get_feature_flag('legacy-flag', 'test-user')
+          expect(result).to eq(true)
+        end
+      end
+    end
   end
 end

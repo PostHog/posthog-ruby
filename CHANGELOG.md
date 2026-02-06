@@ -1,3 +1,7 @@
+## 3.5.2 - 2026-02-06
+
+1. fix: Filter out failed flag evaluations to prevent cached values from being overwritten during transient server errors ([#96](https://github.com/PostHog/posthog-ruby/pull/96))
+
 ## 3.5.1 - 2026-02-06
 
 1. Fix `posthog-rails` deployment
