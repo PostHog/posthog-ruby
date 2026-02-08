@@ -30,7 +30,7 @@ module PostHog
         # Use a gem-style path that points to this real file so File.exist? would be true
         # but in_app should be false, so context lines should not be added
         gem_line = "#{__FILE__}:10:in `gem_method'"
-          .gsub(%r{/spec/}, '/gems/ruby/spec/')
+                   .gsub(%r{/spec/}, '/gems/ruby/spec/')
         frame = described_class.parse_backtrace_line(gem_line)
 
         expect(frame['in_app']).to be false

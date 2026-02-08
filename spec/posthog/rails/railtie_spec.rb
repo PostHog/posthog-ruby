@@ -48,9 +48,9 @@ RSpec.describe PostHog::Rails::Railtie do
       # on the Railtie instance, with the app passed as the block argument.
       # This is how Rails runs initializer blocks internally.
       railtie = PostHog::Rails::Railtie.instance
-      expect {
+      expect do
         railtie.instance_exec(app, &initializer.block)
-      }.not_to raise_error
+      end.not_to raise_error
     end
   end
 end
