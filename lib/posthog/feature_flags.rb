@@ -131,8 +131,10 @@ module PostHog
           FeatureFlag.new(flag)
         end
         flags_response[:flags] = flags_hash
-        flags_response[:featureFlags] = flags_hash.transform_values(&:get_value).transform_keys(&:to_sym)
-        flags_response[:featureFlagPayloads] = flags_hash.transform_values(&:payload).transform_keys(&:to_sym)
+        # Filter out flags that failed evaluation to avoid overwriting cached values
+        successful_flags = flags_hash.reject { |_, flag| flag.failed == true }
+        flags_response[:featureFlags] = successful_flags.transform_values(&:get_value).transform_keys(&:to_sym)
+        flags_response[:featureFlagPayloads] = successful_flags.transform_values(&:payload).transform_keys(&:to_sym)
       elsif flags_response[:featureFlags]
         # v3 format
         flags_response[:featureFlags] = flags_response[:featureFlags] || {}
@@ -309,8 +311,19 @@ module PostHog
             flags = {}
             payloads = {}
           else
-            flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
-            payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+            server_flags = stringify_keys(flags_and_payloads[:featureFlags] || {})
+            server_payloads = stringify_keys(flags_and_payloads[:featureFlagPayloads] || {})
+
+            if errors_while_computing
+              # Merge server results into locally-evaluated results so that flags which
+              # failed server-side evaluation (already filtered out by get_flags) don't
+              # overwrite valid locally-evaluated values.
+              flags = stringify_keys(flags).merge(server_flags)
+              payloads = stringify_keys(payloads).merge(server_payloads)
+            else
+              flags = server_flags
+              payloads = server_payloads
+            end
           end
         rescue StandardError => e
           @on_error.call(-1, "Error computing flag remotely: #{e}")
