@@ -1,3 +1,10 @@
+## 3.5.3 - 2026-02-08
+
+1. fix: Fix Railtie middleware insertion crashing on Rails initialization — changed `insert_middleware_after` from a class method to an instance method (matching how Rails executes initializer blocks via `instance_exec`), and removed the unsupported `include?` query on `MiddlewareStackProxy` ([#97](https://github.com/PostHog/posthog-ruby/issues/97))
+2. fix: Prevent sending empty batches and handle non-JSON response bodies gracefully in transport layer ([#87](https://github.com/PostHog/posthog-ruby/issues/87))
+3. fix: Use `$current_url` property (instead of `$request_url`) so exception URLs appear correctly in the PostHog UI
+4. fix: Only include source context lines for in-app exception frames, avoiding unnecessary reads of gem source files ([#88](https://github.com/PostHog/posthog-ruby/issues/88))
+
 ## 3.5.2 - 2026-02-06
 
 1. fix: Filter out failed flag evaluations to prevent cached values from being overwritten during transient server errors ([#96](https://github.com/PostHog/posthog-ruby/pull/96))

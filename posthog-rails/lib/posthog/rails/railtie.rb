@@ -111,13 +111,11 @@ module PostHog
         at_exit { PostHog.client&.shutdown if PostHog.initialized? }
       end
 
-      def self.insert_middleware_after(app, target, middleware)
-        if app.config.middleware.include?(target)
-          app.config.middleware.insert_after(target, middleware)
-        else
-          # Fallback: append to stack if target middleware is missing (e.g., API-only apps)
-          app.config.middleware.use(middleware)
-        end
+      def insert_middleware_after(app, target, middleware)
+        # During initialization, app.config.middleware is a MiddlewareStackProxy
+        # which only supports recording operations (insert_after, use, etc.)
+        # and does NOT support query methods like include?.
+        app.config.middleware.insert_after(target, middleware)
       end
 
       def self.register_error_subscriber

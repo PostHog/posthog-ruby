@@ -11,6 +11,7 @@ group :development, :test do
   gem 'commander', '~> 5.0'
   gem 'oj', '~> 3.16.10'
   gem 'prettier'
+  gem 'railties', '~> 7.1'
   gem 'rake', '~> 13.2.1'
   gem 'rspec', '~> 3.13'
   gem 'rubocop', '~> 1.75.6'

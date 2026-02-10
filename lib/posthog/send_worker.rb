@@ -43,8 +43,10 @@ module PostHog
           consume_message_from_queue! until @batch.full? || @queue.empty?
         end
 
-        res = @transport.send @api_key, @batch
-        @on_error.call(res.status, res.error) unless res.status == 200
+        unless @batch.empty?
+          res = @transport.send @api_key, @batch
+          @on_error.call(res.status, res.error) unless res.status == 200
+        end
 
         @lock.synchronize { @batch.clear }
       end

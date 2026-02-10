@@ -225,21 +225,21 @@ module PostHog
           it_behaves_like('non-retried request', 400, '{}')
         end
 
-        context 'request or parsing of response results in an exception' do
+        context 'response body is malformed JSON' do
           let(:response_body) { 'Malformed JSON ---' }
 
           subject { described_class.new(retries: 0) }
 
-          it 'returns a -1 for status' do
-            expect(subject.send(api_key, batch).status).to eq(-1)
+          it 'returns the HTTP status code' do
+            expect(subject.send(api_key, batch).status).to eq(200)
           end
 
-          it 'has a connection error' do
+          it 'uses the raw body as the error' do
             error = subject.send(api_key, batch).error
-            expect(error).to match(/unexpected character.*Malformed/)
+            expect(error).to eq('Malformed JSON ---')
           end
 
-          it_behaves_like('retried request', 200, 'Malformed JSON ---')
+          it_behaves_like('non-retried request', 200, 'Malformed JSON ---')
         end
       end
     end
