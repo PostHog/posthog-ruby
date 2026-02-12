@@ -213,7 +213,7 @@ module PostHog
                 'name' => 'Beta Feature',
                 'key' => 'beta-feature',
                 'active' => true,
-                'is_simple_flag' => true,
+
                 'rollout_percentage' => 100,
                 'filters' => {
                   'groups' => [
@@ -386,7 +386,7 @@ module PostHog
                 'name' => 'Beta Feature',
                 'key' => 'beta-feature',
                 'active' => true,
-                'is_simple_flag' => true,
+
                 'rollout_percentage' => 100,
                 'filters' => {
                   'groups' => [
@@ -402,7 +402,6 @@ module PostHog
                 'name' => 'Server Only Flag',
                 'key' => 'server-only-flag',
                 'active' => true,
-                'is_simple_flag' => false,
                 'ensure_experience_continuity' => true,
                 'filters' => {
                   'groups' => [

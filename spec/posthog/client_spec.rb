@@ -123,7 +123,6 @@ module PostHog
               name: '',
               key: 'beta-feature',
               active: true,
-              is_simple_flag: false,
               rollout_percentage: 100
             }
           ]
@@ -160,7 +159,6 @@ module PostHog
               'name' => '',
               'key' => 'beta-feature',
               'active' => true,
-              'is_simple_flag' => false,
               'rollout_percentage' => 100,
               'filters' => {
                 'groups' => [
@@ -484,7 +482,6 @@ module PostHog
               name: 'Beta Feature',
               key: 'beta-feature',
               active: true,
-              is_simple_flag: false,
               rollout_percentage: 100
             }
           ]
@@ -522,7 +519,6 @@ module PostHog
               name: 'Beta Feature',
               key: 'beta-feature',
               active: true,
-              is_simple_flag: false,
               rollout_percentage: 100
             }
           ]
@@ -998,7 +994,6 @@ module PostHog
               name: '',
               key: 'simple_flag',
               active: true,
-              is_simple_flag: true,
               rollout_percentage: nil,
               filters: {
                 groups: [
@@ -1011,7 +1006,6 @@ module PostHog
               name: '',
               key: 'disabled_flag',
               active: false,
-              is_simple_flag: true,
               filters: {
                 groups: [
                   { properties: [], rollout_percentage: nil }
@@ -1023,7 +1017,6 @@ module PostHog
               name: '',
               key: 'complex_flag',
               active: true,
-              is_simple_flag: false,
               rollout_percentage: nil,
               filters: {
                 groups: [

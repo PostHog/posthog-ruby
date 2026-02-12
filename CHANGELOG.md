@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Maintenance
+- Removed deprecated `is_simple_flag` mentions from tests.
+
 ## 3.5.3 - 2026-02-08
 
 1. fix: Fix Railtie middleware insertion crashing on Rails initialization — changed `insert_middleware_after` from a class method to an instance method (matching how Rails executes initializer blocks via `instance_exec`), and removed the unsupported `include?` query on `MiddlewareStackProxy` ([#97](https://github.com/PostHog/posthog-ruby/issues/97))
