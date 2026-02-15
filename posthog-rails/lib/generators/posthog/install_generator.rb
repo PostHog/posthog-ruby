@@ -7,10 +7,10 @@ module Posthog
     class InstallGenerator < ::Rails::Generators::Base
       desc 'Creates a PostHog initializer file at config/initializers/posthog.rb'
 
-      source_root File.expand_path('../../..', __dir__)
+      source_root File.expand_path('templates', __dir__)
 
       def copy_initializer
-        copy_file 'examples/posthog.rb', 'config/initializers/posthog.rb'
+        copy_file 'posthog.rb', 'config/initializers/posthog.rb'
       end
 
       def show_readme
