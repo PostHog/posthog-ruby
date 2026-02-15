@@ -1,3 +1,7 @@
+## 3.5.4 - 2026-02-15
+
+1. fix: Move Rails generator template to `lib/generators/posthog/templates/` to ensure it's included in the gem package ([#103](https://github.com/PostHog/posthog-ruby/issues/103))
+
 ## 3.5.3 - 2026-02-08
 
 1. fix: Fix Railtie middleware insertion crashing on Rails initialization — changed `insert_middleware_after` from a class method to an instance method (matching how Rails executes initializer blocks via `instance_exec`), and removed the unsupported `include?` query on `MiddlewareStackProxy` ([#97](https://github.com/PostHog/posthog-ruby/issues/97))
