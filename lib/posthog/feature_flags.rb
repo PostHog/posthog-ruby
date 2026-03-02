@@ -422,6 +422,87 @@ module PostHog
       parsed_dt
     end
 
+    # Parse a semver string into a comparable [major, minor, patch] integer array.
+    # Handles v-prefix, whitespace, pre-release suffixes. Defaults missing components to 0.
+    def self.parse_semver(value)
+      raise InconclusiveMatchError, 'Invalid semver format' if value.nil?
+
+      text = value.to_s.strip.sub(/^[vV]/, '')
+
+      raise InconclusiveMatchError, 'Invalid semver format' if text.empty?
+
+      # Strip pre-release and build metadata suffixes
+      text = text.split('-')[0].split('+')[0]
+      parts = text.split('.')
+
+      raise InconclusiveMatchError, 'Invalid semver format' if parts.empty? || parts[0].to_s.empty?
+
+      # Check for leading dot or non-numeric parts
+      parts.each do |part|
+        raise InconclusiveMatchError, 'Invalid semver format' if part.empty? || part !~ /^\d+$/
+      end
+
+      major = parts[0].to_i
+      minor = parts.length > 1 ? parts[1].to_i : 0
+      patch = parts.length > 2 ? parts[2].to_i : 0
+
+      [major, minor, patch]
+    end
+
+    # Returns bounds for tilde (~) range: >=X.Y.Z <X.(Y+1).0
+    def self.semver_tilde_bounds(value)
+      major, minor, patch = parse_semver(value)
+      lower = [major, minor, patch]
+      upper = [major, minor + 1, 0]
+      [lower, upper]
+    end
+
+    # Returns bounds for caret (^) range per semver spec:
+    # ^X.Y.Z where X > 0 → >=X.Y.Z <(X+1).0.0
+    # ^0.Y.Z where Y > 0 → >=0.Y.Z <0.(Y+1).0
+    # ^0.0.Z → >=0.0.Z <0.0.(Z+1)
+    def self.semver_caret_bounds(value)
+      major, minor, patch = parse_semver(value)
+      lower = [major, minor, patch]
+
+      upper = if major.positive?
+                [major + 1, 0, 0]
+              elsif minor.positive?
+                [0, minor + 1, 0]
+              else
+                [0, 0, patch + 1]
+              end
+
+      [lower, upper]
+    end
+
+    # Returns bounds for wildcard (*) range:
+    # X.* or X → >=X.0.0 <(X+1).0.0
+    # X.Y.* → >=X.Y.0 <X.(Y+1).0
+    def self.semver_wildcard_bounds(value)
+      cleaned = value.to_s.strip.sub(/^[vV]/, '').gsub('*', '').chomp('.')
+      parts = cleaned.split('.').reject(&:empty?)
+
+      raise InconclusiveMatchError, 'Invalid semver wildcard format' if parts.empty?
+
+      parts.each do |part|
+        raise InconclusiveMatchError, 'Invalid semver wildcard format' if part !~ /^\d+$/
+      end
+
+      major = parts[0].to_i
+      case parts.length
+      when 1
+        [[major, 0, 0], [major + 1, 0, 0]]
+      when 2
+        minor = parts[1].to_i
+        [[major, minor, 0], [major, minor + 1, 0]]
+      else
+        minor = parts[1].to_i
+        patch = parts[2].to_i
+        [[major, minor, patch], [major, minor, patch + 1]]
+      end
+    end
+
     def self.match_property(property, property_values, cohort_properties = {})
       # only looks for matches where key exists in property_values
       # doesn't support operator is_not_set
@@ -496,6 +577,36 @@ module PostHog
         elsif operator == 'is_date_after'
           override_date > parsed_date
         end
+      when 'semver_eq', 'semver_neq', 'semver_gt', 'semver_gte', 'semver_lt', 'semver_lte'
+        override_parsed = parse_semver(override_value)
+        flag_parsed = parse_semver(value)
+
+        case operator
+        when 'semver_eq'
+          override_parsed == flag_parsed
+        when 'semver_neq'
+          override_parsed != flag_parsed
+        when 'semver_gt'
+          (override_parsed <=> flag_parsed) == 1
+        when 'semver_gte'
+          (override_parsed <=> flag_parsed) >= 0
+        when 'semver_lt'
+          (override_parsed <=> flag_parsed) == -1
+        when 'semver_lte'
+          (override_parsed <=> flag_parsed) <= 0
+        end
+      when 'semver_tilde'
+        override_parsed = parse_semver(override_value)
+        lower, upper = semver_tilde_bounds(value)
+        (override_parsed <=> lower) >= 0 && (override_parsed <=> upper) == -1
+      when 'semver_caret'
+        override_parsed = parse_semver(override_value)
+        lower, upper = semver_caret_bounds(value)
+        (override_parsed <=> lower) >= 0 && (override_parsed <=> upper) == -1
+      when 'semver_wildcard'
+        override_parsed = parse_semver(override_value)
+        lower, upper = semver_wildcard_bounds(value)
+        (override_parsed <=> lower) >= 0 && (override_parsed <=> upper) == -1
       else
         raise InconclusiveMatchError, "Unknown operator: #{operator}"
       end
