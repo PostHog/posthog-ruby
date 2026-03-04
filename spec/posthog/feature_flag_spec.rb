@@ -1566,6 +1566,256 @@ module PostHog
         expect(e.message).to eq('Unknown operator: is_unknown')
       end
     end
+
+    # Semver operator tests
+    it 'with semver_eq operator' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be false
+    end
+
+    it 'with semver_neq operator' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_neq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be true
+    end
+
+    it 'with semver_gt operator' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_gt' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.3.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '0.9.9' })).to be false
+    end
+
+    it 'with semver_gte operator' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_gte' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.3.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '0.9.9' })).to be false
+    end
+
+    it 'with semver_lt operator' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_lt' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.1.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '0.9.9' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be false
+    end
+
+    it 'with semver_lte operator' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_lte' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.1.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '0.9.9' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be false
+    end
+
+    it 'with semver_tilde operator' do
+      # ~1.2.3 means >=1.2.3 <1.3.0
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_tilde' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.3.0' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.3.1' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be false
+
+      # Test boundary values
+      property2 = { 'key' => 'version', 'value' => '1.0.0', 'operator' => 'semver_tilde' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.0.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.0.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.1.0' })).to be false
+
+      # Major-only tilde: ~1 means >=1.0.0 <2.0.0
+      property3 = { 'key' => 'version', 'value' => '1', 'operator' => 'semver_tilde' }
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1.0.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1.5.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1.99.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '0.9.9' })).to be false
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '2.0.0' })).to be false
+    end
+
+    it 'with semver_caret operator' do
+      # ^1.2.3 means >=1.2.3 <2.0.0 (major > 0)
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_caret' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.3.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.99.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '0.9.9' })).to be false
+
+      # ^0.2.3 means >=0.2.3 <0.3.0 (major == 0, minor > 0)
+      property2 = { 'key' => 'version', 'value' => '0.2.3', 'operator' => 'semver_caret' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '0.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '0.2.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '0.2.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '0.2.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '0.3.0' })).to be false
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.0.0' })).to be false
+
+      # ^0.0.3 means >=0.0.3 <0.0.4 (major == 0, minor == 0)
+      property3 = { 'key' => 'version', 'value' => '0.0.3', 'operator' => 'semver_caret' }
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '0.0.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '0.0.2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '0.0.4' })).to be false
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '0.1.0' })).to be false
+    end
+
+    it 'with semver_wildcard operator' do
+      # 1.2.* means >=1.2.0 <1.3.0
+      property = { 'key' => 'version', 'value' => '1.2.*', 'operator' => 'semver_wildcard' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.1.9' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.3.0' })).to be false
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '2.0.0' })).to be false
+
+      # 1.* means >=1.0.0 <2.0.0
+      property2 = { 'key' => 'version', 'value' => '1.*', 'operator' => 'semver_wildcard' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.0.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.99.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '0.9.9' })).to be false
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '2.0.0' })).to be false
+    end
+
+    it 'with semver operators and v-prefix' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => 'v1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => 'V1.2.3' })).to be true
+
+      property2 = { 'key' => 'version', 'value' => 'v1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => 'v1.2.3' })).to be true
+    end
+
+    it 'with semver operators and pre-release suffixes stripped' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3-alpha' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3-beta.1' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3+build' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3-alpha+build' })).to be true
+
+      property2 = { 'key' => 'version', 'value' => '1.2.3-alpha', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })).to be true
+    end
+
+    it 'with semver operators and whitespace handling' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => ' 1.2.3 ' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '  1.2.3' })).to be true
+
+      property2 = { 'key' => 'version', 'value' => ' 1.2.3 ', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })).to be true
+    end
+
+    it 'with semver operators and leading zeros' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '01.02.03' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '001.002.003' })).to be true
+    end
+
+    it 'with semver operators and partial versions' do
+      # "1.2" equals "1.2.0"
+      property = { 'key' => 'version', 'value' => '1.2.0', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2' })).to be true
+
+      property2 = { 'key' => 'version', 'value' => '1.2', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.0' })).to be true
+
+      # "1" equals "1.0.0"
+      property3 = { 'key' => 'version', 'value' => '1.0.0', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1' })).to be true
+
+      property4 = { 'key' => 'version', 'value' => '1', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property4, { 'version' => '1.0.0' })).to be true
+    end
+
+    it 'with semver operators and 4-part versions' do
+      # "1.2.3.4" equals "1.2.3" (extra parts ignored)
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3.4' })).to be true
+      expect(FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3.999' })).to be true
+
+      property2 = { 'key' => 'version', 'value' => '1.2.3.4', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })).to be true
+    end
+
+    it 'with semver operators and invalid values' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+
+      # Non-numeric strings raise InconclusiveMatchError
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'version' => 'not-a-version' })
+      end.to raise_error(InconclusiveMatchError)
+
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'version' => '' })
+      end.to raise_error(InconclusiveMatchError)
+
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'version' => '.1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'version' => 'abc.def.ghi' })
+      end.to raise_error(InconclusiveMatchError)
+
+      # Invalid flag condition value
+      invalid_property = { 'key' => 'version', 'value' => 'invalid', 'operator' => 'semver_eq' }
+      expect do
+        FeatureFlagsPoller.match_property(invalid_property, { 'version' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+    end
+
+    it 'with semver operators and missing property key' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'other_key' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+
+      expect do
+        FeatureFlagsPoller.match_property(property, {})
+      end.to raise_error(InconclusiveMatchError)
+    end
+
+    it 'with semver operators and null property value' do
+      property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'version' => nil })
+      end.to raise_error(InconclusiveMatchError)
+    end
+
+    it 'with semver_wildcard invalid patterns' do
+      # Invalid wildcard pattern - completely empty after cleaning
+      property = { 'key' => 'version', 'value' => '*', 'operator' => 'semver_wildcard' }
+      expect do
+        FeatureFlagsPoller.match_property(property, { 'version' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+
+      property2 = { 'key' => 'version', 'value' => '*.*', 'operator' => 'semver_wildcard' }
+      expect do
+        FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+    end
   end
 
   describe 'relative date parsing' do
