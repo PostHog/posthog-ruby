@@ -449,11 +449,27 @@ module PostHog
       [major, minor, patch]
     end
 
-    # Returns bounds for tilde (~) range: >=X.Y.Z <X.(Y+1).0
+    # Returns bounds for tilde (~) range:
+    # ~X       → >=X.0.0 <(X+1).0.0
+    # ~X.Y     → >=X.Y.0 <X.(Y+1).0
+    # ~X.Y.Z   → >=X.Y.Z <X.(Y+1).0
     def self.semver_tilde_bounds(value)
       major, minor, patch = parse_semver(value)
       lower = [major, minor, patch]
-      upper = [major, minor + 1, 0]
+
+      # Determine how many components were provided
+      text = value.to_s.strip.sub(/^[vV]/, '')
+      text = text.split('-')[0].split('+')[0]
+      component_count = text.split('.').length
+
+      upper = if component_count == 1
+                # Major-only: bump major
+                [major + 1, 0, 0]
+              else
+                # Major.minor or major.minor.patch: bump minor
+                [major, minor + 1, 0]
+              end
+
       [lower, upper]
     end
 

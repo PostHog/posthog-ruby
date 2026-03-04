@@ -1640,6 +1640,14 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.0.0' })).to be true
       expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.0.99' })).to be true
       expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.1.0' })).to be false
+
+      # Major-only tilde: ~1 means >=1.0.0 <2.0.0
+      property3 = { 'key' => 'version', 'value' => '1', 'operator' => 'semver_tilde' }
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1.0.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1.5.0' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '1.99.99' })).to be true
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '0.9.9' })).to be false
+      expect(FeatureFlagsPoller.match_property(property3, { 'version' => '2.0.0' })).to be false
     end
 
     it 'with semver_caret operator' do
