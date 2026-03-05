@@ -1,3 +1,10 @@
+## 3.5.5 - 2026-03-04
+
+1. feat: Add semver comparison operators for local feature flag evaluation ([#107](https://github.com/PostHog/posthog-ruby/pull/107))
+   - Supports `semver_eq`, `semver_neq`, `semver_gt`, `semver_gte`, `semver_lt`, `semver_lte` for direct comparisons
+   - Supports `semver_tilde`, `semver_caret`, `semver_wildcard` for range matching
+   - Handles v-prefix, pre-release suffixes, partial versions, and whitespace
+
 ## 3.5.4 - 2026-02-15
 
 1. fix: Move Rails generator template to `lib/generators/posthog/templates/` to ensure it's included in the gem package ([#103](https://github.com/PostHog/posthog-ruby/issues/103))
