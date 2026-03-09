@@ -7,6 +7,7 @@ require 'webmock/rspec'
 RSpec.configure do |config|
   config.before(:each) do
     PostHog::Logging.logger = Logger.new(File::NULL) # Suppress all logging
+    PostHog::Client.reset_instance_tracking!
   end
 end
 

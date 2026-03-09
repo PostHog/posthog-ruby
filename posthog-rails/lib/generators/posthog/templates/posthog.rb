@@ -46,6 +46,8 @@ end
 # CORE POSTHOG CONFIGURATION
 # ============================================================================
 # Initialize the PostHog client with core SDK options.
+# IMPORTANT: Use PostHog.init once — creating multiple clients can cause dropped events.
+# PostHog.init provides a singleton-like pattern; use PostHog.capture, PostHog.identify, etc.
 
 PostHog.init do |config|
   # ============================================================================
