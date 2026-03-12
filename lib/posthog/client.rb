@@ -17,6 +17,35 @@ module PostHog
     include PostHog::Utils
     include PostHog::Logging
 
+    # Thread-safe tracking of client instances per API key for singleton warnings
+    @instances_by_api_key = {}
+    @instances_mutex = Mutex.new
+
+    class << self
+      # Resets instance tracking. Used primarily for testing.
+      # In production, instance counts persist for the lifetime of the process.
+      def reset_instance_tracking!
+        @instances_mutex.synchronize do
+          @instances_by_api_key = {}
+        end
+      end
+
+      def _increment_instance_count(api_key)
+        @instances_mutex.synchronize do
+          count = @instances_by_api_key[api_key] || 0
+          @instances_by_api_key[api_key] = count + 1
+          count
+        end
+      end
+
+      def _decrement_instance_count(api_key)
+        @instances_mutex.synchronize do
+          count = (@instances_by_api_key[api_key] || 1) - 1
+          @instances_by_api_key[api_key] = [count, 0].max
+        end
+      end
+    end
+
     # @param [Hash] opts
     # @option opts [String] :api_key Your project's api_key
     # @option opts [String] :personal_api_key Your personal API key
@@ -32,6 +61,8 @@ module PostHog
     #   Measured in seconds, defaults to 3.
     # @option opts [Proc] :before_send A block that receives the event hash and should return either a modified hash
     #   to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`
+    # @option opts [Bool] :disable_singleton_warning +true+ to suppress the warning when multiple clients
+    #   share the same API key. Use only when you intentionally need multiple clients. Defaults to +false+.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -51,6 +82,19 @@ module PostHog
       @personal_api_key = opts[:personal_api_key]
 
       check_api_key!
+
+      # Warn when multiple clients are created with the same API key (can cause dropped events)
+      unless opts[:test_mode] || opts[:disable_singleton_warning]
+        previous_count = self.class._increment_instance_count(@api_key)
+        if previous_count >= 1
+          logger.warn(
+            'Multiple PostHog client instances detected for the same API key. ' \
+            'This can cause dropped events and inconsistent behavior. ' \
+            'Use a singleton pattern: instantiate once and reuse the client. ' \
+            'See https://posthog.com/docs/libraries/ruby'
+          )
+        end
+      end
 
       @feature_flags_poller =
         FeatureFlagsPoller.new(
@@ -444,6 +488,7 @@ module PostHog
     end
 
     def shutdown
+      self.class._decrement_instance_count(@api_key) if @api_key
       @feature_flags_poller.shutdown_poller
       flush
     end

@@ -36,6 +36,61 @@ module PostHog
                                                            skip_ssl_verification: true })
         expect { Client.new api_key: API_KEY, skip_ssl_verification: true }.to_not raise_error
       end
+
+      context 'singleton warning' do
+        before do
+          # Stub HTTP to allow creating clients without test_mode (which triggers the warning)
+          stub_request(:post, 'https://app.posthog.com/batch/').to_return(status: 200, body: '{}')
+          stub_request(:get, %r{https://app\.posthog\.com/api/feature_flag/}).to_return(status: 200, body: '{}')
+        end
+
+        it 'warns when multiple clients are created with the same API key' do
+          Client.new(api_key: API_KEY, test_mode: false)
+          Client.new(api_key: API_KEY, test_mode: false)
+
+          expect(logger).to have_received(:warn).with(
+            include('Multiple PostHog client instances detected')
+          )
+          expect(logger).to have_received(:warn).with(
+            include('singleton pattern')
+          )
+        end
+
+        it 'does not warn when only one client exists' do
+          Client.new(api_key: API_KEY, test_mode: false)
+
+          expect(logger).not_to have_received(:warn).with(
+            include('Multiple PostHog client instances detected')
+          )
+        end
+
+        it 'does not warn when disable_singleton_warning is true' do
+          Client.new(api_key: API_KEY, test_mode: false)
+          Client.new(api_key: API_KEY, test_mode: false, disable_singleton_warning: true)
+
+          expect(logger).not_to have_received(:warn).with(
+            include('Multiple PostHog client instances detected')
+          )
+        end
+
+        it 'does not warn when clients use different API keys' do
+          Client.new(api_key: API_KEY, test_mode: false)
+          Client.new(api_key: 'different_key', test_mode: false)
+
+          expect(logger).not_to have_received(:warn).with(
+            include('Multiple PostHog client instances detected')
+          )
+        end
+
+        it 'does not warn when test_mode is true' do
+          Client.new(api_key: API_KEY, test_mode: true)
+          Client.new(api_key: API_KEY, test_mode: true)
+
+          expect(logger).not_to have_received(:warn).with(
+            include('Multiple PostHog client instances detected')
+          )
+        end
+      end
     end
 
     describe '#capture' do

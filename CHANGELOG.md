@@ -1,3 +1,8 @@
+1. fix: Warn when multiple PostHog client instances are created with the same API key ([#57](https://github.com/PostHog/posthog-ruby/issues/57))
+   - Multiple instances can cause dropped events and inconsistent behavior
+   - Use `disable_singleton_warning: true` when intentionally creating multiple clients (e.g., for different projects)
+   - Documentation updated with singleton best practices
+
 ## 3.5.5 - 2026-03-04
 
 1. feat: Add semver comparison operators for local feature flag evaluation ([#107](https://github.com/PostHog/posthog-ruby/pull/107))

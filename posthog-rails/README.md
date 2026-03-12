@@ -40,6 +40,8 @@ This will create `config/initializers/posthog.rb` with sensible defaults and doc
 
 ## Configuration
 
+PostHog.init creates a single client instance used across your app. Avoid creating multiple `PostHog::Client` instances with the same API key — it can cause dropped events.
+
 The generated initializer at `config/initializers/posthog.rb` includes all available options:
 
 ```ruby

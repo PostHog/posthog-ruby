@@ -5,6 +5,9 @@ Please see the main [PostHog docs](https://posthog.com/docs).
 Specifically, the [Ruby integration](https://posthog.com/docs/integrations/ruby-integration) details.
 
 > [!IMPORTANT]
+> **Use a single client instance (singleton)** — Create the PostHog client once and reuse it throughout your application. Multiple client instances with the same API key can cause dropped events and inconsistent behavior. The SDK will log a warning if it detects multiple instances. For Rails apps, use `PostHog.init` in an initializer (see [posthog-rails](posthog-rails/README.md)).
+
+> [!IMPORTANT]
 > Supports Ruby 3.2 and above
 >
 > We will lag behind but generally not support versions which are end-of-life as listed here https://www.ruby-lang.org/en/downloads/branches/
