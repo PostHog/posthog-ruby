@@ -1,6 +1,4 @@
-## Unreleased
-
-1. chore: Warn when multiple PostHog client instances are created with the same API key ([#57](https://github.com/PostHog/posthog-ruby/issues/57))
+1. fix: Warn when multiple PostHog client instances are created with the same API key ([#57](https://github.com/PostHog/posthog-ruby/issues/57))
    - Multiple instances can cause dropped events and inconsistent behavior
    - Use `disable_singleton_warning: true` when intentionally creating multiple clients (e.g., for different projects)
    - Documentation updated with singleton best practices
