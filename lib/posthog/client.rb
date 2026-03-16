@@ -86,13 +86,14 @@ module PostHog
                 else
                   SendWorker.new(@queue, @api_key, opts)
                 end
-      @transport = if @sync_mode
-                     Transport.new(
-                       api_host: opts[:host],
-                       skip_ssl_verification: opts[:skip_ssl_verification],
-                       retries: 3
-                     )
-                   end
+      if @sync_mode
+        @transport = Transport.new(
+          api_host: opts[:host],
+          skip_ssl_verification: opts[:skip_ssl_verification],
+          retries: 3
+        )
+        @sync_lock = Mutex.new
+      end
       @worker_thread = nil
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
@@ -596,8 +597,10 @@ module PostHog
       end
       return if batch.empty?
 
-      res = @transport.send(@api_key, batch)
-      @on_error.call(res.status, res.error) unless res.status == 200
+      @sync_lock.synchronize do
+        res = @transport.send(@api_key, batch)
+        @on_error.call(res.status, res.error) unless res.status == 200
+      end
     end
 
     def worker_running?
