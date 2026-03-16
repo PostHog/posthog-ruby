@@ -135,7 +135,11 @@ module PostHog
     # Use only for scripts which are not long-running, and will specifically
     # exit
     def flush
-      return if @sync_mode
+      if @sync_mode
+        # Wait for any in-flight sync send to complete
+        @sync_lock.synchronize {} # rubocop:disable Lint/EmptyBlock
+        return
+      end
 
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
@@ -511,7 +515,7 @@ module PostHog
       @feature_flags_poller.shutdown_poller
       flush
       if @sync_mode
-        @transport&.shutdown
+        @sync_lock.synchronize { @transport&.shutdown }
       else
         @worker&.shutdown
       end
