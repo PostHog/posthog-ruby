@@ -54,6 +54,10 @@ module PostHog
       @transport.shutdown
     end
 
+    def shutdown
+      @transport.shutdown
+    end
+
     # public: Check whether we have outstanding requests.
     #
     # TODO: Rename to `requesting?` in future version
