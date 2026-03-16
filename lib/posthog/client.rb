@@ -8,6 +8,8 @@ require 'posthog/logging'
 require 'posthog/utils'
 require 'posthog/send_worker'
 require 'posthog/noop_worker'
+require 'posthog/message_batch'
+require 'posthog/transport'
 require 'posthog/feature_flags'
 require 'posthog/send_feature_flags_options'
 require 'posthog/exception_capture'
@@ -53,6 +55,9 @@ module PostHog
     #   remain queued. Defaults to 10_000.
     # @option opts [Bool] :test_mode +true+ if messages should remain
     #   queued for testing. Defaults to +false+.
+    # @option opts [Bool] :sync_mode +true+ to send events synchronously
+    #   on the calling thread. Useful in forking environments like Sidekiq
+    #   and Resque. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
     # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes.
@@ -72,11 +77,22 @@ module PostHog
       @api_key = opts[:api_key]
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
+      @sync_mode = opts[:sync_mode] == true && !opts[:test_mode]
+      @on_error = opts[:on_error] || proc { |status, error| }
       @worker = if opts[:test_mode]
                   NoopWorker.new(@queue)
+                elsif @sync_mode
+                  nil
                 else
                   SendWorker.new(@queue, @api_key, opts)
                 end
+      @transport = if @sync_mode
+                     Transport.new(
+                       api_host: opts[:host],
+                       skip_ssl_verification: opts[:skip_ssl_verification],
+                       retries: 3
+                     )
+                   end
       @worker_thread = nil
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
@@ -118,6 +134,8 @@ module PostHog
     # Use only for scripts which are not long-running, and will specifically
     # exit
     def flush
+      return if @sync_mode
+
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
         sleep(0.1)
@@ -491,6 +509,11 @@ module PostHog
       self.class._decrement_instance_count(@api_key) if @api_key
       @feature_flags_poller.shutdown_poller
       flush
+      if @sync_mode
+        @transport&.shutdown
+      else
+        @worker&.shutdown
+      end
     end
 
     private
@@ -528,6 +551,11 @@ module PostHog
       # add our request id for tracing purposes
       action[:messageId] ||= uid
 
+      if @sync_mode
+        send_sync(action)
+        return true
+      end
+
       if @queue.length < @max_queue_size
         @queue << action
         ensure_worker_running
@@ -556,6 +584,20 @@ module PostHog
 
         @worker_thread = Thread.new { @worker.run }
       end
+    end
+
+    def send_sync(action)
+      batch = MessageBatch.new(1)
+      begin
+        batch << action
+      rescue MessageBatch::JSONGenerationError => e
+        @on_error.call(-1, e.to_s)
+        return
+      end
+      return if batch.empty?
+
+      res = @transport.send(@api_key, batch)
+      @on_error.call(res.status, res.error) unless res.status == 200
     end
 
     def worker_running?

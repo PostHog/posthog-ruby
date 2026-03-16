@@ -160,6 +160,10 @@ module PostHog
         @base_options[:test_mode] = value
       end
 
+      def sync_mode=(value)
+        @base_options[:sync_mode] = value
+      end
+
       def on_error=(value)
         @base_options[:on_error] = value
       end

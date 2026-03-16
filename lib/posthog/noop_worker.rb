@@ -15,5 +15,9 @@ module PostHog
     def is_requesting? # rubocop:disable Naming/PredicateName
       false
     end
+
+    def shutdown
+      # Does nothing
+    end
   end
 end

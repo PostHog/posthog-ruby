@@ -93,6 +93,72 @@ module PostHog
       end
     end
 
+    describe 'sync_mode' do
+      around do |example|
+        PostHog::Transport.stub = true
+        example.call
+        PostHog::Transport.stub = false
+      end
+
+      it 'sends events inline without using a queue or worker' do
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+        sync_client.capture(Queued::CAPTURE)
+
+        worker = sync_client.instance_variable_get(:@worker)
+        worker_thread = sync_client.instance_variable_get(:@worker_thread)
+        expect(worker).to be_nil
+        expect(worker_thread).to be_nil
+        expect(sync_client.queued_messages).to eq(0)
+      end
+
+      it 'calls on_error when the request fails' do
+        error_status = nil
+        on_error = proc { |status, _error| error_status = status }
+
+        allow_any_instance_of(PostHog::Transport).to(
+          receive(:send).and_return(PostHog::Response.new(400, 'Bad request'))
+        )
+
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true, on_error: on_error)
+        sync_client.capture(Queued::CAPTURE)
+
+        expect(error_status).to eq(400)
+      end
+
+      it 'flush does not attempt to run a worker' do
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+        expect(sync_client).not_to receive(:ensure_worker_running)
+        sync_client.flush
+      end
+
+      it 'calls on_error with status -1 when message serialization fails' do
+        error_status = nil
+        error_message = nil
+        on_error = proc { |status, error|
+          error_status = status
+          error_message = error
+        }
+
+        allow_any_instance_of(PostHog::MessageBatch).to(
+          receive(:<<).and_raise(PostHog::MessageBatch::JSONGenerationError, 'Serialization error')
+        )
+
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true, on_error: on_error)
+        sync_client.capture(Queued::CAPTURE)
+
+        expect(error_status).to eq(-1)
+        expect(error_message).to include('Serialization error')
+      end
+
+      it 'prefers test_mode over sync_mode' do
+        both_client = Client.new(api_key: API_KEY, test_mode: true, sync_mode: true)
+        worker = both_client.instance_variable_get(:@worker)
+        sync_mode = both_client.instance_variable_get(:@sync_mode)
+        expect(worker).to be_a(PostHog::NoopWorker)
+        expect(sync_mode).to eq(false)
+      end
+    end
+
     describe '#capture' do
       it 'errors without an event' do
         expect { client.capture(distinct_id: 'user') }.to raise_error(
