@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Use Ruby ${{ matrix.ruby-version }}
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           # runs 'bundle install' and caches installed gems automatically
