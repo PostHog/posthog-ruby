@@ -2,85 +2,53 @@
 
 require 'spec_helper'
 
-module PostHog
-  LOCAL_EVAL_URL = 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+# MockCacheProvider is scoped outside PostHog module to avoid polluting the production namespace.
+class MockCacheProvider
+  attr_accessor :stored_data, :should_fetch_return_value,
+                :should_fetch_error, :get_error, :on_received_error, :shutdown_error
+  attr_reader :get_call_count, :should_fetch_call_count, :on_received_call_count, :shutdown_call_count
 
-  class MockCacheProvider
-    attr_accessor :stored_data, :should_fetch_return_value,
-                  :should_fetch_error, :get_error, :on_received_error, :shutdown_error
-    attr_reader :get_call_count, :should_fetch_call_count, :on_received_call_count, :shutdown_call_count
-
-    def initialize
-      @stored_data = nil
-      @should_fetch_return_value = true
-      @get_call_count = 0
-      @should_fetch_call_count = 0
-      @on_received_call_count = 0
-      @shutdown_call_count = 0
-      @should_fetch_error = nil
-      @get_error = nil
-      @on_received_error = nil
-      @shutdown_error = nil
-    end
-
-    def flag_definitions
-      @get_call_count += 1
-      raise @get_error if @get_error
-
-      @stored_data
-    end
-
-    def should_fetch_flag_definitions?
-      @should_fetch_call_count += 1
-      raise @should_fetch_error if @should_fetch_error
-
-      @should_fetch_return_value
-    end
-
-    def on_flag_definitions_received(data)
-      @on_received_call_count += 1
-      raise @on_received_error if @on_received_error
-
-      @stored_data = data
-    end
-
-    def shutdown
-      @shutdown_call_count += 1
-      raise @shutdown_error if @shutdown_error
-    end
+  def initialize
+    @stored_data = nil
+    @should_fetch_return_value = true
+    @get_call_count = 0
+    @should_fetch_call_count = 0
+    @on_received_call_count = 0
+    @shutdown_call_count = 0
+    @should_fetch_error = nil
+    @get_error = nil
+    @on_received_error = nil
+    @shutdown_error = nil
   end
 
-  # Sample API response with string keys (simulating JSON deserialization from cache)
-  SAMPLE_FLAGS_DATA_STRING_KEYS = {
-    'flags' => [
-      {
-        'id' => 1,
-        'key' => 'test-flag',
-        'active' => true,
-        'filters' => {
-          'groups' => [
-            {
-              'properties' => [
-                { 'key' => 'region', 'operator' => 'exact', 'value' => ['USA'], 'type' => 'person' }
-              ],
-              'rollout_percentage' => 100
-            }
-          ]
-        }
-      },
-      { 'id' => 2, 'key' => 'disabled-flag', 'active' => false, 'filters' => {} }
-    ],
-    'group_type_mapping' => { '0' => 'company', '1' => 'project' },
-    'cohorts' => { '1' => { 'type' => 'AND', 'values' => [] } }
-  }.freeze
+  def flag_definitions
+    @get_call_count += 1
+    raise @get_error if @get_error
 
-  # API response format (what webmock returns)
-  API_FLAG_RESPONSE = {
-    'flags' => SAMPLE_FLAGS_DATA_STRING_KEYS['flags'],
-    'group_type_mapping' => SAMPLE_FLAGS_DATA_STRING_KEYS['group_type_mapping'],
-    'cohorts' => SAMPLE_FLAGS_DATA_STRING_KEYS['cohorts']
-  }.freeze
+    @stored_data
+  end
 
+  def should_fetch_flag_definitions?
+    @should_fetch_call_count += 1
+    raise @should_fetch_error if @should_fetch_error
+
+    @should_fetch_return_value
+  end
+
+  def on_flag_definitions_received(data)
+    @on_received_call_count += 1
+    raise @on_received_error if @on_received_error
+
+    @stored_data = data
+  end
+
+  def shutdown
+    @shutdown_call_count += 1
+    raise @shutdown_error if @shutdown_error
+  end
+end
+
+module PostHog
   describe FlagDefinitionCacheProvider do
     describe '.validate!' do
       it 'passes for a complete provider' do
@@ -117,11 +85,38 @@ module PostHog
 
   describe 'flag definition cache integration' do
     let(:provider) { MockCacheProvider.new }
+    let(:local_eval_url) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+
+    # Sample flag data with string keys (simulating JSON deserialization from cache)
+    let(:sample_flags_data) do
+      {
+        'flags' => [
+          {
+            'id' => 1,
+            'key' => 'test-flag',
+            'active' => true,
+            'filters' => {
+              'groups' => [
+                {
+                  'properties' => [
+                    { 'key' => 'region', 'operator' => 'exact', 'value' => ['USA'], 'type' => 'person' }
+                  ],
+                  'rollout_percentage' => 100
+                }
+              ]
+            }
+          },
+          { 'id' => 2, 'key' => 'disabled-flag', 'active' => false, 'filters' => {} }
+        ],
+        'group_type_mapping' => { '0' => 'company', '1' => 'project' },
+        'cohorts' => { '1' => { 'type' => 'AND', 'values' => [] } }
+      }
+    end
 
     def create_client_with_cache(provider:, stub_api: true)
       if stub_api
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
       end
       Client.new(
         api_key: API_KEY,
@@ -138,11 +133,11 @@ module PostHog
     describe 'cache initialization' do
       it 'uses cached data when should_fetch? returns false and cache has data' do
         provider.should_fetch_return_value = false
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS
+        provider.stored_data = sample_flags_data
 
         # The initial load_feature_flags call should use cache, not API
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         # API should not have been called (initial load uses cache)
@@ -156,8 +151,8 @@ module PostHog
       it 'fetches from API when should_fetch? returns true' do
         provider.should_fetch_return_value = true
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         expect(stub).to have_been_requested
@@ -169,8 +164,8 @@ module PostHog
         provider.should_fetch_return_value = false
         provider.stored_data = nil # Cache empty
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         # Should have fallen back to API
@@ -182,8 +177,8 @@ module PostHog
       it 'preserves existing flags when cache returns nil but flags already loaded' do
         provider.should_fetch_return_value = true
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         poller = get_poller(client)
@@ -205,8 +200,8 @@ module PostHog
       it 'calls should_fetch? before each poll cycle' do
         provider.should_fetch_return_value = true
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider)
 
         initial_count = provider.should_fetch_call_count
@@ -220,8 +215,8 @@ module PostHog
       it 'stores data in cache after API fetch' do
         provider.should_fetch_return_value = true
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         create_client_with_cache(provider: provider)
 
         expect(provider.on_received_call_count).to be >= 1
@@ -234,8 +229,8 @@ module PostHog
       it 'does not call on_flag_definitions_received when cache is used' do
         provider.should_fetch_return_value = true
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider)
 
         initial_on_received_count = provider.on_received_call_count
@@ -253,9 +248,9 @@ module PostHog
         provider.should_fetch_return_value = true
 
         # First call: return flags
-        stub_request(:get, LOCAL_EVAL_URL)
+        stub_request(:get, local_eval_url)
           .to_return(
-            { status: 200, body: API_FLAG_RESPONSE.to_json, headers: { 'ETag' => 'abc123' } },
+            { status: 200, body: sample_flags_data.to_json, headers: { 'ETag' => 'abc123' } },
             { status: 304, body: '', headers: { 'ETag' => 'abc123' } }
           )
         client = create_client_with_cache(provider: provider, stub_api: false)
@@ -274,8 +269,8 @@ module PostHog
       it 'defaults to fetching from API when should_fetch? raises' do
         provider.should_fetch_error = RuntimeError.new('Redis connection error')
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         expect(stub).to have_been_requested
@@ -287,8 +282,8 @@ module PostHog
         provider.should_fetch_return_value = false
         provider.get_error = RuntimeError.new('Redis timeout')
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         expect(stub).to have_been_requested
@@ -300,8 +295,8 @@ module PostHog
         provider.should_fetch_return_value = true
         provider.on_received_error = RuntimeError.new('Redis write error')
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider)
 
         poller = get_poller(client)
@@ -312,8 +307,8 @@ module PostHog
         provider.should_fetch_return_value = true
         provider.shutdown_error = RuntimeError.new('Redis error')
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider)
 
         expect { client.shutdown }.not_to raise_error
@@ -325,8 +320,8 @@ module PostHog
       it 'calls provider shutdown via client shutdown' do
         provider.should_fetch_return_value = true
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider)
 
         client.shutdown
@@ -336,8 +331,8 @@ module PostHog
 
     describe 'backward compatibility' do
       it 'works without a cache provider' do
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
 
         client = Client.new(
           api_key: API_KEY,
@@ -353,10 +348,10 @@ module PostHog
     describe 'data integrity' do
       it 'evaluates flags loaded from cache' do
         provider.should_fetch_return_value = false
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS
+        provider.stored_data = sample_flags_data
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         expect(stub).not_to have_been_requested
@@ -377,10 +372,10 @@ module PostHog
 
       it 'handles string-keyed cache data correctly' do
         provider.should_fetch_return_value = false
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS
+        provider.stored_data = sample_flags_data
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         poller = get_poller(client)
@@ -391,10 +386,10 @@ module PostHog
 
       it 'loads group_type_mapping from cache' do
         provider.should_fetch_return_value = false
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS
+        provider.stored_data = sample_flags_data
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         poller = get_poller(client)
@@ -405,10 +400,10 @@ module PostHog
 
       it 'loads cohorts from cache' do
         provider.should_fetch_return_value = false
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS
+        provider.stored_data = sample_flags_data
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         poller = get_poller(client)
@@ -420,8 +415,8 @@ module PostHog
       it 'updates cache when API returns new data' do
         provider.should_fetch_return_value = true
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         create_client_with_cache(provider: provider)
 
         expect(provider.stored_data).not_to be_nil
@@ -432,8 +427,8 @@ module PostHog
       it 'roundtrip: data stored after API fetch can be loaded via JSON serialization' do
         provider.should_fetch_return_value = true
 
-        stub_request(:get, LOCAL_EVAL_URL)
-          .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.to_json)
         client1 = create_client_with_cache(provider: provider, stub_api: false)
         client1.shutdown
 
@@ -448,7 +443,7 @@ module PostHog
         provider2.should_fetch_return_value = false
         provider2.stored_data = serialized_data
 
-        stub_request(:get, LOCAL_EVAL_URL)
+        stub_request(:get, local_eval_url)
           .to_return(status: 200, body: { 'flags' => [], 'group_type_mapping' => {}, 'cohorts' => {} }.to_json)
         client2 = create_client_with_cache(provider: provider2, stub_api: false)
 
@@ -464,20 +459,20 @@ module PostHog
 
       it 'picks up updated cache data on subsequent poll cycles' do
         provider.should_fetch_return_value = false
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS
+        provider.stored_data = sample_flags_data
 
-        stub = stub_request(:get, LOCAL_EVAL_URL)
-               .to_return(status: 200, body: API_FLAG_RESPONSE.to_json)
+        stub = stub_request(:get, local_eval_url)
+               .to_return(status: 200, body: sample_flags_data.to_json)
         client = create_client_with_cache(provider: provider, stub_api: false)
 
         poller = get_poller(client)
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(2)
 
         # Simulate leader updating cache with a new flag
-        updated_flags = SAMPLE_FLAGS_DATA_STRING_KEYS['flags'] + [
+        updated_flags = sample_flags_data['flags'] + [
           { 'id' => 3, 'key' => 'new-flag', 'active' => true, 'filters' => {} }
         ]
-        provider.stored_data = SAMPLE_FLAGS_DATA_STRING_KEYS.merge('flags' => updated_flags)
+        provider.stored_data = sample_flags_data.merge('flags' => updated_flags)
 
         poller.send(:_load_feature_flags)
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(3)

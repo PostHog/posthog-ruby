@@ -1030,7 +1030,7 @@ module PostHog
         end
       end
 
-      if !should_fetch && @flag_definition_cache_provider
+      unless should_fetch
         begin
           cached_data = @flag_definition_cache_provider.flag_definitions
           if cached_data
