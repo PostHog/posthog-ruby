@@ -283,7 +283,7 @@ module PostHog
         expect(poller.instance_variable_get(:@feature_flags).length).to eq(2)
       end
 
-      it 'falls back to API fetch when get_flag_definitions raises' do
+      it 'falls back to API fetch when flag_definitions raises' do
         provider.should_fetch_return_value = false
         provider.get_error = RuntimeError.new('Redis timeout')
 

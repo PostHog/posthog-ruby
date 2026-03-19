@@ -6,6 +6,7 @@ require 'json'
 require 'posthog/version'
 require 'posthog/logging'
 require 'posthog/feature_flag'
+require 'posthog/flag_definition_cache'
 require 'digest'
 
 module PostHog
@@ -1032,8 +1033,7 @@ module PostHog
       if !should_fetch && @flag_definition_cache_provider
         begin
           cached_data = @flag_definition_cache_provider.flag_definitions
-          cached_flags = cached_data && get_by_symbol_or_string_key(cached_data, 'flags')
-          if cached_flags && !cached_flags.empty?
+          if cached_data
             logger.debug '[FEATURE FLAGS] Using cached flag definitions from external cache'
             _apply_flag_definitions(cached_data)
             return
