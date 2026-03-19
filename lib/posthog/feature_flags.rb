@@ -29,7 +29,8 @@ module PostHog
       project_api_key,
       host,
       feature_flag_request_timeout_seconds,
-      on_error = nil
+      on_error = nil,
+      flag_definition_cache_provider: nil
     )
       @polling_interval = polling_interval || 30
       @personal_api_key = personal_api_key
@@ -44,6 +45,10 @@ module PostHog
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @flags_etag = Concurrent::AtomicReference.new(nil)
+
+      @flag_definition_cache_provider = flag_definition_cache_provider
+      FlagDefinitionCacheProvider.validate!(@flag_definition_cache_provider) if @flag_definition_cache_provider
+
       @task =
         Concurrent::TimerTask.new(
           execution_interval: polling_interval
@@ -372,6 +377,13 @@ module PostHog
 
     def shutdown_poller
       @task.shutdown
+      return unless @flag_definition_cache_provider
+
+      begin
+        @flag_definition_cache_provider.shutdown
+      rescue StandardError => e
+        logger.error("[FEATURE FLAGS] Cache provider shutdown error: #{e}")
+      end
     end
 
     # Class methods
@@ -1006,6 +1018,39 @@ module PostHog
     end
 
     def _load_feature_flags
+      should_fetch = true
+
+      if @flag_definition_cache_provider
+        begin
+          should_fetch = @flag_definition_cache_provider.should_fetch_flag_definitions?
+        rescue StandardError => e
+          logger.error("[FEATURE FLAGS] Cache provider should_fetch error: #{e}")
+          should_fetch = true
+        end
+      end
+
+      if !should_fetch && @flag_definition_cache_provider
+        begin
+          cached_data = @flag_definition_cache_provider.flag_definitions
+          cached_flags = cached_data && get_by_symbol_or_string_key(cached_data, 'flags')
+          if cached_flags && !cached_flags.empty?
+            logger.debug '[FEATURE FLAGS] Using cached flag definitions from external cache'
+            _apply_flag_definitions(cached_data)
+            return
+          elsif @feature_flags.empty?
+            # Emergency fallback: cache empty and no flags loaded -> fetch from API
+            should_fetch = true
+          end
+        rescue StandardError => e
+          logger.error("[FEATURE FLAGS] Cache provider get error: #{e}")
+          should_fetch = true
+        end
+      end
+
+      _fetch_and_apply_flag_definitions if should_fetch
+    end
+
+    def _fetch_and_apply_flag_definitions
       begin
         res = _request_feature_flag_definitions(etag: @flags_etag.value)
       rescue StandardError => e
@@ -1040,19 +1085,46 @@ module PostHog
         # Only update ETag on successful responses with flag data
         @flags_etag.value = res[:etag]
 
-        @feature_flags = res[:flags] || []
-        @feature_flags_by_key = {}
-        @feature_flags.each do |flag|
-          @feature_flags_by_key[flag[:key]] = flag unless flag[:key].nil?
-        end
-        @group_type_mapping = res[:group_type_mapping] || {}
-        @cohorts = res[:cohorts] || {}
-
-        logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
-        @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
+        _apply_flag_definitions(res)
+        _store_in_cache_provider
       else
         logger.debug "Failed to load feature flags: #{res}"
       end
+    end
+
+    def _store_in_cache_provider
+      return unless @flag_definition_cache_provider
+
+      begin
+        data = {
+          flags: @feature_flags.to_a,
+          group_type_mapping: @group_type_mapping.to_h,
+          cohorts: @cohorts.to_h
+        }
+        @flag_definition_cache_provider.on_flag_definitions_received(data)
+      rescue StandardError => e
+        logger.error("[FEATURE FLAGS] Cache provider store error: #{e}")
+      end
+    end
+
+    def _apply_flag_definitions(data)
+      flags = get_by_symbol_or_string_key(data, 'flags') || []
+      group_type_mapping = get_by_symbol_or_string_key(data, 'group_type_mapping') || {}
+      cohorts = get_by_symbol_or_string_key(data, 'cohorts') || {}
+
+      @feature_flags = Concurrent::Array.new(flags.map { |f| deep_symbolize_keys(f) })
+
+      new_by_key = {}
+      @feature_flags.each do |flag|
+        new_by_key[flag[:key]] = flag unless flag[:key].nil?
+      end
+      @feature_flags_by_key = new_by_key
+
+      @group_type_mapping = Concurrent::Hash[deep_symbolize_keys(group_type_mapping)]
+      @cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
+
+      logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
+      @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
     end
 
     def _request_feature_flag_definitions(etag: nil)

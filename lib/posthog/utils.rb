@@ -27,6 +27,21 @@ module PostHog
       hash.transform_keys(&:to_s)
     end
 
+    # public: Recursively convert all keys to symbols in a Hash/Array tree
+    #
+    def deep_symbolize_keys(obj)
+      case obj
+      when Hash
+        obj.each_with_object({}) do |(key, value), result|
+          result[key.to_sym] = deep_symbolize_keys(value)
+        end
+      when Array
+        obj.map { |item| deep_symbolize_keys(item) }
+      else
+        obj
+      end
+    end
+
     # public: Returns a new hash with all the date values in the into iso8601
     #         strings
     #
