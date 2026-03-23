@@ -68,6 +68,9 @@ module PostHog
     #   to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`
     # @option opts [Bool] :disable_singleton_warning +true+ to suppress the warning when multiple clients
     #   share the same API key. Use only when you intentionally need multiple clients. Defaults to +false+.
+    # @option opts [Object] :flag_definition_cache_provider An object implementing the
+    #   {FlagDefinitionCacheProvider} interface for distributed flag definition caching.
+    #   EXPERIMENTAL: This API may change in future minor version bumps.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -120,7 +123,8 @@ module PostHog
           @api_key,
           opts[:host],
           opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
-          opts[:on_error]
+          opts[:on_error],
+          flag_definition_cache_provider: opts[:flag_definition_cache_provider]
         )
 
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
