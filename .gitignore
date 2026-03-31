@@ -1,5 +1,8 @@
 *.gem
-Gemfile.lock
+# We check in Gemfile.lock for CI reproducibility and supply chain security.
+# Bundler verifies gem checksums on install.
+# Run `bundle update` to update dependencies explicitly.
+# Gemfile.lock
 coverage/
 .bundle
 vendor/bundle
