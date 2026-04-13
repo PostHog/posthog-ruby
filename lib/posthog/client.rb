@@ -81,6 +81,7 @@ module PostHog
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
       @sync_mode = opts[:sync_mode] == true && !opts[:test_mode]
+      @test_mode = opts[:test_mode] == true
       @on_error = opts[:on_error] || proc { |status, error| }
       @worker = if opts[:test_mode]
                   NoopWorker.new(@queue)
@@ -142,6 +143,11 @@ module PostHog
       if @sync_mode
         # Wait for any in-flight sync send to complete
         @sync_lock.synchronize {} # rubocop:disable Lint/EmptyBlock
+        return
+      end
+
+      if @test_mode
+        @queue.clear
         return
       end
 

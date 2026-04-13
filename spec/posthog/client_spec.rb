@@ -1108,6 +1108,21 @@ module PostHog
           Process.wait
         end
       end
+
+      it 'clears queue immediately in test mode without hanging' do
+        test_client = PostHog::Client.new(
+          api_key: 'test-api-key',
+          test_mode: true
+        )
+        test_client.capture(distinct_id: 'test-user', event: 'test event')
+        expect(test_client.queued_messages).to eq(1)
+
+        thread = Thread.new { test_client.flush }
+        result = thread.join(2)
+
+        expect(result).not_to be_nil
+        expect(test_client.queued_messages).to eq(0)
+      end
     end
 
     describe 'feature flags' do
