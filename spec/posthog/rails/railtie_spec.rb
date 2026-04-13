@@ -8,11 +8,20 @@ require 'rails/railtie'
 # so we add it manually for testing.
 $LOAD_PATH.unshift File.expand_path('../../../posthog-rails/lib', __dir__)
 
-# Load just enough of posthog-rails to define the Railtie.
-# Middleware classes (CaptureExceptions, etc.) are only referenced inside
-# initializer blocks, not at file-load time, so we don't need them here.
-require 'posthog/rails/configuration'
-require 'posthog/rails/railtie'
+# Stub minimal Rails interface needed by posthog-rails submodules
+module Rails
+  def self.version
+    '7.2.0'
+  end
+
+  def self.logger
+    @logger ||= Logger.new(File::NULL)
+  end
+end
+
+# Load the full posthog-rails module, which also extends PostHog with
+# init, capture, and other singleton methods at load time.
+require 'posthog/rails'
 
 RSpec.describe PostHog::Rails::Railtie do
   describe 'posthog.insert_middlewares initializer' do
@@ -51,6 +60,46 @@ RSpec.describe PostHog::Rails::Railtie do
       expect do
         railtie.instance_exec(app, &initializer.block)
       end.not_to raise_error
+    end
+  end
+
+  describe 'PostHog.init availability at gem load time' do
+    before do
+      PostHog.instance_variable_set(:@client, nil)
+      PostHog::Client.reset_instance_tracking!
+    end
+
+    after do
+      PostHog.instance_variable_set(:@client, nil)
+      PostHog::Client.reset_instance_tracking!
+    end
+
+    it 'PostHog.init can be called without any Rails initializer having run' do
+      expect do
+        PostHog.init(api_key: 'test-key', test_mode: true)
+      end.not_to raise_error
+
+      expect(PostHog.initialized?).to be true
+      expect(PostHog.client).to be_a(PostHog::Client)
+    end
+
+    it 'PostHog.init with block configuration works without Rails initializers' do
+      expect do
+        PostHog.init do |config|
+          config.api_key = 'test-key'
+          config.test_mode = true
+        end
+      end.not_to raise_error
+
+      expect(PostHog.initialized?).to be true
+    end
+
+    it 'raises a clear error when delegated methods are called before init' do
+      expect(PostHog.initialized?).to be false
+
+      expect do
+        PostHog.capture(distinct_id: 'test', event: 'test')
+      end.to raise_error(RuntimeError, /PostHog is not initialized/)
     end
   end
 end
