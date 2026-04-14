@@ -19,6 +19,5 @@
 - [ ] Updated `lib/posthog/version.rb` with the new version
 - [ ] Updated `CHANGELOG.md` with the release notes and current date
 - [ ] Added the `release` label to the PR
-- [ ] A maintainer approved the GitHub `Release` environment
 
 <!-- For more details check README.md#how-to-release -->
