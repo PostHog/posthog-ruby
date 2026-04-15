@@ -1128,7 +1128,7 @@ module PostHog
     end
 
     def _request_feature_flag_definitions(etag: nil)
-      uri = URI("#{@host}/api/feature_flag/local_evaluation")
+      uri = URI("#{@host}/flags/definitions")
       uri.query = URI.encode_www_form([['token', @project_api_key], %w[send_cohorts true]])
       req = Net::HTTP::Get.new(uri)
       req['Authorization'] = "Bearer #{@personal_api_key}"
