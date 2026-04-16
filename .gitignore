@@ -9,4 +9,5 @@ vendor/bundle
 .idea
 .ruby-version
 .env
+node_modules/
 
