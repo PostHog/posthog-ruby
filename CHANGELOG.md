@@ -1,7 +1,13 @@
 1. fix: Warn when multiple PostHog client instances are created with the same API key ([#57](https://github.com/PostHog/posthog-ruby/issues/57))
-   - Multiple instances can cause dropped events and inconsistent behavior
-   - Use `disable_singleton_warning: true` when intentionally creating multiple clients (e.g., for different projects)
-   - Documentation updated with singleton best practices
+
+## 3.6.2
+
+### Patch Changes
+
+- f69d97a: Switch the Ruby SDK to automated Changesets-based releases.
+  - Multiple instances can cause dropped events and inconsistent behavior
+  - Use `disable_singleton_warning: true` when intentionally creating multiple clients (e.g., for different projects)
+  - Documentation updated with singleton best practices
 
 ## 3.5.5 - 2026-03-04
 
