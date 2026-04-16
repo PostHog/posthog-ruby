@@ -1,5 +1,3 @@
-1. fix: Warn when multiple PostHog client instances are created with the same API key ([#57](https://github.com/PostHog/posthog-ruby/issues/57))
-
 ## 3.6.4
 
 ### Patch Changes
