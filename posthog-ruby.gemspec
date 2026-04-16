@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.summary = 'PostHog library'
   spec.description = 'The PostHog ruby library'
   spec.authors = ['']
-  spec.email = 'hey@posthog.com'
+  spec.email = 'engineering@posthog.com'
   spec.homepage = 'https://github.com/PostHog/posthog-ruby'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 3.0'
