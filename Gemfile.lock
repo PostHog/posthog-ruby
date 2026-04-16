@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    posthog-ruby (3.6.2)
+    posthog-ruby (3.6.3)
       concurrent-ruby (~> 1)
 
 GEM
@@ -286,7 +286,7 @@ CHECKSUMS
   ostruct (0.6.3) sha256=95a2ed4a4bd1d190784e666b47b2d3f078e4a9efda2fccf18f84ddc6538ed912
   parallel (1.27.0) sha256=4ac151e1806b755fb4e2dc2332cbf0e54f2e24ba821ff2d3dcf86bf6dc4ae130
   parser (3.3.11.1) sha256=d17ace7aabe3e72c3cc94043714be27cc6f852f104d81aa284c2281aecc65d54
-  posthog-ruby (3.6.2)
+  posthog-ruby (3.6.3)
   pp (0.6.3) sha256=2951d514450b93ccfeb1df7d021cae0da16e0a7f95ee1e2273719669d0ab9df6
   prettier (4.0.4) sha256=713110c77675de802806b4e09b4b7783e497689db3e8a991f812aa78f4835bc5
   prettier_print (1.2.1) sha256=a72838b5f23facff21f90a5423cdcdda19e4271092b41f4ea7f50b83929e6ff9

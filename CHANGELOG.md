@@ -1,5 +1,11 @@
 1. fix: Warn when multiple PostHog client instances are created with the same API key ([#57](https://github.com/PostHog/posthog-ruby/issues/57))
 
+## 3.6.3
+
+### Patch Changes
+
+- d83df86: Simplify Ruby release token usage to retry the automated release flow.
+
 ## 3.6.2
 
 ### Patch Changes
