@@ -66,7 +66,7 @@ jobs:
     permissions:
       contents: write
     outputs:
-      committed: ${{ steps.commit-version-bump.outputs.committed }}
+      commit-hash: ${{ steps.commit-version-bump.outputs.commit-hash }}
       new-version: ${{ steps.apply-changesets.outputs.new-version }}
     steps:
       - name: Notify Slack - Approved
@@ -127,19 +127,13 @@ jobs:
 
       - name: Commit version bump
         id: commit-version-bump
+        uses: planetscale/ghcommit-action@25309d8005ac7c3bcd61d3fe19b69e0fe47dbdde # v0.2.20
+        with:
+          commit_message: "chore: release ${{ steps.apply-changesets.outputs.new-version }} [version bump]"
+          repo: ${{ github.repository }}
+          branch: main
         env:
           GITHUB_TOKEN: ${{ steps.releaser.outputs.token }}
-          NEW_VERSION: ${{ steps.apply-changesets.outputs.new-version }}
-        run: |
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            echo "committed=false" >> "$GITHUB_OUTPUT"
-          else
-            git commit -m "chore: release v$NEW_VERSION [version bump]"
-            git push origin main
-            echo "committed=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Notify Slack - Failed
         if: ${{ failure() && needs.notify-approval-needed.outputs.slack_ts != '' }}
@@ -194,7 +188,7 @@ jobs:
     name: Release and publish
     needs: [version-bump, notify-approval-needed]
     runs-on: ubuntu-latest
-    if: always() && needs.version-bump.outputs.committed == 'true'
+    if: always() && needs.version-bump.outputs.commit-hash != ''
     permissions:
       contents: write
       id-token: write
@@ -250,9 +244,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.releaser.outputs.token }}
           NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
+          COMMIT_HASH: ${{ needs.version-bump.outputs.commit-hash }}
         run: |
-          git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
-          git push origin "$NEW_VERSION"
+          gh api "repos/${{ github.repository }}/git/refs" \
+            -f "ref=refs/tags/${NEW_VERSION}" \
+            -f "sha=${COMMIT_HASH}"
 
       - name: Create GitHub Release
         env:
