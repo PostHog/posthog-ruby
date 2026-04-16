@@ -125,6 +125,14 @@ jobs:
           NEW_VERSION: ${{ steps.apply-changesets.outputs.new-version }}
         run: ./scripts/bump-version.sh "$NEW_VERSION"
 
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
+        with:
+          ruby-version: ruby
+
+      - name: Update Gemfile.lock
+        run: bundle lock
+
       - name: Commit version bump
         id: commit-version-bump
         uses: planetscale/ghcommit-action@25309d8005ac7c3bcd61d3fe19b69e0fe47dbdde # v0.2.20
