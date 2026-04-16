@@ -193,19 +193,11 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - name: Get GitHub App token
-        id: releaser
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ secrets.GH_APP_POSTHOG_RUBY_RELEASER_APP_ID }}
-          private-key: ${{ secrets.GH_APP_POSTHOG_RUBY_RELEASER_PRIVATE_KEY }}
-
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.releaser.outputs.token }}
 
       - name: Configure Git
         run: |
@@ -242,17 +234,15 @@ jobs:
 
       - name: Tag repository
         env:
-          GH_TOKEN: ${{ steps.releaser.outputs.token }}
           NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
           COMMIT_HASH: ${{ needs.version-bump.outputs.commit-hash }}
         run: |
-          gh api "repos/${{ github.repository }}/git/refs" \
-            -f "ref=refs/tags/${NEW_VERSION}" \
-            -f "sha=${COMMIT_HASH}"
+          git tag -a "$NEW_VERSION" "$COMMIT_HASH" -m "$NEW_VERSION"
+          git push origin "$NEW_VERSION"
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ steps.releaser.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
         run: |
           gh release create "$NEW_VERSION" \
