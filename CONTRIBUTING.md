@@ -29,19 +29,14 @@ Thanks for your interest in improving the PostHog Ruby SDK.
    ruby example.rb
    ```
 
-## Testing
+## CI-aligned checks
 
-1. Run the full test suite:
+Run the same checks CI uses before opening a PR:
 
-   ```bash
-   bin/test
-   ```
-
-2. Run a specific test if needed:
-
-   ```bash
-   bin/test spec/posthog/client_spec.rb:26
-   ```
+```bash
+bundle exec rspec
+bundle exec rubocop
+```
 
 ## Rails package
 

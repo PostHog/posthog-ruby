@@ -4,13 +4,13 @@ This guide covers package-specific development for `posthog-rails`.
 
 For repository-level setup, see the root [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-## Development
+## CI-aligned checks
 
-Run the package tests from the repository root:
+Run the same checks CI uses before opening a PR:
 
 ```bash
-bundle install
 bundle exec rspec
+bundle exec rubocop
 ```
 
 ## Pull requests
