@@ -393,15 +393,9 @@ RSpec.configure do |config|
 end
 ```
 
-## Development
+## Contributing
 
-To run tests:
-
-```bash
-cd posthog-rails
-bundle install
-bundle exec rspec
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for package-specific development instructions.
 
 ## Architecture
 
@@ -445,10 +439,6 @@ Ensure you've set `personal_api_key`:
 ```ruby
 config.personal_api_key = ENV['POSTHOG_PERSONAL_API_KEY']
 ```
-
-## Contributing
-
-See the main [PostHog Ruby](../README.md) repository for contribution guidelines.
 
 ## License
 
