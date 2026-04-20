@@ -16,6 +16,7 @@ module PostHog
       allow(logger).to receive(:warn)
       allow(logger).to receive(:info)
       allow(logger).to receive(:debug)
+      allow(logger).to receive(:error)
     end
 
     describe '#initialize' do
@@ -35,6 +36,31 @@ module PostHog
         expect(PostHog::Transport).to receive(:new).with({ api_host: 'https://app.posthog.com',
                                                            skip_ssl_verification: true })
         expect { Client.new api_key: API_KEY, skip_ssl_verification: true }.to_not raise_error
+      end
+
+      it 'trims whitespace-sensitive options' do
+        client = Client.new(
+          api_key: " \n#{API_KEY}\t ",
+          personal_api_key: " \n\t ",
+          host: " \nhttps://eu.i.posthog.com/\t ",
+          test_mode: true
+        )
+
+        expect(client.instance_variable_get(:@api_key)).to eq(API_KEY)
+        expect(client.instance_variable_get(:@personal_api_key)).to be_nil
+        expect(client.instance_variable_get(:@feature_flags_poller).instance_variable_get(:@host)).to eq('https://eu.i.posthog.com/')
+      end
+
+      it 'defaults a blank host after trimming whitespace' do
+        client = Client.new(api_key: API_KEY, host: " \n\t ", test_mode: true)
+
+        expect(client.instance_variable_get(:@feature_flags_poller).instance_variable_get(:@host)).to eq('https://app.posthog.com')
+      end
+
+      it 'logs when the api_key is empty after trimming whitespace' do
+        Client.new(api_key: " \n\t ", test_mode: true)
+
+        expect(logger).to have_received(:error).with(include('api_key is empty after trimming whitespace'))
       end
 
       context 'singleton warning' do
