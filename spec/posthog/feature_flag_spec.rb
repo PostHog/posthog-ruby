@@ -6,7 +6,7 @@ require 'timecop'
 module PostHog
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
-  flags_endpoint = 'https://app.posthog.com/flags/?v=2'
+  flags_endpoint = 'https://us.i.posthog.com/flags/?v=2'
 
   describe 'local evaluation' do
     it 'evaluates person properties' do
@@ -38,7 +38,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # shouldn't call flags
@@ -89,7 +89,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # shouldn't call flags
@@ -177,7 +177,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -252,7 +252,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -373,7 +373,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -435,7 +435,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -495,7 +495,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -554,7 +554,7 @@ module PostHog
       # We don't go to `/flags` if local eval is enabled and the flag is not in list of all flag definitions
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -573,7 +573,7 @@ module PostHog
       # TRICKY: Pretty hard to simulate a timeout using sleep with WebMock, so we'll just raise an error
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_raise(Net::ReadTimeout)
 
       stub_request(:post, flags_endpoint)
@@ -620,7 +620,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -686,7 +686,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -758,7 +758,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -780,7 +780,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -832,7 +832,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -883,7 +883,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -933,7 +933,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res_updated.to_json)
 
       # force reload to simulate poll interval
@@ -978,7 +978,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -1037,7 +1037,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -1088,7 +1088,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -1150,7 +1150,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint).to_return(status: 400)
@@ -2039,7 +2039,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # shouldn't call `/flags`
@@ -3086,7 +3086,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # shouldn't call `/flags`
@@ -4174,7 +4174,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => flag_res }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4193,7 +4193,7 @@ module PostHog
     it 'get all flags and payloads with fallback and empty local flags' do
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [] }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4270,7 +4270,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => flag_res }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4326,7 +4326,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [basic_flag, disabled_flag] }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4366,7 +4366,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [basic_flag_res] }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4387,7 +4387,7 @@ module PostHog
     it 'evaluates boolean feature flags with `/flags`' do
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [] }.to_json)
       stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: { 'featureFlags' => {},
@@ -4436,7 +4436,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { flags: [multivariate_flag] }.to_json)
       stub_request(:post, flags_endpoint)
         .to_return(status: 200, body: { featureFlagPayloads: { 'first-variant' => { b: 'json' } } }.to_json)
@@ -4468,11 +4468,11 @@ module PostHog
       mock_decrypted_payload = '"super secret payload in plaintext"'
       stub_request(
         :get,
-        "https://app.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config?token=testsecret"
+        "https://us.i.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config?token=testsecret"
       ).to_return(status: 200, body: mock_decrypted_payload)
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { flags: [] }.to_json)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
@@ -4506,7 +4506,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => flag_res }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4556,7 +4556,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4568,7 +4568,7 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 400, body: { 'error' => 'went_wrong!' }.to_json)
 
       # force reload to simulate poll interval
@@ -4609,17 +4609,17 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # Add the exact stub for the `/flags` endpoint as recommended in the error
-      stub_request(:post, 'https://app.posthog.com/flags/?v=2').with(
+      stub_request(:post, 'https://us.i.posthog.com/flags/?v=2').with(
         body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"distinct_id":"distinct_id","region":"USA"},"group_properties":{},"token":"testsecret"}', # rubocop:disable Layout/LineLength
         headers: {
           'Accept' => '*/*',
           'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
           'Content-Type' => 'application/json',
-          'Host' => 'app.posthog.com',
+          'Host' => 'us.i.posthog.com',
           'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
         }
       ).to_return(status: 200, body: '{"featureFlags": {}}', headers: {})
@@ -4632,7 +4632,7 @@ module PostHog
       # Now simulate quota limit with 402 response
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 402, body: { error: 'quota_limit_exceeded' }.to_json)
 
       # Force reload to simulate poll interval
@@ -4692,11 +4692,11 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # Mock API response - user is in the static cohort
-      stub_request(:post, 'https://app.posthog.com/flags/?v=2')
+      stub_request(:post, 'https://us.i.posthog.com/flags/?v=2')
         .to_return(status: 200, body: {
           'featureFlags' => { 'multi-condition-flag' => 'set-1' }
         }.to_json)
@@ -4749,11 +4749,11 @@ module PostHog
 
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       # Mock API response - user is in the static cohort
-      stub_request(:post, 'https://app.posthog.com/flags/?v=2')
+      stub_request(:post, 'https://us.i.posthog.com/flags/?v=2')
         .to_return(status: 200, body: {
           'featureFlags' => { 'multi-condition-flag' => 'variant-1' },
           'featureFlagPayloads' => { 'multi-condition-flag' => '{"message": "from-api"}' }
@@ -4773,7 +4773,7 @@ module PostHog
   end
 
   describe 'get_feature_flag_result' do
-    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
+    let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
 
     it 'returns a FeatureFlagResult with flag value and payload' do
       api_feature_flag_res = {
@@ -4792,7 +4792,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint).to_return(status: 400)
@@ -4827,7 +4827,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [multivariate_flag] }.to_json)
 
       stub_request(:post, flags_endpoint).to_return(status: 400)
@@ -4861,7 +4861,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint).to_return(status: 400)
@@ -4895,7 +4895,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint).to_return(status: 400)
@@ -4926,7 +4926,7 @@ module PostHog
       }
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
       stub_request(:post, flags_endpoint).to_return(status: 400)
@@ -4949,7 +4949,7 @@ module PostHog
     it 'returns nil when flag evaluation returns nil' do
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [] }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4965,7 +4965,7 @@ module PostHog
     it 'falls back to remote evaluation when needed' do
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [] }.to_json)
 
       stub_request(:post, flags_endpoint)
@@ -4994,7 +4994,7 @@ module PostHog
     it 'includes request_id and evaluated_at from remote evaluation in event' do
       stub_request(
         :get,
-        'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
       ).to_return(status: 200, body: { 'flags' => [] }.to_json)
 
       stub_request(:post, flags_endpoint)

@@ -59,7 +59,7 @@ module PostHog
     #   on the calling thread. Useful in forking environments like Sidekiq
     #   and Resque. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
-    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
+    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`
     # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes.
     #   Measured in seconds, defaults to 30.
     # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation.
@@ -74,7 +74,9 @@ module PostHog
     def initialize(opts = {})
       symbolize_keys!(opts)
 
-      opts[:host] ||= 'https://app.posthog.com'
+      opts[:api_key] = normalize_string_option(opts[:api_key])
+      opts[:personal_api_key] = normalize_string_option(opts[:personal_api_key], blank_as_nil: true)
+      opts[:host] = normalize_host_option(opts[:host])
 
       @queue = Queue.new
       @api_key = opts[:api_key]
@@ -102,6 +104,7 @@ module PostHog
       @personal_api_key = opts[:personal_api_key]
 
       check_api_key!
+      logger.error('api_key is empty after trimming whitespace; check your project API key') if @api_key == ''
 
       # Warn when multiple clients are created with the same API key (can cause dropped events)
       unless opts[:test_mode] || opts[:disable_singleton_warning]
@@ -583,6 +586,22 @@ module PostHog
     # private: Checks that the api_key is properly initialized
     def check_api_key!
       raise ArgumentError, 'API key must be initialized' if @api_key.nil?
+    end
+
+    def normalize_string_option(value, blank_as_nil: false)
+      return value unless value.is_a?(String)
+
+      normalized = value.strip
+      return nil if blank_as_nil && normalized.empty?
+
+      normalized
+    end
+
+    def normalize_host_option(host)
+      normalized = normalize_string_option(host)
+      return 'https://us.i.posthog.com' if normalized.nil? || normalized.empty?
+
+      normalized
     end
 
     def ensure_worker_running
