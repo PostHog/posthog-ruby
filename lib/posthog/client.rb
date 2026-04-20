@@ -59,7 +59,7 @@ module PostHog
     #   on the calling thread. Useful in forking environments like Sidekiq
     #   and Resque. Defaults to +false+.
     # @option opts [Proc] :on_error Handles error calls from the API.
-    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://app.posthog.com`
+    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`
     # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes.
     #   Measured in seconds, defaults to 30.
     # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation.
@@ -599,7 +599,7 @@ module PostHog
 
     def normalize_host_option(host)
       normalized = normalize_string_option(host)
-      return 'https://app.posthog.com' if normalized.nil? || normalized.empty?
+      return 'https://us.i.posthog.com' if normalized.nil? || normalized.empty?
 
       normalized
     end

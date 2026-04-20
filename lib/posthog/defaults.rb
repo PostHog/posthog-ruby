@@ -5,7 +5,7 @@ module PostHog
     MAX_HASH_SIZE = 50_000
 
     module Request
-      HOST = 'app.posthog.com'
+      HOST = 'us.i.posthog.com'
       PORT = 443
       PATH = '/batch/'
       SSL = true

@@ -5,8 +5,8 @@ require 'posthog/client'
 
 module PostHog
   describe 'FeatureFlagsPoller#get_flags' do
-    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
-    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
     let(:flags_v3_response) do
@@ -23,7 +23,7 @@ module PostHog
             'Accept' => '*/*',
             'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Authorization' => 'Bearer testsecret',
-            'Host' => 'app.posthog.com',
+            'Host' => 'us.i.posthog.com',
             'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
           }
         )
@@ -334,7 +334,7 @@ module PostHog
 
   describe 'Client#get_feature_flag' do
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: nil, test_mode: true) }
-    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
+    let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
     let(:flags_v4_response) do
       JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-flags-v4.json')), symbolize_names: true)
     end
@@ -365,8 +365,8 @@ module PostHog
   end
 
   describe 'FeatureFlagsPoller#get_remote_config_payload' do
-    let(:remote_config_endpoint) { 'https://app.posthog.com/api/projects/@current/feature_flags/test-flag/remote_config?token=testsecret' }
-    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:remote_config_endpoint) { 'https://us.i.posthog.com/api/projects/@current/feature_flags/test-flag/remote_config?token=testsecret' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -387,7 +387,7 @@ module PostHog
             'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Content-Type' => 'application/json',
             'Authorization' => 'Bearer personal_key',
-            'Host' => 'app.posthog.com',
+            'Host' => 'us.i.posthog.com',
             'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
           }
         )
@@ -680,7 +680,7 @@ module PostHog
     end
 
     describe 'integration with feature flags' do
-      let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+      let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
       let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
       let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -781,8 +781,8 @@ module PostHog
   end
 
   describe 'Flag dependencies' do
-    let(:flags_endpoint) { 'https://app.posthog.com/flags/?v=2' }
-    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -794,7 +794,7 @@ module PostHog
             'Accept' => '*/*',
             'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Authorization' => 'Bearer testsecret',
-            'Host' => 'app.posthog.com',
+            'Host' => 'us.i.posthog.com',
             'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
           }
         )
@@ -1529,7 +1529,7 @@ module PostHog
 
     before do
       # Stub the initial feature flag definitions request
-      stub_request(:get, 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true')
+      stub_request(:get, 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true')
         .to_return(status: 200, body: { flags: [] }.to_json)
     end
 
@@ -1621,7 +1621,7 @@ module PostHog
   end
 
   describe 'FeatureFlagsPoller ETag support' do
-    let(:feature_flag_endpoint) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 

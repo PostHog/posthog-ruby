@@ -85,7 +85,7 @@ module PostHog
 
   describe 'flag definition cache integration' do
     let(:provider) { MockCacheProvider.new }
-    let(:local_eval_url) { 'https://app.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:local_eval_url) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
 
     # Sample flag data with string keys (simulating JSON deserialization from cache)
     let(:sample_flags_data) do
