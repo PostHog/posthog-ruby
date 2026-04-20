@@ -1,3 +1,9 @@
+## 3.6.5
+
+### Patch Changes
+
+- 5546e4d: Trim whitespace from `api_key`, `personal_api_key`, and `host` config values, and default `host` to `https://us.i.posthog.com`.
+
 ## 3.6.4
 
 ### Patch Changes
