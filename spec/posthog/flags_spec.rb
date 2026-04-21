@@ -6,7 +6,7 @@ require 'posthog/client'
 module PostHog
   describe 'FeatureFlagsPoller#get_flags' do
     let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
-    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
     let(:flags_v3_response) do
@@ -366,7 +366,7 @@ module PostHog
 
   describe 'FeatureFlagsPoller#get_remote_config_payload' do
     let(:remote_config_endpoint) { 'https://us.i.posthog.com/api/projects/@current/feature_flags/test-flag/remote_config?token=testsecret' }
-    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -680,7 +680,7 @@ module PostHog
     end
 
     describe 'integration with feature flags' do
-      let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+      let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
       let(:client) { Client.new(api_key: 'testsecret', personal_api_key: 'personal_key', test_mode: true) }
       let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -782,7 +782,7 @@ module PostHog
 
   describe 'Flag dependencies' do
     let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
-    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 
@@ -1529,7 +1529,7 @@ module PostHog
 
     before do
       # Stub the initial feature flag definitions request
-      stub_request(:get, 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true')
+      stub_request(:get, 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true')
         .to_return(status: 200, body: { flags: [] }.to_json)
     end
 
@@ -1621,7 +1621,7 @@ module PostHog
   end
 
   describe 'FeatureFlagsPoller ETag support' do
-    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
     let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
 

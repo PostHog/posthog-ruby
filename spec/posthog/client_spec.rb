@@ -278,7 +278,7 @@ module PostHog
 
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_response.to_json)
@@ -323,7 +323,7 @@ module PostHog
 
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_response.to_json)
@@ -348,7 +348,7 @@ module PostHog
                                                'off-feature' => false } }
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: {}.to_json)
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_response.to_json)
@@ -373,7 +373,7 @@ module PostHog
 
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 401, body: { 'error' => 'not authorized' }.to_json)
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_response.to_json)
@@ -390,7 +390,7 @@ module PostHog
         expect(properties['$feature/beta-feature']).to eq('random-variant')
         expect(properties['$active_feature_flags']).to eq(['beta-feature'])
 
-        assert_not_requested :get, 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+        assert_not_requested :get, 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
       end
 
       it 'manages memory well when sending feature flags' do
@@ -414,7 +414,7 @@ module PostHog
         }
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         stub_const('PostHog::Defaults::MAX_HASH_SIZE', 10)
@@ -482,7 +482,7 @@ module PostHog
 
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         stub_const('PostHog::Defaults::MAX_HASH_SIZE', 10)
@@ -639,7 +639,7 @@ module PostHog
 
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_response.to_json)
@@ -677,7 +677,7 @@ module PostHog
 
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_response.to_json)
@@ -703,7 +703,7 @@ module PostHog
       it 'ignores feature flags with invalid send_feature_flags parameter' do
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: { flags: [] }.to_json)
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
@@ -741,7 +741,7 @@ module PostHog
         }
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # This should NOT be called because only_evaluate_locally is true
@@ -793,7 +793,7 @@ module PostHog
         }
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # This should NOT be called because only_evaluate_locally is true
@@ -844,7 +844,7 @@ module PostHog
         }
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # This SHOULD be called because only_evaluate_locally is explicitly false
@@ -1186,7 +1186,7 @@ module PostHog
         # Mock response for api/feature_flag
         stub_request(
           :get,
-          'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true'
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
         ).to_return(status: 200, body: api_feature_flag_res.to_json)
 
         # Mock response for `/flags`

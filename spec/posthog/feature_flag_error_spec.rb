@@ -5,7 +5,7 @@ require 'spec_helper'
 module PostHog
   describe 'Feature Flag Error Tracking' do
     let(:flags_endpoint) { 'https://us.i.posthog.com/flags/?v=2' }
-    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/api/feature_flag/local_evaluation?token=testsecret&send_cohorts=true' }
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
 
     before do
