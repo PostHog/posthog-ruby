@@ -105,7 +105,7 @@ class PostHog
       end
     end
 
-    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys: nil)
+    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil)
       request_data = {
         distinct_id: distinct_id,
         groups: groups,

@@ -337,8 +337,7 @@ class PostHog
       unless only_evaluate_locally
         begin
           flags_response = @feature_flags_poller.get_flags(
-            distinct_id, groups, person_properties, group_properties,
-            flag_keys: flag_keys
+            distinct_id, groups, person_properties, group_properties, flag_keys
           )
           request_id = flags_response[:requestId]
           evaluated_at = flags_response[:evaluatedAt]
