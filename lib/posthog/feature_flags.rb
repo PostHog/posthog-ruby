@@ -33,6 +33,7 @@ class PostHog
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
+      @flag_definitions_loaded_at = nil
       @task =
         Concurrent::TimerTask.new(
           execution_interval: polling_interval
@@ -54,6 +55,8 @@ class PostHog
 
       _load_feature_flags
     end
+
+    attr_reader :flag_definitions_loaded_at, :feature_flags_by_key
 
     def get_feature_variants(
       distinct_id,
@@ -102,13 +105,14 @@ class PostHog
       end
     end
 
-    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {})
+    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys: nil)
       request_data = {
         distinct_id: distinct_id,
         groups: groups,
         person_properties: person_properties,
         group_properties: group_properties
       }
+      request_data[:flag_keys_to_evaluate] = flag_keys if flag_keys && !flag_keys.empty?
 
       flags_response = _request_feature_flag_evaluation(request_data)
 
@@ -614,6 +618,7 @@ class PostHog
         @group_type_mapping = res[:group_type_mapping] || {}
 
         logger.debug "Loaded #{@feature_flags.length} feature flags"
+        @flag_definitions_loaded_at = (Time.now.to_f * 1000).to_i
         @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
       else
         logger.debug "Failed to load feature flags: #{res}"

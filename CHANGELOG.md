@@ -1,3 +1,7 @@
+## 2.10.0 – 2026-04-27
+
+1. Add `evaluate_flags(distinct_id, …)` returning a `FeatureFlagEvaluations` snapshot, and a `flags:` option on `capture` so a single `/flags` call can power both flag branching and event enrichment per request. The snapshot exposes `is_enabled`, `get_flag`, `get_flag_payload`, and `only_accessed` / `only([keys])` filter helpers; `flag_keys:` scopes the underlying `/flags` request itself. `is_enabled` and `get_flag` fire `$feature_flag_called` events with full metadata (`$feature_flag_id`, `$feature_flag_version`, `$feature_flag_reason`, `$feature_flag_request_id`), deduped through the existing per-distinct_id cache. The existing `is_feature_enabled`, `get_feature_flag`, `get_feature_flag_payload`, and `capture(send_feature_flags:)` continue to work unchanged; they will be deprecated in a follow-up minor.
+
 ## 2.9.0 – 2025-04-30
 
 1. Use new `/flags` service to power feature flag evaluation.
