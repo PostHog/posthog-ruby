@@ -886,7 +886,8 @@ module PostHog
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
       if aggregation_group_type_index.nil?
-        return match_feature_flag_properties(flag, distinct_id, person_properties, evaluation_cache, @cohorts)
+        return match_feature_flag_properties(flag, distinct_id, person_properties, evaluation_cache, @cohorts,
+                                             groups: groups, group_properties: group_properties)
       end
 
       group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
@@ -910,7 +911,7 @@ module PostHog
 
       focused_group_properties = group_properties[group_name_symbol]
       match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties, evaluation_cache,
-                                    @cohorts)
+                                    @cohorts, groups: groups, group_properties: group_properties)
     end
 
     def _compute_flag_payload_locally(key, match_value)
@@ -925,23 +926,57 @@ module PostHog
       response
     end
 
-    def match_feature_flag_properties(flag, distinct_id, properties, evaluation_cache, cohort_properties = {})
+    def match_feature_flag_properties(flag, distinct_id, properties, evaluation_cache, cohort_properties = {},
+                                      groups: {}, group_properties: {})
       flag_filters = flag[:filters] || {}
 
       flag_conditions = flag_filters[:groups] || []
+      flag_aggregation = flag_filters[:aggregation_group_type_index]
       is_inconclusive = false
       result = nil
 
       # NOTE: This NEEDS to be `each` because `each_key` breaks
       flag_conditions.each do |condition|
-        if condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties)
+        # Per-condition aggregation overrides only when the condition explicitly
+        # sets its own aggregation_group_type_index (mixed targeting). When absent,
+        # use the properties/bucketing already resolved by the caller.
+        condition_aggregation = condition.fetch(:aggregation_group_type_index, flag_aggregation)
+
+        effective_properties = properties
+        effective_bucketing = distinct_id
+
+        # Mixed-override path: condition-level aggregation differs from flag-level.
+        # This assumes flag-level aggregation is nil for mixed flags.
+        if condition_aggregation != flag_aggregation
+          if condition_aggregation.nil?
+            # Person condition under a mixed flag — caller already passed person props/bucketing.
+          else
+            group_name = @group_type_mapping[condition_aggregation.to_s.to_sym]
+            if group_name.nil? || !groups.key?(group_name.to_sym)
+              logger.debug do
+                "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
+                  "group type index #{condition_aggregation} not available"
+              end
+              next
+            end
+            unless group_properties.key?(group_name.to_sym)
+              is_inconclusive = true
+              next
+            end
+            effective_properties = group_properties[group_name.to_sym]
+            effective_bucketing = groups[group_name.to_sym]
+          end
+        end
+
+        if condition_match(flag, effective_bucketing, condition, effective_properties, evaluation_cache,
+                           cohort_properties)
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
           flag_variants = flag_multivariate[:variants] || []
           variant = if flag_variants.map { |variant| variant[:key] }.include?(condition[:variant])
                       variant_override
                     else
-                      get_matching_variant(flag, distinct_id)
+                      get_matching_variant(flag, effective_bucketing)
                     end
           result = variant || true
           break

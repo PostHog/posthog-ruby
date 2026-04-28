@@ -1164,6 +1164,131 @@ module PostHog
 
       assert_not_requested :post, flags_endpoint
     end
+
+    context 'mixed targeting' do
+      mixed_flag = {
+        'id' => 1,
+        'name' => 'Mixed Flag',
+        'key' => 'mixed-flag',
+        'active' => true,
+        'filters' => {
+          'aggregation_group_type_index' => nil,
+          'groups' => [
+            {
+              'aggregation_group_type_index' => 0,
+              'properties' => [{
+                'key' => 'plan', 'operator' => 'exact', 'value' => ['enterprise'],
+                'type' => 'group', 'group_type_index' => 0
+              }],
+              'rollout_percentage' => 100
+            },
+            {
+              'aggregation_group_type_index' => nil,
+              'properties' => [{
+                'key' => 'email', 'operator' => 'exact', 'value' => ['test@example.com'],
+                'type' => 'person'
+              }],
+              'rollout_percentage' => 100
+            }
+          ]
+        }
+      }
+      mixed_flag_response = { 'flags' => [mixed_flag], 'group_type_mapping' => { '0' => 'company' } }
+
+      only_group_flag = {
+        'id' => 2,
+        'name' => 'Only Group Flag',
+        'key' => 'only-group-flag',
+        'active' => true,
+        'filters' => {
+          'aggregation_group_type_index' => nil,
+          'groups' => [
+            {
+              'aggregation_group_type_index' => 0,
+              'properties' => [{
+                'key' => 'plan', 'operator' => 'exact', 'value' => ['enterprise'],
+                'type' => 'group', 'group_type_index' => 0
+              }],
+              'rollout_percentage' => 100
+            }
+          ]
+        }
+      }
+      only_group_response = { 'flags' => [only_group_flag], 'group_type_mapping' => { '0' => 'company' } }
+
+      [
+        { name: 'person condition matches when no groups passed',
+          flag_key: 'mixed-flag', response: mixed_flag_response,
+          opts: { person_properties: { 'email' => 'test@example.com' } },
+          expected: true },
+        { name: 'group condition matches when group props match',
+          flag_key: 'mixed-flag', response: mixed_flag_response,
+          opts: { groups: { 'company' => 'acme' },
+                  group_properties: { 'company' => { 'plan' => 'enterprise' } },
+                  person_properties: { 'email' => 'nope@example.com' } },
+          expected: true },
+        { name: 'no match when both person and group fail',
+          flag_key: 'mixed-flag', response: mixed_flag_response,
+          opts: { groups: { 'company' => 'acme' },
+                  group_properties: { 'company' => { 'plan' => 'free' } },
+                  person_properties: { 'email' => 'nope@example.com' } },
+          expected: false },
+        { name: 'only group conditions, no groups passed: returns false without /flags fallback',
+          flag_key: 'only-group-flag', response: only_group_response,
+          opts: {},
+          expected: false }
+      ].each do |tc|
+        it tc[:name] do
+          stub_request(
+            :get,
+            'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+          ).to_return(status: 200, body: tc[:response].to_json)
+          # Server fallback would return a different value if we ever reach it.
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: { 'featureFlags' => { tc[:flag_key] => 'server-fallback' } }.to_json)
+
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          expect(c.get_feature_flag(tc[:flag_key], 'test-distinct-id', **tc[:opts])).to eq(tc[:expected])
+          assert_not_requested :post, flags_endpoint
+        end
+      end
+
+      it 'rollout uses group bucketing for group conditions and resolves locally' do
+        rollout_flag = {
+          'id' => 3,
+          'name' => 'Rollout Flag',
+          'key' => 'rollout-flag',
+          'active' => true,
+          'filters' => {
+            'aggregation_group_type_index' => nil,
+            'groups' => [
+              {
+                'aggregation_group_type_index' => 0,
+                'properties' => [],
+                'rollout_percentage' => 100
+              }
+            ]
+          }
+        }
+        response = { 'flags' => [rollout_flag], 'group_type_mapping' => { '0' => 'company' } }
+
+        stub_request(
+          :get,
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+        ).to_return(status: 200, body: response.to_json)
+        stub_request(:post, flags_endpoint).to_return(status: 400)
+
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(c.get_feature_flag(
+                 'rollout-flag', 'any-distinct-id',
+                 groups: { 'company' => 'acme' },
+                 group_properties: { 'company' => {} }
+               )).to eq(true)
+        assert_not_requested :post, flags_endpoint
+      end
+    end
   end
 
   describe 'property matching' do
