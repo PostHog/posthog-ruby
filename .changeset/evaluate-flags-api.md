@@ -11,4 +11,4 @@ posthog.capture(distinct_id: "user-1", event: "checkout_started", flags: snapsho
 
 The snapshot exposes `is_enabled`, `get_flag`, `get_flag_payload`, plus `only_accessed` / `only([keys])` filter helpers. `flag_keys:` scopes the underlying `/flags` request itself. `is_enabled` and `get_flag` fire `$feature_flag_called` events with full metadata (`$feature_flag_id`, `$feature_flag_version`, `$feature_flag_reason`, `$feature_flag_request_id`), deduped through the existing per-distinct_id cache. `get_flag_payload` does not record access or fire an event.
 
-Existing `is_feature_enabled`, `get_feature_flag`, `get_feature_flag_result`, `get_feature_flag_payload`, and `capture(send_feature_flags:)` continue to work unchanged.
+Deprecates `is_feature_enabled`, `get_feature_flag`, `get_feature_flag_result`, `get_feature_flag_payload`, and `capture(send_feature_flags:)`. They continue to work unchanged but now emit a `DeprecationWarning` pointing at `evaluate_flags()`. Removal is planned for the next major version.

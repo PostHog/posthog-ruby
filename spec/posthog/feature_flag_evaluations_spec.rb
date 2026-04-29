@@ -42,6 +42,15 @@ module PostHog
       msgs
     end
 
+    def capture_stderr
+      original = $stderr
+      $stderr = StringIO.new
+      yield
+      $stderr.string
+    ensure
+      $stderr = original
+    end
+
     let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
 
     describe 'remote evaluation' do
@@ -138,15 +147,11 @@ module PostHog
         expect(filtered.keys).to eq(%w[boolean-flag])
       end
 
-      it 'only_accessed warns and falls back to all flags when nothing was accessed' do
-        warned = []
-        c = Client.new(api_key: API_KEY, test_mode: true)
-        allow(c.send(:logger)).to receive(:warn) { |m| warned << m }
+      it 'only_accessed returns an empty snapshot when nothing has been accessed' do
         stub_flags(flags_response)
-        snapshot = c.evaluate_flags('user-1')
+        snapshot = client.evaluate_flags('user-1')
         filtered = snapshot.only_accessed
-        expect(filtered.keys).to match_array(%w[variant-flag boolean-flag disabled-flag])
-        expect(warned.any? { |m| m.include?('only_accessed') }).to be(true)
+        expect(filtered.keys).to eq([])
       end
 
       it 'silences filter warnings when feature_flags_log_warnings: false' do
@@ -155,7 +160,7 @@ module PostHog
         allow(c.send(:logger)).to receive(:warn) { |m| warned << m }
         stub_flags(flags_response)
         snapshot = c.evaluate_flags('user-1')
-        snapshot.only_accessed
+        snapshot.only(%w[no-such-flag])
         expect(warned).to eq([])
       end
 
@@ -212,16 +217,114 @@ module PostHog
         expect(event[:properties]['$active_feature_flags']).to eq(%w[boolean-flag])
       end
 
-      it 'flags: takes precedence over send_feature_flags' do
+      it 'flags: takes precedence over send_feature_flags and warns' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
         WebMock.reset_executed_requests!
 
-        client.capture(
-          distinct_id: 'user-1', event: 'test-event',
-          flags: snapshot, send_feature_flags: true
-        )
+        warned = []
+        allow(client.send(:logger)).to receive(:warn) { |m| warned << m }
+        # Suppress the DeprecationWarning on send_feature_flags so we only assert the precedence warning
+        Kernel.silence_warnings do
+          client.capture(
+            distinct_id: 'user-1', event: 'test-event',
+            flags: snapshot, send_feature_flags: true
+          )
+        end
         expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+        expect(warned.any? { |m| m.include?('Both `flags` and `send_feature_flags`') }).to be(true)
+      end
+
+      it 'capture_exception forwards flags: to the inner capture' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+
+        begin
+          raise 'boom'
+        rescue StandardError => e
+          client.capture_exception(e, 'user-1', flags: snapshot)
+        end
+        msgs = drain_messages(client)
+        event = msgs.find { |m| m[:event] == '$exception' }
+        expect(event).not_to be_nil
+        expect(event[:properties]['$feature/variant-flag']).to eq('variant-value')
+        expect(event[:properties]['$active_feature_flags']).to eq(%w[boolean-flag variant-flag])
+      end
+    end
+
+    describe 'response-level errors' do
+      it 'combines errorsWhileComputingFlags with flag_missing on $feature_flag_error' do
+        stub_flags(flags_response.merge(errorsWhileComputingFlags: true))
+        snapshot = client.evaluate_flags('user-1')
+
+        snapshot.is_enabled('boolean-flag')
+        snapshot.is_enabled('missing-flag')
+        msgs = drain_messages(client).select { |m| m[:event] == '$feature_flag_called' }
+        by_key = msgs.to_h { |m| [m[:properties]['$feature_flag'], m[:properties]] }
+
+        expect(by_key['boolean-flag']['$feature_flag_error']).to eq('errors_while_computing_flags')
+        expect(by_key['missing-flag']['$feature_flag_error']).to eq('errors_while_computing_flags,flag_missing')
+      end
+
+      it 'tags quota_limited from response' do
+        stub_flags(flags_response.merge(quotaLimited: ['feature_flags']))
+        snapshot = client.evaluate_flags('user-1')
+        snapshot.is_enabled('boolean-flag')
+        msg = drain_messages(client).find { |m| m[:event] == '$feature_flag_called' }
+        expect(msg[:properties]['$feature_flag_error']).to eq('quota_limited')
+      end
+    end
+
+    describe 'Phase 2 deprecation warnings' do
+      around do |example|
+        original = Warning[:deprecated]
+        Warning[:deprecated] = true
+        example.run
+      ensure
+        Warning[:deprecated] = original
+      end
+
+      it 'is_feature_enabled emits a deprecation warning pointing at evaluate_flags' do
+        stub_flags(flags_response)
+        out = capture_stderr { client.is_feature_enabled('boolean-flag', 'user-1') }
+        expect(out).to include('is_feature_enabled')
+        expect(out).to include('evaluate_flags')
+      end
+
+      it 'get_feature_flag emits a deprecation warning' do
+        stub_flags(flags_response)
+        out = capture_stderr { client.get_feature_flag('boolean-flag', 'user-1') }
+        expect(out).to include('get_feature_flag')
+        expect(out).to include('evaluate_flags')
+      end
+
+      it 'get_feature_flag_result emits a deprecation warning' do
+        stub_flags(flags_response)
+        out = capture_stderr { client.get_feature_flag_result('boolean-flag', 'user-1') }
+        expect(out).to include('get_feature_flag_result')
+      end
+
+      it 'get_feature_flag_payload emits a deprecation warning' do
+        stub_flags(flags_response)
+        out = capture_stderr { client.get_feature_flag_payload('boolean-flag', 'user-1') }
+        expect(out).to include('get_feature_flag_payload')
+      end
+
+      it 'capture(send_feature_flags:) emits a deprecation warning' do
+        stub_flags(flags_response)
+        out = capture_stderr do
+          client.capture(distinct_id: 'user-1', event: 'test', send_feature_flags: true)
+        end
+        expect(out).to include('send_feature_flags')
+        expect(out).to include('evaluate_flags')
+      end
+
+      it 'is_feature_enabled emits exactly one deprecation warning per call (no cascade)' do
+        stub_flags(flags_response)
+        out = capture_stderr { client.is_feature_enabled('boolean-flag', 'user-1') }
+        # Count occurrences of the deprecation lead phrase
+        count = out.scan('is deprecated and will be removed').length
+        expect(count).to eq(1)
       end
     end
 

@@ -30,6 +30,8 @@ module PostHog
       request_id: nil,
       evaluated_at: nil,
       flag_definitions_loaded_at: nil,
+      errors_while_computing: false,
+      quota_limited: false,
       accessed: nil
     )
       @host = host
@@ -40,6 +42,8 @@ module PostHog
       @request_id = request_id
       @evaluated_at = evaluated_at
       @flag_definitions_loaded_at = flag_definitions_loaded_at
+      @errors_while_computing = errors_while_computing
+      @quota_limited = quota_limited
       @accessed = Set.new(accessed || [])
     end
 
@@ -75,17 +79,11 @@ module PostHog
       flag&.payload
     end
 
+    # Order-dependent: if nothing has been accessed yet, the returned snapshot is
+    # empty. The method honors its name — pre-access flags before calling this if
+    # you want a populated result.
     def only_accessed
-      if @accessed.empty?
-        @host.log_warning.call(
-          'FeatureFlagEvaluations#only_accessed was called before any flags were accessed — ' \
-          'attaching all evaluated flags as a fallback. ' \
-          'See https://posthog.com/docs/feature-flags/server-sdks for details.'
-        )
-        return _clone_with(@flags)
-      end
-      filtered = @flags.slice(*@accessed)
-      _clone_with(filtered)
+      _clone_with(@flags.slice(*@accessed))
     end
 
     def only(keys)
@@ -139,7 +137,12 @@ module PostHog
 
       properties['$feature_flag_request_id'] = @request_id if @request_id
       properties['$feature_flag_evaluated_at'] = @evaluated_at if @evaluated_at && !(flag && flag.locally_evaluated)
-      properties['$feature_flag_error'] = 'flag_missing' if flag.nil?
+
+      errors = []
+      errors << 'errors_while_computing_flags' if @errors_while_computing
+      errors << 'quota_limited' if @quota_limited
+      errors << 'flag_missing' if flag.nil?
+      properties['$feature_flag_error'] = errors.join(',') unless errors.empty?
 
       @host.capture_flag_called_event_if_needed.call(
         distinct_id: @distinct_id,
@@ -161,6 +164,8 @@ module PostHog
         request_id: @request_id,
         evaluated_at: @evaluated_at,
         flag_definitions_loaded_at: @flag_definitions_loaded_at,
+        errors_while_computing: @errors_while_computing,
+        quota_limited: @quota_limited,
         accessed: @accessed.dup
       )
     end
