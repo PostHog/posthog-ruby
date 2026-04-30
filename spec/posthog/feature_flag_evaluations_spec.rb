@@ -69,11 +69,11 @@ module PostHog
         expect(msgs.any? { |m| m[:event] == '$feature_flag_called' }).to be(false)
       end
 
-      it 'is_enabled fires the event with full metadata on first access and dedupes on second' do
+      it 'enabled? fires the event with full metadata on first access and dedupes on second' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
 
-        expect(snapshot.is_enabled('boolean-flag')).to be(true)
+        expect(snapshot.enabled?('boolean-flag')).to be(true)
         msgs = drain_messages(client)
         event = msgs.find { |m| m[:event] == '$feature_flag_called' }
         expect(event).not_to be_nil
@@ -85,7 +85,7 @@ module PostHog
         expect(event[:properties]['$feature_flag_request_id']).to eq('request-id-1')
         expect(event[:properties]['locally_evaluated']).to be(false)
 
-        snapshot.is_enabled('boolean-flag')
+        snapshot.enabled?('boolean-flag')
         msgs = drain_messages(client)
         expect(msgs.any? { |m| m[:event] == '$feature_flag_called' }).to be(false)
       end
@@ -104,10 +104,40 @@ module PostHog
         expect(unknown[:properties]['$feature_flag_error']).to eq('flag_missing')
       end
 
-      it 'is_enabled returns false for unknown flags' do
+      it 'enabled? returns false for unknown flags' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
-        expect(snapshot.is_enabled('not-a-flag')).to be(false)
+        expect(snapshot.enabled?('not-a-flag')).to be(false)
+      end
+
+      it 'enabled? and get_flag on a variant flag dedupe to a single event with the variant response' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+
+        expect(snapshot.enabled?('variant-flag')).to be(true)
+        expect(snapshot.get_flag('variant-flag')).to eq('variant-value')
+
+        msgs = drain_messages(client).select do |m|
+          m[:event] == '$feature_flag_called' && m[:properties]['$feature_flag'] == 'variant-flag'
+        end
+        expect(msgs.length).to eq(1)
+        expect(msgs.first[:properties]['$feature_flag_response']).to eq('variant-value')
+        expect(msgs.first[:properties]['$feature/variant-flag']).to eq('variant-value')
+      end
+
+      it 'enabled? and get_flag on a missing flag dedupe to a single event' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+
+        snapshot.enabled?('not-a-flag')
+        snapshot.get_flag('not-a-flag')
+
+        msgs = drain_messages(client).select do |m|
+          m[:event] == '$feature_flag_called' && m[:properties]['$feature_flag'] == 'not-a-flag'
+        end
+        expect(msgs.length).to eq(1)
+        expect(msgs.first[:properties]['$feature_flag_response']).to be_nil
+        expect(msgs.first[:properties]['$feature_flag_error']).to eq('flag_missing')
       end
 
       it 'get_flag_payload does not fire an event' do
@@ -131,7 +161,7 @@ module PostHog
         snapshot = client.evaluate_flags('')
         expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
         expect(snapshot.keys).to eq([])
-        expect(snapshot.is_enabled('anything')).to be(false)
+        expect(snapshot.enabled?('anything')).to be(false)
         expect(snapshot.get_flag('anything')).to be_nil
         msgs = drain_messages(client)
         expect(msgs.any? { |m| m[:event] == '$feature_flag_called' }).to be(false)
@@ -142,7 +172,7 @@ module PostHog
       it 'only_accessed returns a snapshot with just the accessed flags' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
-        snapshot.is_enabled('boolean-flag')
+        snapshot.enabled?('boolean-flag')
         filtered = snapshot.only_accessed
         expect(filtered.keys).to eq(%w[boolean-flag])
       end
@@ -152,16 +182,6 @@ module PostHog
         snapshot = client.evaluate_flags('user-1')
         filtered = snapshot.only_accessed
         expect(filtered.keys).to eq([])
-      end
-
-      it 'silences filter warnings when feature_flags_log_warnings: false' do
-        warned = []
-        c = Client.new(api_key: API_KEY, test_mode: true, feature_flags_log_warnings: false)
-        allow(c.send(:logger)).to receive(:warn) { |m| warned << m }
-        stub_flags(flags_response)
-        snapshot = c.evaluate_flags('user-1')
-        snapshot.only(%w[no-such-flag])
-        expect(warned).to eq([])
       end
 
       it 'only(keys) drops unknown keys with a warning' do
@@ -178,9 +198,9 @@ module PostHog
       it 'filtered snapshots do not back-propagate access to the parent' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
-        snapshot.is_enabled('boolean-flag')
+        snapshot.enabled?('boolean-flag')
         filtered = snapshot.only_accessed
-        filtered.is_enabled('variant-flag')
+        filtered.enabled?('variant-flag')
         reaccessed = snapshot.only_accessed
         expect(reaccessed.keys).to eq(%w[boolean-flag])
       end
@@ -207,7 +227,7 @@ module PostHog
       it 'capture(flags: snapshot.only_accessed) attaches only accessed flags' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
-        snapshot.is_enabled('boolean-flag')
+        snapshot.enabled?('boolean-flag')
 
         client.capture(distinct_id: 'user-1', event: 'test-event', flags: snapshot.only_accessed)
         msgs = drain_messages(client)
@@ -235,6 +255,20 @@ module PostHog
         expect(warned.any? { |m| m.include?('Both `flags` and `send_feature_flags`') }).to be(true)
       end
 
+      it 'logs and ignores flags: when given a non-snapshot value (no NoMethodError)' do
+        warned = []
+        allow(client.send(:logger)).to receive(:warn) { |m| warned << m }
+
+        expect do
+          client.capture(distinct_id: 'user-1', event: 'test-event', flags: 'not-a-snapshot')
+        end.not_to raise_error
+        msgs = drain_messages(client)
+        event = msgs.find { |m| m[:event] == 'test-event' }
+        expect(event).not_to be_nil
+        expect(event[:properties].keys.grep(%r{^\$feature/})).to be_empty
+        expect(warned.any? { |m| m.include?('expects a PostHog::FeatureFlagEvaluations snapshot') }).to be(true)
+      end
+
       it 'capture_exception forwards flags: to the inner capture' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
@@ -257,8 +291,8 @@ module PostHog
         stub_flags(flags_response.merge(errorsWhileComputingFlags: true))
         snapshot = client.evaluate_flags('user-1')
 
-        snapshot.is_enabled('boolean-flag')
-        snapshot.is_enabled('missing-flag')
+        snapshot.enabled?('boolean-flag')
+        snapshot.enabled?('missing-flag')
         msgs = drain_messages(client).select { |m| m[:event] == '$feature_flag_called' }
         by_key = msgs.to_h { |m| [m[:properties]['$feature_flag'], m[:properties]] }
 
@@ -269,21 +303,13 @@ module PostHog
       it 'tags quota_limited from response' do
         stub_flags(flags_response.merge(quotaLimited: ['feature_flags']))
         snapshot = client.evaluate_flags('user-1')
-        snapshot.is_enabled('boolean-flag')
+        snapshot.enabled?('boolean-flag')
         msg = drain_messages(client).find { |m| m[:event] == '$feature_flag_called' }
         expect(msg[:properties]['$feature_flag_error']).to eq('quota_limited')
       end
     end
 
     describe 'Phase 2 deprecation warnings' do
-      around do |example|
-        original = Warning[:deprecated]
-        Warning[:deprecated] = true
-        example.run
-      ensure
-        Warning[:deprecated] = original
-      end
-
       it 'is_feature_enabled emits a deprecation warning pointing at evaluate_flags' do
         stub_flags(flags_response)
         out = capture_stderr { client.is_feature_enabled('boolean-flag', 'user-1') }
@@ -326,6 +352,16 @@ module PostHog
         count = out.scan('is deprecated and will be removed').length
         expect(count).to eq(1)
       end
+
+      it 'emits each deprecation warning at most once per client (suppresses repeats)' do
+        stub_flags(flags_response)
+        c = Client.new(api_key: API_KEY, test_mode: true)
+        out = capture_stderr do
+          5.times { c.is_feature_enabled('boolean-flag', "user-#{rand(1000)}") }
+        end
+        count = out.scan('`is_feature_enabled` is deprecated').length
+        expect(count).to eq(1)
+      end
     end
 
     describe 'local evaluation' do
@@ -347,7 +383,7 @@ module PostHog
         snapshot = c.evaluate_flags('user-1', only_evaluate_locally: true)
 
         expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
-        expect(snapshot.is_enabled('local-flag')).to be(true)
+        expect(snapshot.enabled?('local-flag')).to be(true)
 
         msgs = drain_messages(c).select { |m| m[:event] == '$feature_flag_called' }
         event = msgs.find { |m| m[:properties]['$feature_flag'] == 'local-flag' }
@@ -356,6 +392,41 @@ module PostHog
         expect(event[:properties]['$feature_flag_reason']).to eq('Evaluated locally')
         expect(event[:properties]['$feature_flag_id']).to eq(99)
         expect(event[:properties]['$feature_flag_definitions_loaded_at']).to be_a(Integer)
+      end
+
+      it 'skips the remote /flags call when flag_keys are all resolved locally' do
+        stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
+          .to_return(status: 200, body: local_definitions.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        c.evaluate_flags('user-1', flag_keys: %w[local-flag])
+        expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+      end
+
+      it 'still hits /flags when flag_keys is not provided (server may have unknown flags)' do
+        stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
+          .to_return(status: 200, body: local_definitions.to_json)
+        stub_flags(flags_response)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        c.evaluate_flags('user-1')
+        expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
+      end
+    end
+
+    describe 'disable_geoip' do
+      it 'forwards disable_geoip: as geoip_disable in the /flags request body' do
+        stub_flags(flags_response)
+        client.evaluate_flags('user-1', disable_geoip: true)
+        expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).with(
+          body: hash_including(geoip_disable: true)
+        )
+      end
+    end
+
+    describe 'payload normalization' do
+      it 'parses JSON-encoded payloads from the /flags response' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+        expect(snapshot.get_flag_payload('variant-flag')).to eq('key' => 'value')
       end
     end
   end

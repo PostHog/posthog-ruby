@@ -51,27 +51,18 @@ module PostHog
       @flags.keys
     end
 
-    def is_enabled(key) # rubocop:disable Naming/PredicateName
+    def enabled?(key)
       key = key.to_s
       flag = @flags[key]
-      response = flag&.enabled ? true : false
-      _record_access(key, flag, response)
-      response
+      _record_access(key, flag)
+      flag&.enabled ? true : false
     end
 
     def get_flag(key)
       key = key.to_s
       flag = @flags[key]
-      response =
-        if flag.nil?
-          nil
-        elsif flag.variant
-          flag.variant
-        else
-          flag.enabled ? true : false
-        end
-      _record_access(key, flag, response)
-      response
+      _record_access(key, flag)
+      _flag_value(flag)
     end
 
     def get_flag_payload(key)
@@ -114,10 +105,23 @@ module PostHog
 
     private
 
-    def _record_access(key, flag, response)
+    # Canonical "stored" value for a flag — used for both the
+    # `$feature_flag_response` event property and the dedup cache key, so
+    # `enabled?` and `get_flag` collapse to a single exposure per flag.
+    # Variant string when present, else boolean enabled status; `nil` for
+    # unknown flags.
+    def _flag_value(flag)
+      return nil if flag.nil?
+      return flag.variant if flag.variant
+
+      flag.enabled ? true : false
+    end
+
+    def _record_access(key, flag)
       @accessed.add(key)
       return if @distinct_id.nil? || @distinct_id.to_s.empty?
 
+      response = _flag_value(flag)
       properties = {
         '$feature_flag' => key,
         '$feature_flag_response' => response,

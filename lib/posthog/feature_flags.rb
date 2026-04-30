@@ -123,7 +123,8 @@ module PostHog
       end
     end
 
-    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil)
+    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil,
+                  disable_geoip = nil)
       request_data = {
         distinct_id: distinct_id,
         groups: groups,
@@ -131,6 +132,7 @@ module PostHog
         group_properties: group_properties
       }
       request_data[:flag_keys_to_evaluate] = flag_keys if flag_keys && !flag_keys.empty?
+      request_data[:geoip_disable] = true if disable_geoip
 
       flags_response = _request_feature_flag_evaluation(request_data)
 
