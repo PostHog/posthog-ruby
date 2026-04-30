@@ -1347,6 +1347,31 @@ module PostHog
         expect(message[:distinct_id].length).to eq(36)
         expect(message[:properties]['$process_person_profile']).to be false
       end
+
+      it 'captures exception via kwargs with $exception_fingerprint' do
+        begin
+          raise StandardError, 'Test exception'
+        rescue StandardError => e
+          client.capture_exception(
+            e,
+            distinct_id: 'user-123',
+            properties: {
+              '$exception_fingerprint' => 'CustomExceptionGroup',
+              'user_agent' => 'Test Agent'
+            }
+          )
+        end
+
+        message = client.dequeue_last_message
+
+        expect(message[:event]).to eq('$exception')
+        expect(message[:distinct_id]).to eq('user-123')
+        expect(message[:properties]['$exception_list'].first['type']).to eq('StandardError')
+        expect(message[:properties]['$exception_list'].first['value']).to eq('Test exception')
+        expect(message[:properties]['$exception_fingerprint']).to eq('CustomExceptionGroup')
+        expect(message[:properties]['user_agent']).to eq('Test Agent')
+        expect(message[:properties]).not_to have_key('$process_person_profile')
+      end
     end
 
     context 'common' do

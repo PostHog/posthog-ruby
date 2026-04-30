@@ -131,9 +131,16 @@ PostHog.identify(
 # Track an exception manually
 PostHog.capture_exception(
   exception,
-  current_user.id,
-  { custom_property: 'value' }
+  distinct_id: current_user.id,
+  properties: {
+    custom_property: 'value',
+    # Override exception grouping by setting a fingerprint
+    '$exception_fingerprint' => 'CustomExceptionGroup'
+  }
 )
+
+# The positional form is still supported:
+# PostHog.capture_exception(exception, current_user.id, { custom_property: 'value' })
 ```
 
 ### Background Jobs
