@@ -80,11 +80,12 @@ module PostHog
 
       @queue = Queue.new
       @api_key = opts[:api_key]
+      @disabled = @api_key.nil? || (@api_key.respond_to?(:empty?) && @api_key.empty?)
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
-      @sync_mode = opts[:sync_mode] == true && !opts[:test_mode]
+      @sync_mode = opts[:sync_mode] == true && !opts[:test_mode] && !@disabled
       @on_error = opts[:on_error] || proc { |status, error| }
-      @worker = if opts[:test_mode]
+      @worker = if opts[:test_mode] || @disabled
                   NoopWorker.new(@queue)
                 elsif @sync_mode
                   nil
@@ -103,11 +104,10 @@ module PostHog
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
 
-      check_api_key!
       logger.error('api_key is empty after trimming whitespace; check your project API key') if @api_key == ''
 
       # Warn when multiple clients are created with the same API key (can cause dropped events)
-      unless opts[:test_mode] || opts[:disable_singleton_warning]
+      unless @disabled || opts[:test_mode] || opts[:disable_singleton_warning]
         previous_count = self.class._increment_instance_count(@api_key)
         if previous_count >= 1
           logger.warn(
@@ -119,16 +119,18 @@ module PostHog
         end
       end
 
-      @feature_flags_poller =
-        FeatureFlagsPoller.new(
-          opts[:feature_flags_polling_interval],
-          opts[:personal_api_key],
-          @api_key,
-          opts[:host],
-          opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
-          opts[:on_error],
-          flag_definition_cache_provider: opts[:flag_definition_cache_provider]
-        )
+      unless @disabled
+        @feature_flags_poller =
+          FeatureFlagsPoller.new(
+            opts[:feature_flags_polling_interval],
+            opts[:personal_api_key],
+            @api_key,
+            opts[:host],
+            opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
+            opts[:on_error],
+            flag_definition_cache_provider: opts[:flag_definition_cache_provider]
+          )
+      end
 
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
         hash[key] = []
@@ -184,7 +186,7 @@ module PostHog
       symbolize_keys! attrs
 
       send_feature_flags_param = attrs[:send_feature_flags]
-      if send_feature_flags_param
+      if send_feature_flags_param && !@disabled
         # Handle different types of send_feature_flags parameter
         case send_feature_flags_param
         when true
@@ -320,6 +322,8 @@ module PostHog
     # @param [String] flag_key The unique flag key of the feature flag
     # @return [String] The decrypted value of the feature flag payload
     def get_remote_config_payload(flag_key)
+      return nil if @disabled
+
       @feature_flags_poller.get_remote_config_payload(flag_key)
     end
 
@@ -387,6 +391,8 @@ module PostHog
       only_evaluate_locally: false,
       send_feature_flag_events: true
     )
+      return nil if @disabled
+
       person_properties, group_properties = add_local_person_and_group_properties(
         distinct_id,
         groups,
@@ -441,6 +447,8 @@ module PostHog
       group_properties: {},
       only_evaluate_locally: false
     )
+      return {} if @disabled
+
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups,
                                                                                   person_properties, group_properties)
       @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties,
@@ -469,6 +477,8 @@ module PostHog
       group_properties: {},
       only_evaluate_locally: false
     )
+      return nil if @disabled
+
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups,
                                                                                   person_properties, group_properties)
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties,
@@ -494,6 +504,8 @@ module PostHog
       group_properties: {},
       only_evaluate_locally: false
     )
+      return { featureFlags: {}, featureFlagPayloads: {} } if @disabled
+
       person_properties, group_properties = add_local_person_and_group_properties(
         distinct_id, groups, person_properties, group_properties
       )
@@ -508,6 +520,8 @@ module PostHog
     end
 
     def reload_feature_flags
+      return if @disabled
+
       unless @personal_api_key
         logger.error(
           'You need to specify a personal_api_key to locally evaluate feature flags'
@@ -518,8 +532,8 @@ module PostHog
     end
 
     def shutdown
-      self.class._decrement_instance_count(@api_key) if @api_key
-      @feature_flags_poller.shutdown_poller
+      self.class._decrement_instance_count(@api_key) unless @disabled
+      @feature_flags_poller&.shutdown_poller
       flush
       if @sync_mode
         @sync_lock.synchronize { @transport&.shutdown }
@@ -557,6 +571,8 @@ module PostHog
     #
     # returns Boolean of whether the item was added to the queue.
     def enqueue(action)
+      return false if @disabled
+
       action = process_before_send(action)
       return false if action.nil? || action.empty?
 
