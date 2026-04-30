@@ -222,10 +222,21 @@ module PostHog
 
     # Captures an exception as an event
     #
+    # Supports both positional and keyword argument styles:
+    #   capture_exception(exception, 'user-123', { '$exception_fingerprint' => 'CustomGroup' })
+    #   capture_exception(exception, distinct_id: 'user-123', properties: { '$exception_fingerprint' => 'CustomGroup' })
+    #
     # @param [Exception, String, Object] exception The exception to capture, a string message, or exception-like object
     # @param [String] distinct_id The ID for the user (optional, defaults to a generated UUID)
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
-    def capture_exception(exception, distinct_id = nil, additional_properties = {})
+    # @param [Hash] kwargs Keyword form: :distinct_id, :properties
+    def capture_exception(exception, distinct_id = nil, additional_properties = nil, **kwargs)
+      unless kwargs.empty?
+        distinct_id = kwargs[:distinct_id] if distinct_id.nil?
+        additional_properties = kwargs[:properties] if additional_properties.nil?
+      end
+      additional_properties ||= {}
+
       exception_info = ExceptionCapture.build_parsed_exception(exception)
 
       return if exception_info.nil?
