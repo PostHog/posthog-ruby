@@ -20,8 +20,33 @@ module PostHog
     end
 
     describe '#initialize' do
-      it 'errors if no api_key is supplied' do
-        expect { Client.new }.to raise_error(ArgumentError)
+      it 'creates a disabled client if no api_key is supplied' do
+        client = nil
+
+        expect { client = Client.new }.to_not raise_error
+
+        expect(client.instance_variable_get(:@disabled)).to eq(true)
+        expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
+      end
+
+      it 'creates a disabled client if api_key is nil, empty, or blank after trimming' do
+        [{ api_key: nil }, { api_key: '' }, { api_key: " \n\t " }].each do |opts|
+          client = Client.new(opts)
+
+          expect(client.instance_variable_get(:@disabled)).to eq(true)
+          expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
+          expect(client.capture(Queued::CAPTURE)).to eq(false)
+          expect(client.queued_messages).to eq(0)
+        end
+      end
+
+      it 'does not start a sender or sync transport when api_key is nil, empty, or blank after trimming' do
+        expect(PostHog::SendWorker).not_to receive(:new)
+        expect(PostHog::Transport).not_to receive(:new)
+
+        [nil, '', " \n\t "].each do |api_key|
+          Client.new(api_key: api_key, sync_mode: true)
+        end
       end
 
       it 'does not error if a api_key is supplied' do
