@@ -11,6 +11,7 @@ require 'posthog/noop_worker'
 require 'posthog/message_batch'
 require 'posthog/transport'
 require 'posthog/feature_flags'
+require 'posthog/feature_flag_evaluations'
 require 'posthog/send_feature_flags_options'
 require 'posthog/exception_capture'
 
@@ -135,6 +136,7 @@ module PostHog
       end
 
       @before_send = opts[:before_send]
+      @deprecation_emitted_for = Concurrent::Set.new
     end
 
     # Synchronously waits until the worker has cleared the queue.
@@ -175,6 +177,10 @@ module PostHog
     # @option attrs [Hash] :properties Event properties (optional)
     # @option attrs [Bool, Hash, SendFeatureFlagsOptions] :send_feature_flags
     #   Whether to send feature flags with this event, or configuration for feature flag evaluation (optional)
+    # @option attrs [PostHog::FeatureFlagEvaluations] :flags A snapshot returned by
+    #   {#evaluate_flags}. When present, `$feature/<key>` and `$active_feature_flags` are
+    #   attached from the snapshot without making an additional /flags request, and this
+    #   takes precedence over `:send_feature_flags`.
     # @option attrs [String] :uuid ID that uniquely identifies an event;
     #                             events in PostHog are deduplicated by the
     #                             combination of teamId, timestamp date,
@@ -183,8 +189,39 @@ module PostHog
     def capture(attrs)
       symbolize_keys! attrs
 
+      # Precedence: an explicit `flags` snapshot always wins, regardless of
+      # `send_feature_flags`. The snapshot guarantees the event carries the same
+      # values the developer branched on with no additional network call.
+      if attrs[:flags]
+        if attrs[:flags].is_a?(FeatureFlagEvaluations)
+          if attrs[:send_feature_flags]
+            logger.warn(
+              '[FEATURE FLAGS] Both `flags` and `send_feature_flags` were passed to ' \
+              'capture(); using `flags` and ignoring `send_feature_flags`.'
+            )
+          end
+          snapshot_props = attrs[:flags]._get_event_properties
+          attrs[:properties] = snapshot_props.merge(attrs[:properties] || {})
+          attrs.delete(:flags)
+          attrs.delete(:send_feature_flags)
+        else
+          logger.warn(
+            '[FEATURE FLAGS] capture(flags:) expects a PostHog::FeatureFlagEvaluations snapshot ' \
+            "from `client.evaluate_flags(...)`; got #{attrs[:flags].class}. Ignoring."
+          )
+          attrs.delete(:flags)
+        end
+      end
+
       send_feature_flags_param = attrs[:send_feature_flags]
       if send_feature_flags_param
+        _emit_deprecation(
+          :capture_send_feature_flags,
+          '`send_feature_flags` on `capture` is deprecated and will be removed in a future major ' \
+          'version. Pass a `flags` snapshot from `client.evaluate_flags(...)` instead — it ' \
+          'avoids a second `/flags` request per capture and guarantees the event carries the ' \
+          'exact flag values your code branched on.'
+        )
         # Handle different types of send_feature_flags parameter
         case send_feature_flags_param
         when true
@@ -225,7 +262,10 @@ module PostHog
     # @param [Exception, String, Object] exception The exception to capture, a string message, or exception-like object
     # @param [String] distinct_id The ID for the user (optional, defaults to a generated UUID)
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
-    def capture_exception(exception, distinct_id = nil, additional_properties = {})
+    # @param [PostHog::FeatureFlagEvaluations] flags A snapshot returned by {#evaluate_flags}.
+    #   Forwarded to the inner {#capture} call so the captured `$exception` event carries the
+    #   same `$feature/<key>` and `$active_feature_flags` properties as the snapshot.
+    def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil)
       exception_info = ExceptionCapture.build_parsed_exception(exception)
 
       return if exception_info.nil?
@@ -243,6 +283,7 @@ module PostHog
         properties: properties,
         timestamp: Time.now
       }
+      event_data[:flags] = flags if flags
 
       capture(event_data)
     end
@@ -293,6 +334,7 @@ module PostHog
       @queue.length
     end
 
+    # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#is_enabled} instead.
     # TODO: In future version, rename to `feature_flag_enabled?`
     def is_feature_enabled( # rubocop:disable Naming/PredicateName
       flag_key,
@@ -303,15 +345,20 @@ module PostHog
       only_evaluate_locally: false,
       send_feature_flag_events: true
     )
-      response = get_feature_flag(
-        flag_key,
-        distinct_id,
-        groups: groups,
-        person_properties: person_properties,
-        group_properties: group_properties,
-        only_evaluate_locally: only_evaluate_locally,
-        send_feature_flag_events: send_feature_flag_events
+      _emit_deprecation(
+        :is_feature_enabled,
+        '`is_feature_enabled` is deprecated and will be removed in a future major version. ' \
+        'Use `client.evaluate_flags(distinct_id, ...)` and call `flags.enabled?(key)` instead — ' \
+        'this consolidates flag evaluation into a single `/flags` request per incoming request.'
       )
+      # Bypass the public `get_feature_flag` so the user only sees a single deprecation
+      # warning per call, not a cascade.
+      result = _get_feature_flag_result(
+        flag_key, distinct_id,
+        groups: groups, person_properties: person_properties, group_properties: group_properties,
+        only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events
+      )
+      response = result&.value
       return nil if response.nil?
 
       !!response
@@ -344,6 +391,7 @@ module PostHog
     # ```ruby
     #     group_properties: {"organization": {"name": "PostHog", "employees": 11}}
     # ```
+    # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#get_flag} instead.
     def get_feature_flag(
       key,
       distinct_id,
@@ -353,31 +401,23 @@ module PostHog
       only_evaluate_locally: false,
       send_feature_flag_events: true
     )
-      result = get_feature_flag_result(
-        key,
-        distinct_id,
-        groups: groups,
-        person_properties: person_properties,
-        group_properties: group_properties,
-        only_evaluate_locally: only_evaluate_locally,
-        send_feature_flag_events: send_feature_flag_events
+      _emit_deprecation(
+        :get_feature_flag,
+        '`get_feature_flag` is deprecated and will be removed in a future major version. ' \
+        'Use `client.evaluate_flags(distinct_id, ...)` and call `flags.get_flag(key)` instead — ' \
+        'this consolidates flag evaluation into a single `/flags` request per incoming request.'
+      )
+      # Bypass the public `get_feature_flag_result` so the user only sees one deprecation warning.
+      result = _get_feature_flag_result(
+        key, distinct_id,
+        groups: groups, person_properties: person_properties, group_properties: group_properties,
+        only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events
       )
       result&.value
     end
 
-    # Returns both the feature flag value and payload in a single call.
-    # This method raises the $feature_flag_called event with the payload included.
-    #
-    # @param [String] key The key of the feature flag
-    # @param [String] distinct_id The distinct id of the user
-    # @param [Hash] groups
-    # @param [Hash] person_properties key-value pairs of properties to associate with the user.
-    # @param [Hash] group_properties
-    # @param [Boolean] only_evaluate_locally
-    # @param [Boolean] send_feature_flag_events
-    #
-    # @return [FeatureFlagResult, nil] A FeatureFlagResult object containing the flag value and payload,
-    #   or nil if the flag evaluation returned nil
+    # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#get_flag} /
+    #   {FeatureFlagEvaluations#get_flag_payload} instead.
     def get_feature_flag_result(
       key,
       distinct_id,
@@ -387,43 +427,149 @@ module PostHog
       only_evaluate_locally: false,
       send_feature_flag_events: true
     )
-      person_properties, group_properties = add_local_person_and_group_properties(
-        distinct_id,
-        groups,
-        person_properties,
-        group_properties
+      _emit_deprecation(
+        :get_feature_flag_result,
+        '`get_feature_flag_result` is deprecated and will be removed in a future major version. ' \
+        'Use `client.evaluate_flags(distinct_id, ...)` and call `flags.get_flag(key)` / ' \
+        '`flags.get_flag_payload(key)` instead — this consolidates flag evaluation into a single ' \
+        '`/flags` request per incoming request.'
       )
-      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload =
-        @feature_flags_poller.get_feature_flag(
-          key,
-          distinct_id,
-          groups,
-          person_properties,
-          group_properties,
-          only_evaluate_locally
-        )
-      feature_flag_reported_key = "#{key}_#{feature_flag_response}"
+      _get_feature_flag_result(
+        key, distinct_id,
+        groups: groups, person_properties: person_properties, group_properties: group_properties,
+        only_evaluate_locally: only_evaluate_locally, send_feature_flag_events: send_feature_flag_events
+      )
+    end
 
-      if !@distinct_id_has_sent_flag_calls[distinct_id].include?(feature_flag_reported_key) && send_feature_flag_events
-        properties = {
-          '$feature_flag' => key,
-          '$feature_flag_response' => feature_flag_response,
-          'locally_evaluated' => flag_was_locally_evaluated
-        }
-        properties['$feature_flag_request_id'] = request_id if request_id
-        properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at
-        properties['$feature_flag_error'] = feature_flag_error if feature_flag_error
+    # Evaluate feature flags for a distinct id and return a snapshot.
+    #
+    # The returned {PostHog::FeatureFlagEvaluations} can be queried with
+    # `is_enabled` / `get_flag` / `get_flag_payload`, narrowed with
+    # `only_accessed` / `only`, and passed to {#capture} via the `flags:` option
+    # to attach `$feature/<key>` and `$active_feature_flags` without an extra
+    # /flags request.
+    #
+    # @param [String] distinct_id The distinct id of the user
+    # @param [Hash] groups
+    # @param [Hash] person_properties key-value pairs of properties to associate with the user
+    # @param [Hash] group_properties
+    # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely
+    # @param [Boolean] disable_geoip Stamped on captured access events
+    # @param [Array<String>] flag_keys When set, scopes the underlying /flags
+    #   request to only these flag keys (sent as `flag_keys_to_evaluate`).
+    #   Distinct from {FeatureFlagEvaluations#only}, which filters the
+    #   already-fetched snapshot in memory.
+    # @return [PostHog::FeatureFlagEvaluations]
+    def evaluate_flags(
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false,
+      disable_geoip: nil,
+      flag_keys: nil
+    )
+      host = _feature_flag_evaluations_host
 
-        capture(
-          distinct_id: distinct_id,
-          event: '$feature_flag_called',
-          properties: properties,
-          groups: groups
-        )
-        @distinct_id_has_sent_flag_calls[distinct_id] << feature_flag_reported_key
+      if distinct_id.nil? || distinct_id.to_s.empty?
+        return FeatureFlagEvaluations.new(host: host, distinct_id: '', flags: {})
       end
 
-      FeatureFlagResult.from_value_and_payload(key, feature_flag_response, payload)
+      person_properties, group_properties = add_local_person_and_group_properties(
+        distinct_id, groups, person_properties, group_properties
+      )
+
+      records = {}
+      locally_evaluated_keys = Set.new
+      flag_keys_set = flag_keys&.to_set(&:to_s)
+
+      @feature_flags_poller.load_feature_flags
+      poller_flags_by_key = @feature_flags_poller.feature_flags_by_key || {}
+
+      poller_flags_by_key.each do |key, definition|
+        next if flag_keys_set && !flag_keys_set.include?(key.to_s)
+
+        begin
+          match = @feature_flags_poller.send(
+            :_compute_flag_locally,
+            definition, distinct_id, groups, person_properties, group_properties
+          )
+        rescue PostHog::RequiresServerEvaluation, PostHog::InconclusiveMatchError, StandardError
+          next
+        end
+
+        next if match.nil?
+
+        records[key.to_s] = FeatureFlagEvaluations::EvaluatedFlagRecord.new(
+          key: key.to_s,
+          enabled: match.is_a?(String) || (match ? true : false),
+          variant: match.is_a?(String) ? match : nil,
+          payload: FeatureFlagResult.parse_payload(
+            @feature_flags_poller.send(:_compute_flag_payload_locally, key, match)
+          ),
+          id: definition[:id],
+          version: nil,
+          reason: FeatureFlagEvaluations::EVALUATED_LOCALLY_REASON,
+          locally_evaluated: true
+        )
+        locally_evaluated_keys << key.to_s
+      end
+
+      request_id = nil
+      evaluated_at = nil
+      errors_while_computing = false
+      quota_limited = false
+
+      # Skip the remote `/flags` round-trip when the caller scoped the request
+      # to a fixed set of `flag_keys` and we've already resolved every one of
+      # them locally. Without `flag_keys` set, we can't know whether the server
+      # has flags we don't have definitions for, so we still hit `/flags`.
+      all_requested_flags_resolved_locally = flag_keys_set && (flag_keys_set - locally_evaluated_keys).empty?
+
+      if !only_evaluate_locally && !all_requested_flags_resolved_locally
+        begin
+          flags_response = @feature_flags_poller.get_flags(
+            distinct_id, groups, person_properties, group_properties, flag_keys, disable_geoip
+          )
+          request_id = flags_response[:requestId]
+          evaluated_at = flags_response[:evaluatedAt]
+          errors_while_computing = flags_response[:errorsWhileComputingFlags] == true
+          quota_limited = (flags_response[:quotaLimited] || []).include?('feature_flags')
+          remote_flags = flags_response[:flags] || {}
+          remote_flags.each do |key, ff|
+            key_str = key.to_s
+            next if locally_evaluated_keys.include?(key_str)
+
+            metadata = ff.metadata
+            reason = ff.reason
+            records[key_str] = FeatureFlagEvaluations::EvaluatedFlagRecord.new(
+              key: key_str,
+              enabled: ff.enabled ? true : false,
+              variant: ff.variant,
+              payload: FeatureFlagResult.parse_payload(ff.payload),
+              id: metadata ? metadata.id : nil,
+              version: metadata ? metadata.version : nil,
+              reason: reason ? (reason.description || reason.code) : nil,
+              locally_evaluated: false
+            )
+          end
+        rescue StandardError => e
+          @on_error&.call(-1, "Error evaluating flags remotely: #{e}")
+        end
+      end
+
+      FeatureFlagEvaluations.new(
+        host: host,
+        distinct_id: distinct_id,
+        flags: records,
+        groups: groups,
+        disable_geoip: disable_geoip,
+        request_id: request_id,
+        evaluated_at: evaluated_at,
+        flag_definitions_loaded_at: @feature_flags_poller.flag_definitions_loaded_at,
+        errors_while_computing: errors_while_computing,
+        quota_limited: quota_limited
+      )
     end
 
     # Returns all flags for a given user
@@ -460,6 +606,7 @@ module PostHog
     # @option [Hash] group_properties
     # @option [Boolean] only_evaluate_locally
     #
+    # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#get_flag_payload} instead.
     def get_feature_flag_payload(
       key,
       distinct_id,
@@ -469,6 +616,13 @@ module PostHog
       group_properties: {},
       only_evaluate_locally: false
     )
+      _emit_deprecation(
+        :get_feature_flag_payload,
+        '`get_feature_flag_payload` is deprecated and will be removed in a future major version. ' \
+        'Use `client.evaluate_flags(distinct_id, ...)` and call `flags.get_flag_payload(key)` ' \
+        'instead — this consolidates flag evaluation into a single `/flags` request per ' \
+        'incoming request.'
+      )
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups,
                                                                                   person_properties, group_properties)
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties,
@@ -529,6 +683,84 @@ module PostHog
     end
 
     private
+
+    # Shared by the legacy single-flag path ({#get_feature_flag_result}) and the
+    # snapshot's access-recording. Owns dedup-key construction, the
+    # per-distinct_id sent-flags cache, and the `$feature_flag_called` capture call.
+    def _capture_feature_flag_called_if_needed(
+      distinct_id: nil, key: nil, response: nil, properties: nil,
+      groups: nil, disable_geoip: nil
+    )
+      reported_key = "#{key}_#{response.nil? ? '::null::' : response}"
+      return if @distinct_id_has_sent_flag_calls[distinct_id].include?(reported_key)
+
+      msg = {
+        distinct_id: distinct_id,
+        event: '$feature_flag_called',
+        properties: properties
+      }
+      msg[:groups] = groups if groups
+      msg[:disable_geoip] = disable_geoip unless disable_geoip.nil?
+
+      capture(msg)
+      @distinct_id_has_sent_flag_calls[distinct_id] << reported_key
+    end
+
+    def _feature_flag_evaluations_host
+      @feature_flag_evaluations_host ||= FeatureFlagEvaluations::Host.new(
+        capture_flag_called_event_if_needed: method(:_capture_feature_flag_called_if_needed),
+        log_warning: ->(message) { logger.warn(message) }
+      )
+    end
+
+    # Implementation of {#get_feature_flag_result}, called by both the public
+    # method and the legacy `is_feature_enabled` / `get_feature_flag` paths so
+    # a single user-level call emits exactly one deprecation warning.
+    def _get_feature_flag_result(
+      key,
+      distinct_id,
+      groups: {},
+      person_properties: {},
+      group_properties: {},
+      only_evaluate_locally: false,
+      send_feature_flag_events: true
+    )
+      person_properties, group_properties = add_local_person_and_group_properties(
+        distinct_id, groups, person_properties, group_properties
+      )
+      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload =
+        @feature_flags_poller.get_feature_flag(
+          key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally
+        )
+      if send_feature_flag_events
+        properties = {
+          '$feature_flag' => key,
+          '$feature_flag_response' => feature_flag_response,
+          'locally_evaluated' => flag_was_locally_evaluated
+        }
+        properties['$feature_flag_request_id'] = request_id if request_id
+        properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at
+        properties['$feature_flag_error'] = feature_flag_error if feature_flag_error
+
+        _capture_feature_flag_called_if_needed(
+          distinct_id: distinct_id, key: key, response: feature_flag_response,
+          properties: properties, groups: groups
+        )
+      end
+
+      FeatureFlagResult.from_value_and_payload(key, feature_flag_response, payload)
+    end
+
+    # Emits a deprecation warning at most once per `(method_name, process)` pair.
+    # Ruby's `Kernel.warn(..., category: :deprecated)` is suppressed by default
+    # since 2.7.2; we emit without the category so messages reach users on a
+    # default Ruby setup. Standard logger configuration / `$VERBOSE = nil` / IO
+    # redirection still silences as expected.
+    def _emit_deprecation(method_name, message)
+      return unless @deprecation_emitted_for.add?(method_name)
+
+      Kernel.warn("[posthog-ruby] DEPRECATION: #{message}", uplevel: 2)
+    end
 
     # before_send should run immediately before the event is sent to the queue.
     # @param [Object] action The event to be sent to PostHog

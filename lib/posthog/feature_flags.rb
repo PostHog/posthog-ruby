@@ -46,6 +46,7 @@ module PostHog
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @flags_etag = Concurrent::AtomicReference.new(nil)
+      @flag_definitions_loaded_at = nil
 
       @flag_definition_cache_provider = flag_definition_cache_provider
       FlagDefinitionCacheProvider.validate!(@flag_definition_cache_provider) if @flag_definition_cache_provider
@@ -71,6 +72,8 @@ module PostHog
 
       _load_feature_flags
     end
+
+    attr_reader :flag_definitions_loaded_at, :feature_flags_by_key
 
     def get_feature_variants(
       distinct_id,
@@ -120,13 +123,16 @@ module PostHog
       end
     end
 
-    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {})
+    def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil,
+                  disable_geoip = nil)
       request_data = {
         distinct_id: distinct_id,
         groups: groups,
         person_properties: person_properties,
         group_properties: group_properties
       }
+      request_data[:flag_keys_to_evaluate] = flag_keys if flag_keys && !flag_keys.empty?
+      request_data[:geoip_disable] = true if disable_geoip
 
       flags_response = _request_feature_flag_evaluation(request_data)
 
@@ -1124,6 +1130,7 @@ module PostHog
       @cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
 
       logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
+      @flag_definitions_loaded_at = (Time.now.to_f * 1000).to_i
       @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
     end
 

@@ -39,6 +39,10 @@ module PostHog
       end
     end
 
+    # Deserialize a flag payload. Strings are JSON-parsed (with the raw string
+    # returned when the body is not valid JSON); already-deserialized values
+    # pass through. Public so {FeatureFlagEvaluations} can normalize payloads
+    # the same way {FeatureFlagResult} does.
     def self.parse_payload(payload)
       return nil if payload.nil?
       return payload unless payload.is_a?(String)
@@ -50,7 +54,5 @@ module PostHog
         payload
       end
     end
-
-    private_class_method :parse_payload
   end
 end
