@@ -24,13 +24,9 @@ The changeset file will be created in the `.changeset/` directory.
 
 Create a PR with your code changes and the changeset file.
 
-### 3. Add the `release` label
+### 3. Merge the PR
 
-When the PR is ready to be released, add the `release` label.
-
-### 4. Merge the PR
-
-When a PR with the `release` label is merged to `main`, the release workflow will automatically:
+No release label is required. When the PR is merged to `main`, the release workflow will automatically:
 
 1. Check for pending changesets
 2. Notify the Client Libraries team in Slack for approval

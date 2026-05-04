@@ -1,16 +1,17 @@
 name: "Release"
 
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
+    paths:
+      - '.changeset/*.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 # Concurrency control: only one release process can run at a time
-# This prevents race conditions if multiple PRs with 'release' label merge simultaneously
+# This prevents race conditions if multiple releasable changesets merge simultaneously
 concurrency:
   group: release
   cancel-in-progress: false
@@ -19,11 +20,6 @@ jobs:
   check-changesets:
     name: Check for changesets
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.merged == true &&
-       contains(github.event.pull_request.labels.*.name, 'release'))
     outputs:
       has-changesets: ${{ steps.check.outputs.has-changesets }}
     steps:
@@ -137,7 +133,7 @@ jobs:
         id: commit-version-bump
         uses: planetscale/ghcommit-action@25309d8005ac7c3bcd61d3fe19b69e0fe47dbdde # v0.2.20
         with:
-          commit_message: "chore: release ${{ steps.apply-changesets.outputs.new-version }} [version bump]"
+          commit_message: "chore: release ${{ steps.apply-changesets.outputs.new-version }} [version bump] [skip ci]"
           repo: ${{ github.repository }}
           branch: main
         env:
