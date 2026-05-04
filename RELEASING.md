@@ -1,50 +1,45 @@
 # Releasing
 
-This repository uses [Changesets](https://github.com/changesets/changesets) for version management and changelog generation, with GitHub Actions publishing both `posthog-ruby` and `posthog-rails` to RubyGems.
+This repository uses [Changesets](https://github.com/changesets/changesets) for version management and an automated GitHub Actions workflow for releases.
 
-Both gems are released together with the same version number.
+## How to Release
 
-## How to release
+### 1. Add a Changeset
 
-### 1. Add a changeset
-
-When making changes that should be released, add a changeset:
+When making a change that should be released, add a changeset:
 
 ```bash
 pnpm changeset
 ```
 
-This will prompt you to:
-- select the release type (`patch`, `minor`, or `major`)
-- write a summary of the change
+This prompts you to select the version bump (`patch`, `minor`, or `major`) and write a short release summary. Commit the generated file in `.changeset/` with your pull request.
 
-The changeset file will be created in the `.changeset/` directory.
+### 2. Merge the Pull Request
 
-### 2. Create a pull request
+After review, merge the PR to `main`. No GitHub release label is required.
 
-Create a PR with your code changes and the changeset file.
+A push to `main` that includes `.changeset/**` changes automatically starts the release workflow. The workflow then:
 
-### 3. Add the `release` label
+1. Checks for pending changesets
+2. Notifies the client libraries team in Slack for approval
+3. Waits for approval from a maintainer via the GitHub `Release` environment
+4. The workflow applies Changesets, syncs gem versions, publishes the gems, tags the release, and creates a GitHub Release.
+5. Notifies Slack when the release completes or fails
 
-When the PR is ready to be released, add the `release` label.
+### Manual Trigger
 
-### 4. Merge the PR
+You can also manually trigger the release workflow from the Actions tab with `workflow_dispatch`. Manual runs still require pending changesets.
 
-When a PR with the `release` label is merged to `main`, the release workflow will automatically:
+## Version Bumping
 
-1. Check for pending changesets
-2. Notify the Client Libraries team in Slack for approval
-3. Wait for approval via the GitHub `Release` environment
-4. Once approved:
-   - Apply changesets and bump `package.json`
-   - Update `CHANGELOG.md`
-   - Sync the version to `lib/posthog/version.rb`
-   - Commit the version bump to `main`
-   - Publish `posthog-ruby` and `posthog-rails` to RubyGems
-   - Create a git tag and GitHub release
+Changesets determines the next version from the committed changeset files:
 
-The workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`.
+- **patch**: bug fixes, documentation updates, and internal changes
+- **minor**: backwards-compatible features
+- **major**: breaking changes
 
-## Manual trigger
+## Troubleshooting
 
-You can also manually trigger the release workflow from the Actions tab, as long as there are pending changesets.
+### No changesets found
+
+If the release workflow reports that no changesets were found, make sure your PR includes at least one releasable `.changeset/*.md` file.
