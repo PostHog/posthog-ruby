@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.changeset/**'
+      - '.changeset/*.md'
   workflow_dispatch:
 
 permissions:
@@ -133,7 +133,7 @@ jobs:
         id: commit-version-bump
         uses: planetscale/ghcommit-action@25309d8005ac7c3bcd61d3fe19b69e0fe47dbdde # v0.2.20
         with:
-          commit_message: "chore: release ${{ steps.apply-changesets.outputs.new-version }} [version bump]"
+          commit_message: "chore: release ${{ steps.apply-changesets.outputs.new-version }} [version bump] [skip ci]"
           repo: ${{ github.repository }}
           branch: main
         env:
