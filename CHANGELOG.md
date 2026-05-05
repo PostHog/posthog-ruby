@@ -1,3 +1,9 @@
+## 3.8.0
+
+### Minor Changes
+
+- fe7e453: feat(flags): support mixed targeting in local evaluation
+
 ## 3.7.0
 
 ### Minor Changes
