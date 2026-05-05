@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require 'posthog/context'
 require 'posthog/rails/parameter_filter'
+require 'posthog/rails/tracing_headers'
 
 module PostHog
   module Rails
@@ -18,6 +20,7 @@ module PostHog
         PostHog::Rails.enter_web_request
 
         response = @app.call(env)
+        env['posthog.response_status_code'] = response_status(response)
 
         # Check if there was an exception that Rails handled
         exception = collect_exception(env)
@@ -60,7 +63,10 @@ module PostHog
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
       end
 
-      def extract_distinct_id(env, request)
+      def extract_distinct_id(env, _request)
+        context_distinct_id = PostHog::Context.current&.distinct_id
+        return context_distinct_id if present?(context_distinct_id)
+
         # Try to get user from controller if capture_user_context is enabled
         if PostHog::Rails.config&.capture_user_context && env['action_controller.instance']
           controller = env['action_controller.instance']
@@ -72,8 +78,7 @@ module PostHog
           end
         end
 
-        # Fallback to session ID or nil
-        request.session&.id&.to_s
+        nil
       end
 
       def extract_user_id(user)
@@ -119,12 +124,38 @@ module PostHog
         end
 
         # Add user agent
-        properties['$user_agent'] = safe_serialize(request.user_agent) if request.user_agent
+        user_agent = TracingHeaders.sanitize_header_value(request.user_agent)
+        properties['$user_agent'] = safe_serialize(user_agent) if user_agent
+
+        ip_address = client_ip(request)
+        properties['$ip'] = safe_serialize(ip_address) if ip_address
+
+        response_status_code = env['posthog.response_status_code']
+        properties['$response_status_code'] = response_status_code if response_status_code
 
         # Add referrer
         properties['$referrer'] = safe_serialize(request.referrer) if request.referrer
 
         properties
+      end
+
+      def client_ip(request)
+        forwarded_for = TracingHeaders.extract_header(request, 'X-Forwarded-For')
+        forwarded_ip = forwarded_for.split(',').first&.strip if forwarded_for
+        return forwarded_ip if present?(forwarded_ip)
+
+        request.remote_ip
+      rescue StandardError
+        nil
+      end
+
+      def response_status(response)
+        status = response.respond_to?(:[]) ? response[0] : nil
+        status if status.is_a?(Integer)
+      end
+
+      def present?(value)
+        !(value.nil? || (value.respond_to?(:empty?) && value.empty?))
       end
     end
   end

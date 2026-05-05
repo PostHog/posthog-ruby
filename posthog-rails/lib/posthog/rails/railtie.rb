@@ -73,8 +73,15 @@ module PostHog
         end
       end
 
-      # Insert middleware for exception capturing
+      # Insert middleware for request context and exception capturing
       initializer 'posthog.insert_middlewares' do |app|
+        # Wrap the Rails exception middleware so request context is active for
+        # downstream handlers and exception capture.
+        insert_middleware_before(
+          app, ActionDispatch::ShowExceptions,
+          PostHog::Rails::RequestContext
+        )
+
         # Insert after DebugExceptions to catch rescued exceptions
         insert_middleware_after(
           app, ActionDispatch::DebugExceptions,
@@ -116,6 +123,13 @@ module PostHog
         # which only supports recording operations (insert_after, use, etc.)
         # and does NOT support query methods like include?.
         app.config.middleware.insert_after(target, middleware)
+      end
+
+      def insert_middleware_before(app, target, middleware)
+        # During initialization, app.config.middleware is a MiddlewareStackProxy
+        # which only supports recording operations (insert_before, use, etc.)
+        # and does NOT support query methods like include?.
+        app.config.middleware.insert_before(target, middleware)
       end
 
       def self.register_error_subscriber

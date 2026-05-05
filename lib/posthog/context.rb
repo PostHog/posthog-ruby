@@ -54,6 +54,8 @@ module PostHog
       return unless current
 
       current.session_id = session_id
+      current.properties.delete('$session_id')
+      current.properties.delete(:$session_id)
       current.apply_session_property!
     end
 
@@ -72,6 +74,10 @@ module PostHog
 
       parent_properties = fresh || parent.nil? ? {} : parent.properties
       properties = merge_properties(parent_properties, data[:properties] || {})
+      if data[:session_id] && !session_property_key?(data[:properties])
+        properties.delete('$session_id')
+        properties.delete(:$session_id)
+      end
 
       new(
         distinct_id: data[:distinct_id] || (fresh || parent.nil? ? nil : parent.distinct_id),
@@ -111,6 +117,12 @@ module PostHog
       }
     end
 
+    def self.session_property_key?(properties)
+      return false unless properties.is_a?(Hash)
+
+      properties.key?('$session_id') || properties.key?(:$session_id)
+    end
+
     def to_h
       {
         distinct_id: distinct_id,
@@ -120,7 +132,7 @@ module PostHog
     end
 
     def apply_session_property!
-      return if session_id.nil? || properties.key?('$session_id') || properties.key?(:'$session_id')
+      return if session_id.nil? || properties.key?('$session_id') || properties.key?(:$session_id)
 
       properties['$session_id'] = session_id
     end

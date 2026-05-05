@@ -1052,6 +1052,17 @@ module PostHog
         expect(fresh[:properties]['fresh']).to be true
       end
 
+      it 'allows a child context session_id to override the inherited session_id' do
+        client.with_context(session_id: 'outer-session') do
+          client.with_context(session_id: 'inner-session') do
+            client.capture(event: 'session_override_event', distinct_id: 'user')
+          end
+        end
+
+        message = client.dequeue_last_message
+        expect(message[:properties]['$session_id']).to eq('inner-session')
+      end
+
       it 'restores context after the block exits' do
         client.with_context(distinct_id: 'context-user') do
           client.capture(event: 'inside_context')
