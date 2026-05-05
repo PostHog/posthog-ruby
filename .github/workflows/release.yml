@@ -249,9 +249,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
         run: |
+          CHANGELOG_ENTRY=$(awk -v defText="see CHANGELOG.md" '/^## /{if (flag) exit; flag=1; next} flag; END{if (!flag) print defText}' CHANGELOG.md | sed '/[^[:space:]]/,$!d' | tac | sed '/[^[:space:]]/,$!d' | tac)
           gh release create "$NEW_VERSION" \
             --title "$NEW_VERSION" \
-            --generate-notes
+            --notes "$CHANGELOG_ENTRY"
 
       - name: Send failure event to PostHog
         if: ${{ failure() }}
