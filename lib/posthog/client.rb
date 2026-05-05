@@ -14,6 +14,7 @@ require 'posthog/feature_flags'
 require 'posthog/feature_flag_evaluations'
 require 'posthog/send_feature_flags_options'
 require 'posthog/exception_capture'
+require 'posthog/context'
 
 module PostHog
   class Client
@@ -188,6 +189,7 @@ module PostHog
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
+      apply_context_to_capture_attrs!(attrs)
 
       # Precedence: an explicit `flags` snapshot always wins, regardless of
       # `send_feature_flags`. The snapshot guarantees the event carries the same
@@ -270,12 +272,8 @@ module PostHog
 
       return if exception_info.nil?
 
-      no_distinct_id_was_provided = distinct_id.nil?
-      distinct_id ||= SecureRandom.uuid
-
       properties = { '$exception_list' => [exception_info] }
       properties.merge!(additional_properties) if additional_properties && !additional_properties.empty?
-      properties['$process_person_profile'] = false if no_distinct_id_was_provided
 
       event_data = {
         distinct_id: distinct_id,
@@ -294,6 +292,30 @@ module PostHog
     #
     # @option attrs [Hash] :properties User properties (optional)
     # @macro common_attrs
+    def with_context(data = nil, fresh: false, **kwargs, &block)
+      PostHog::Context.with_context(data, fresh: fresh, **kwargs, &block)
+    end
+
+    def enter_context(data = nil, fresh: false, **kwargs)
+      PostHog::Context.enter_context(data, fresh: fresh, **kwargs)
+    end
+
+    def get_context
+      PostHog::Context.get_context
+    end
+
+    def identify_context(distinct_id)
+      PostHog::Context.identify_context(distinct_id)
+    end
+
+    def set_context_session(session_id)
+      PostHog::Context.set_context_session(session_id)
+    end
+
+    def tag_context(key_or_properties, value = nil)
+      PostHog::Context.tag_context(key_or_properties, value)
+    end
+
     def identify(attrs)
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_identify(attrs))
@@ -683,6 +705,39 @@ module PostHog
     end
 
     private
+
+    def apply_context_to_capture_attrs!(attrs)
+      context = PostHog::Context.current
+      explicit_properties = attrs[:properties]
+      properties_are_hash = explicit_properties.nil? || explicit_properties.is_a?(Hash)
+      context_properties = context&.properties || {}
+      if properties_are_hash
+        attrs[:properties] = PostHog::Context.merge_properties(context_properties, explicit_properties || {})
+      end
+
+      return if present_id?(attrs[:distinct_id])
+
+      if present_id?(context&.distinct_id)
+        attrs[:distinct_id] = context.distinct_id
+        return
+      end
+
+      attrs[:distinct_id] = SecureRandom.uuid
+      return unless properties_are_hash
+      return if property_key?(explicit_properties, '$process_person_profile')
+
+      attrs[:properties]['$process_person_profile'] = false
+    end
+
+    def present_id?(value)
+      !(value.nil? || (value.is_a?(String) && value.empty?))
+    end
+
+    def property_key?(properties, key)
+      return false unless properties.is_a?(Hash)
+
+      properties.key?(key) || properties.key?(key.to_sym)
+    end
 
     # Shared by the legacy single-flag path ({#get_feature_flag_result}) and the
     # snapshot's access-recording. Owns dedup-key construction, the

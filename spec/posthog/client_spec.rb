@@ -192,8 +192,20 @@ module PostHog
         )
       end
 
-      it 'errors without a distinct_id' do
-        expect { client.capture(event: 'Event') }.to raise_error(ArgumentError)
+      it 'generates a personless distinct_id without an explicit or context distinct_id' do
+        client.capture(event: 'Event')
+
+        message = client.dequeue_last_message
+        expect(message[:distinct_id]).to be_a(String)
+        expect(message[:distinct_id].length).to eq(36)
+        expect(message[:properties]['$process_person_profile']).to be false
+      end
+
+      it 'does not override an explicit $process_person_profile value for personless capture' do
+        client.capture(event: 'Event', properties: { '$process_person_profile' => true })
+
+        message = client.dequeue_last_message
+        expect(message[:properties]['$process_person_profile']).to be true
       end
 
       it 'errors if properties is not a hash' do
@@ -969,6 +981,147 @@ module PostHog
 
         last_message = client.dequeue_last_message
         expect(last_message[:event]).to eq('test_event')
+      end
+    end
+
+    describe 'request context' do
+      it 'applies context distinct_id, session_id, and properties to capture' do
+        client.with_context(
+          distinct_id: 'context-user',
+          session_id: 'context-session',
+          properties: { 'plan' => 'pro' }
+        ) do
+          client.capture(event: 'context_event')
+        end
+
+        message = client.dequeue_last_message
+        expect(message[:distinct_id]).to eq('context-user')
+        expect(message[:properties]['$session_id']).to eq('context-session')
+        expect(message[:properties]['plan']).to eq('pro')
+        expect(message[:properties]).not_to have_key('$process_person_profile')
+      end
+
+      it 'allows explicit distinct_id and properties to override context' do
+        client.with_context(
+          distinct_id: 'context-user',
+          session_id: 'context-session',
+          properties: { 'plan' => 'free' }
+        ) do
+          client.capture(
+            event: 'override_event',
+            distinct_id: 'explicit-user',
+            properties: { 'plan' => 'paid', '$session_id' => 'explicit-session' }
+          )
+        end
+
+        message = client.dequeue_last_message
+        expect(message[:distinct_id]).to eq('explicit-user')
+        expect(message[:properties]['plan']).to eq('paid')
+        expect(message[:properties]['$session_id']).to eq('explicit-session')
+      end
+
+      it 'inherits nested context by default and isolates fresh context' do
+        client.with_context(
+          distinct_id: 'outer-user',
+          session_id: 'outer-session',
+          properties: { 'outer' => true, 'shared' => 'parent' }
+        ) do
+          client.with_context(properties: { 'inner' => true, 'shared' => 'child' }) do
+            client.capture(event: 'inherited_event')
+          end
+
+          client.with_context({ properties: { 'fresh' => true } }, fresh: true) do
+            client.capture(event: 'fresh_event')
+          end
+        end
+
+        inherited = client.dequeue_last_message
+        fresh = client.dequeue_last_message
+
+        expect(inherited[:distinct_id]).to eq('outer-user')
+        expect(inherited[:properties]['$session_id']).to eq('outer-session')
+        expect(inherited[:properties]['outer']).to be true
+        expect(inherited[:properties]['inner']).to be true
+        expect(inherited[:properties]['shared']).to eq('child')
+
+        expect(fresh[:distinct_id]).to be_a(String)
+        expect(fresh[:distinct_id]).not_to eq('outer-user')
+        expect(fresh[:properties]['$process_person_profile']).to be false
+        expect(fresh[:properties]).not_to have_key('outer')
+        expect(fresh[:properties]).not_to have_key('$session_id')
+        expect(fresh[:properties]['fresh']).to be true
+      end
+
+      it 'restores context after the block exits' do
+        client.with_context(distinct_id: 'context-user') do
+          client.capture(event: 'inside_context')
+        end
+        client.capture(event: 'outside_context')
+
+        inside = client.dequeue_last_message
+        outside = client.dequeue_last_message
+        expect(inside[:distinct_id]).to eq('context-user')
+        expect(outside[:distinct_id]).not_to eq('context-user')
+        expect(outside[:properties]['$process_person_profile']).to be false
+      end
+
+      it 'isolates context across concurrent threads' do
+        threads = 5.times.map do |index|
+          Thread.new do
+            client.with_context(
+              distinct_id: "user-#{index}",
+              session_id: "session-#{index}",
+              properties: { 'index' => index }
+            ) do
+              client.capture(event: 'thread_event')
+            end
+          end
+        end
+        threads.each(&:join)
+
+        messages = 5.times.map { client.dequeue_last_message }
+        messages.each do |message|
+          index = message[:properties]['index']
+          expect(message[:distinct_id]).to eq("user-#{index}")
+          expect(message[:properties]['$session_id']).to eq("session-#{index}")
+        end
+      end
+
+      it 'applies context to exception capture and allows explicit overrides' do
+        client.with_context(
+          distinct_id: 'context-user',
+          session_id: 'context-session',
+          properties: { 'request_id' => 'ctx-req' }
+        ) do
+          begin
+            raise StandardError, 'context error'
+          rescue StandardError => e
+            client.capture_exception(e)
+          end
+
+          begin
+            raise StandardError, 'explicit error'
+          rescue StandardError => e
+            client.capture_exception(
+              e,
+              'explicit-user',
+              { '$session_id' => 'explicit-session', 'request_id' => 'explicit-req' }
+            )
+          end
+        end
+
+        context_message = client.dequeue_last_message
+        explicit_message = client.dequeue_last_message
+
+        expect(context_message[:event]).to eq('$exception')
+        expect(context_message[:distinct_id]).to eq('context-user')
+        expect(context_message[:properties]['$session_id']).to eq('context-session')
+        expect(context_message[:properties]['request_id']).to eq('ctx-req')
+        expect(context_message[:properties]).not_to have_key('$process_person_profile')
+
+        expect(explicit_message[:distinct_id]).to eq('explicit-user')
+        expect(explicit_message[:properties]['$session_id']).to eq('explicit-session')
+        expect(explicit_message[:properties]['request_id']).to eq('explicit-req')
       end
     end
 
