@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'posthog/context'
+require 'posthog/internal/context'
 require 'posthog/rails/tracing_headers'
 
 module PostHog
@@ -14,7 +14,7 @@ module PostHog
       def call(env)
         request = build_request(env)
 
-        PostHog::Context.with_context(context_data(request), fresh: true) do
+        Internal::Context.with_context(context_data(request), fresh: true) do
           @app.call(env)
         end
       end

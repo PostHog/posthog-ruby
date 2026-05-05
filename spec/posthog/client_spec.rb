@@ -9,6 +9,7 @@ module PostHog
 
   describe Client do
     let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
+    let(:context_class) { PostHog.const_get(:Internal).const_get(:Context) }
     let(:logger) { instance_double(Logger) }
 
     before do
@@ -985,8 +986,24 @@ module PostHog
     end
 
     describe 'request context' do
+      it 'keeps context helpers internal rather than exposing new public client methods' do
+        expect { PostHog::Internal }.to raise_error(NameError)
+
+        %i[
+          with_context
+          enter_context
+          get_context
+          identify_context
+          set_context_session
+          tag_context
+        ].each do |method_name|
+          expect(client).not_to respond_to(method_name)
+          expect(PostHog).not_to respond_to(method_name)
+        end
+      end
+
       it 'applies context distinct_id, session_id, and properties to capture' do
-        client.with_context(
+        context_class.with_context(
           distinct_id: 'context-user',
           session_id: 'context-session',
           properties: { 'plan' => 'pro' }
@@ -1002,7 +1019,7 @@ module PostHog
       end
 
       it 'allows explicit distinct_id and properties to override context' do
-        client.with_context(
+        context_class.with_context(
           distinct_id: 'context-user',
           session_id: 'context-session',
           properties: { 'plan' => 'free' }
@@ -1021,16 +1038,16 @@ module PostHog
       end
 
       it 'inherits nested context by default and isolates fresh context' do
-        client.with_context(
+        context_class.with_context(
           distinct_id: 'outer-user',
           session_id: 'outer-session',
           properties: { 'outer' => true, 'shared' => 'parent' }
         ) do
-          client.with_context(properties: { 'inner' => true, 'shared' => 'child' }) do
+          context_class.with_context(properties: { 'inner' => true, 'shared' => 'child' }) do
             client.capture(event: 'inherited_event')
           end
 
-          client.with_context({ properties: { 'fresh' => true } }, fresh: true) do
+          context_class.with_context({ properties: { 'fresh' => true } }, fresh: true) do
             client.capture(event: 'fresh_event')
           end
         end
@@ -1053,8 +1070,8 @@ module PostHog
       end
 
       it 'allows a child context session_id to override the inherited session_id' do
-        client.with_context(session_id: 'outer-session') do
-          client.with_context(session_id: 'inner-session') do
+        context_class.with_context(session_id: 'outer-session') do
+          context_class.with_context(session_id: 'inner-session') do
             client.capture(event: 'session_override_event', distinct_id: 'user')
           end
         end
@@ -1064,7 +1081,7 @@ module PostHog
       end
 
       it 'restores context after the block exits' do
-        client.with_context(distinct_id: 'context-user') do
+        context_class.with_context(distinct_id: 'context-user') do
           client.capture(event: 'inside_context')
         end
         client.capture(event: 'outside_context')
@@ -1079,7 +1096,7 @@ module PostHog
       it 'isolates context across concurrent threads' do
         threads = 5.times.map do |index|
           Thread.new do
-            client.with_context(
+            context_class.with_context(
               distinct_id: "user-#{index}",
               session_id: "session-#{index}",
               properties: { 'index' => index }
@@ -1099,7 +1116,7 @@ module PostHog
       end
 
       it 'applies context to exception capture and allows explicit overrides' do
-        client.with_context(
+        context_class.with_context(
           distinct_id: 'context-user',
           session_id: 'context-session',
           properties: { 'request_id' => 'ctx-req' }

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'posthog/context'
+require 'posthog/internal/context'
 require 'posthog/rails/parameter_filter'
 require 'posthog/rails/tracing_headers'
 
@@ -64,7 +64,7 @@ module PostHog
       end
 
       def extract_distinct_id(env, _request)
-        context_distinct_id = PostHog::Context.current&.distinct_id
+        context_distinct_id = Internal::Context.current&.distinct_id
         return context_distinct_id if present?(context_distinct_id)
 
         # Try to get user from controller if capture_user_context is enabled

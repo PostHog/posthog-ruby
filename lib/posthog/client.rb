@@ -14,7 +14,7 @@ require 'posthog/feature_flags'
 require 'posthog/feature_flag_evaluations'
 require 'posthog/send_feature_flags_options'
 require 'posthog/exception_capture'
-require 'posthog/context'
+require 'posthog/internal/context'
 
 module PostHog
   class Client
@@ -292,30 +292,6 @@ module PostHog
     #
     # @option attrs [Hash] :properties User properties (optional)
     # @macro common_attrs
-    def with_context(data = nil, fresh: false, **kwargs, &block)
-      PostHog::Context.with_context(data, fresh: fresh, **kwargs, &block)
-    end
-
-    def enter_context(data = nil, fresh: false, **kwargs)
-      PostHog::Context.enter_context(data, fresh: fresh, **kwargs)
-    end
-
-    def get_context
-      PostHog::Context.get_context
-    end
-
-    def identify_context(distinct_id)
-      PostHog::Context.identify_context(distinct_id)
-    end
-
-    def set_context_session(session_id)
-      PostHog::Context.set_context_session(session_id)
-    end
-
-    def tag_context(key_or_properties, value = nil)
-      PostHog::Context.tag_context(key_or_properties, value)
-    end
-
     def identify(attrs)
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_identify(attrs))
@@ -707,12 +683,12 @@ module PostHog
     private
 
     def apply_context_to_capture_attrs!(attrs)
-      context = PostHog::Context.current
+      context = Internal::Context.current
       explicit_properties = attrs[:properties]
       properties_are_hash = explicit_properties.nil? || explicit_properties.is_a?(Hash)
       context_properties = context&.properties || {}
       if properties_are_hash
-        attrs[:properties] = PostHog::Context.merge_properties(context_properties, explicit_properties || {})
+        attrs[:properties] = Internal::Context.merge_properties(context_properties, explicit_properties || {})
       end
 
       return if present_id?(attrs[:distinct_id])

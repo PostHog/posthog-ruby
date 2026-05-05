@@ -71,5 +71,7 @@ module PostHog
       end
       private_class_method :normalize_header_name
     end
+
+    private_constant :TracingHeaders
   end
 end
