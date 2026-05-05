@@ -22,7 +22,13 @@ PostHog::Rails.configure do |config|
   # Set to true to enable automatic ActiveJob exception tracking
   # config.auto_instrument_active_job = true
 
-  # Capture user context with exceptions (default: true)
+  # Apply PostHog tracing headers and request metadata to captures during Rails requests (default: true)
+  # Captures: X-PostHog-Distinct-Id, X-PostHog-Session-Id, current URL, method, path, user agent, and IP
+  # Set to false to disable automatic request context capture
+  # config.capture_request_context = true
+
+  # Capture authenticated user context with exceptions (default: true)
+  # Authenticated Rails user context takes precedence over client-supplied tracing headers for exception identity
   # config.capture_user_context = true
 
   # Controller method name to get current user (default: :current_user)

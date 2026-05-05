@@ -64,19 +64,20 @@ module PostHog
       end
 
       def extract_distinct_id(env, _request)
-        context_distinct_id = Internal::Context.current&.distinct_id
-        return context_distinct_id if present?(context_distinct_id)
-
-        # Try to get user from controller if capture_user_context is enabled
+        # Prefer authenticated Rails user context over client-supplied tracing headers.
         if PostHog::Rails.config&.capture_user_context && env['action_controller.instance']
           controller = env['action_controller.instance']
           method_name = PostHog::Rails.config&.current_user_method || :current_user
 
           if controller.respond_to?(method_name, true)
             user = controller.send(method_name)
-            return extract_user_id(user) if user
+            user_id = extract_user_id(user) if user
+            return user_id if present?(user_id)
           end
         end
+
+        context_distinct_id = Internal::Context.current&.distinct_id
+        return context_distinct_id if present?(context_distinct_id)
 
         nil
       end
@@ -140,11 +141,14 @@ module PostHog
       end
 
       def client_ip(request)
+        trusted_ip = request.remote_ip
+        return trusted_ip if present?(trusted_ip)
+
         forwarded_for = TracingHeaders.extract_header(request, 'X-Forwarded-For')
         forwarded_ip = forwarded_for.split(',').first&.strip if forwarded_for
         return forwarded_ip if present?(forwarded_ip)
 
-        request.remote_ip
+        nil
       rescue StandardError
         nil
       end

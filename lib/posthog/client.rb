@@ -186,6 +186,9 @@ module PostHog
     #                             events in PostHog are deduplicated by the
     #                             combination of teamId, timestamp date,
     #                             event name, distinct id, and UUID
+    # @note If `:distinct_id` is omitted, request/context distinct_id is used when
+    #   available; otherwise a UUID is generated and the event is marked personless
+    #   with `$process_person_profile: false`.
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
@@ -262,7 +265,8 @@ module PostHog
     # Captures an exception as an event
     #
     # @param [Exception, String, Object] exception The exception to capture, a string message, or exception-like object
-    # @param [String] distinct_id The ID for the user (optional, defaults to a generated UUID)
+    # @param [String] distinct_id The ID for the user (optional, defaults to request/context distinct_id
+    #   or a generated UUID)
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
     # @param [PostHog::FeatureFlagEvaluations] flags A snapshot returned by {#evaluate_flags}.
     #   Forwarded to the inner {#capture} call so the captured `$exception` event carries the

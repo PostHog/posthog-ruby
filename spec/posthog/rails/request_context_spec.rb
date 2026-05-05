@@ -13,6 +13,14 @@ require 'posthog/rails'
 RSpec.describe PostHog::Rails::RequestContext do
   let(:client) { PostHog::Client.new(api_key: API_KEY, test_mode: true) }
 
+  around do |example|
+    previous_config = PostHog::Rails.config
+    PostHog::Rails.config = PostHog::Rails::Configuration.new
+    example.run
+  ensure
+    PostHog::Rails.config = previous_config
+  end
+
   def env_for(path = '/api/test', headers = nil, **header_keywords)
     headers = (headers || {}).merge(header_keywords)
     Rack::MockRequest.env_for(
@@ -48,12 +56,44 @@ RSpec.describe PostHog::Rails::RequestContext do
     message = client.dequeue_last_message
     expect(message[:distinct_id]).to eq('frontend-user')
     expect(message[:properties]['$session_id']).to eq('frontend-session')
-    expect(message[:properties]['$window_id']).to eq('window-123')
+    expect(message[:properties]).not_to have_key('$window_id')
     expect(message[:properties]['$current_url']).to include('/api/test')
     expect(message[:properties]['$request_method']).to eq('POST')
     expect(message[:properties]['$request_path']).to eq('/api/test')
     expect(message[:properties]['$user_agent']).to eq('RSpec Agent')
     expect(message[:properties]['$ip']).to eq('203.0.113.10')
+  end
+
+  it 'can disable automatic Rails request context capture' do
+    PostHog::Rails.config.capture_request_context = false
+
+    call_with(
+      'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
+      'HTTP_X_POSTHOG_SESSION_ID' => 'header-session',
+      'HTTP_USER_AGENT' => 'RSpec Agent'
+    ) do
+      client.capture(event: 'opt_out_event')
+    end
+
+    message = client.dequeue_last_message
+    expect(message[:distinct_id]).not_to eq('header-user')
+    expect(message[:properties]['$session_id']).to be_nil
+    expect(message[:properties]['$request_path']).to be_nil
+    expect(message[:properties]['$user_agent']).to be_nil
+    expect(message[:properties]['$process_person_profile']).to be false
+  end
+
+  it 'prefers Rails trusted remote_ip over raw forwarded headers' do
+    call_with(
+      'action_dispatch.remote_ip' => '198.51.100.7',
+      'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
+      'HTTP_X_FORWARDED_FOR' => '203.0.113.10, 10.0.0.2'
+    ) do
+      client.capture(event: 'ip_event')
+    end
+
+    message = client.dequeue_last_message
+    expect(message[:properties]['$ip']).to eq('198.51.100.7')
   end
 
   it 'lets explicit capture distinct_id and $session_id override tracing context' do
@@ -125,9 +165,57 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to eq('s' * 1000)
   end
 
+  it 'prefers authenticated Rails user context over tracing headers for exceptions' do
+    PostHog::Rails.config.auto_capture_exceptions = true
+
+    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
+      client.capture_exception(exception, distinct_id, properties)
+    end
+
+    user = Struct.new(:id).new('rails-user')
+    controller_class = Class.new do
+      def initialize(user)
+        @user = user
+      end
+
+      def controller_name
+        'posts'
+      end
+
+      def action_name
+        'show'
+      end
+
+      private
+
+      def current_user
+        @user
+      end
+    end
+
+    app = lambda do |env|
+      env['action_controller.instance'] = controller_class.new(user)
+      raise StandardError, 'boom'
+    end
+    middleware = described_class.new(PostHog::Rails::CaptureExceptions.new(app))
+
+    expect do
+      middleware.call(
+        env_for(
+          '/boom',
+          'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
+          'HTTP_X_POSTHOG_SESSION_ID' => 'exception-session'
+        )
+      )
+    end.to raise_error(StandardError, 'boom')
+
+    message = client.dequeue_last_message
+    expect(message[:event]).to eq('$exception')
+    expect(message[:distinct_id]).to eq('rails-user')
+    expect(message[:properties]['$session_id']).to eq('exception-session')
+  end
+
   it 'captures exceptions with tracing context and re-raises' do
-    previous_config = PostHog::Rails.config
-    PostHog::Rails.config = PostHog::Rails::Configuration.new
     PostHog::Rails.config.auto_capture_exceptions = true
 
     allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
@@ -156,7 +244,5 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to eq('exception-session')
     expect(message[:properties]['$request_path']).to eq('/boom')
     expect(message[:properties]['$user_agent']).to eq('Exception Agent')
-  ensure
-    PostHog::Rails.config = previous_config
   end
 end

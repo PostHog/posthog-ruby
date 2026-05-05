@@ -15,6 +15,9 @@ module PostHog
       # List of exception classes to ignore (in addition to default)
       attr_accessor :excluded_exceptions
 
+      # Whether to apply request-scoped tracing headers and metadata to captures
+      attr_accessor :capture_request_context
+
       # Whether to capture the current user context in exceptions
       attr_accessor :capture_user_context
 
@@ -30,6 +33,7 @@ module PostHog
         @report_rescued_exceptions = false
         @auto_instrument_active_job = false
         @excluded_exceptions = []
+        @capture_request_context = true
         @capture_user_context = true
         @current_user_method = :current_user
         @user_id_method = nil

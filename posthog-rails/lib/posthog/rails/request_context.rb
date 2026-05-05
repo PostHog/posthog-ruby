@@ -12,6 +12,8 @@ module PostHog
       end
 
       def call(env)
+        return @app.call(env) if PostHog::Rails.config&.capture_request_context == false
+
         request = build_request(env)
 
         Internal::Context.with_context(context_data(request), fresh: true) do
@@ -24,15 +26,11 @@ module PostHog
       def context_data(request)
         session_id = tracing_header(request, 'X-POSTHOG-SESSION-ID')
         distinct_id = tracing_header(request, 'X-POSTHOG-DISTINCT-ID')
-        window_id = tracing_header(request, 'X-POSTHOG-WINDOW-ID')
-
-        properties = request_properties(request)
-        properties['$window_id'] = window_id if window_id
 
         {
           distinct_id: distinct_id,
           session_id: session_id,
-          properties: properties
+          properties: request_properties(request)
         }
       end
 
@@ -48,11 +46,18 @@ module PostHog
       end
 
       def client_ip(request)
+        trusted_ip = request_value(request, :remote_ip) || request_value(request, :ip)
+        return trusted_ip if present?(trusted_ip)
+
         forwarded_for = tracing_header(request, 'X-Forwarded-For')
         forwarded_ip = forwarded_for.split(',').first&.strip if forwarded_for
-        return forwarded_ip unless forwarded_ip.nil? || forwarded_ip.empty?
+        return forwarded_ip if present?(forwarded_ip)
 
-        request_value(request, :remote_ip) || request_value(request, :ip) || env_value(request, 'REMOTE_ADDR')
+        env_value(request, 'REMOTE_ADDR')
+      end
+
+      def present?(value)
+        !(value.nil? || (value.respond_to?(:empty?) && value.empty?))
       end
 
       def add_property(properties, key, value)

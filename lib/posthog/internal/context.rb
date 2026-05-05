@@ -3,6 +3,8 @@
 module PostHog
   module Internal
     # Internal request/fiber-local context applied to capture calls.
+    # Uses Rails' isolated execution state when available, otherwise falls back
+    # to thread-local storage in the core SDK.
     #
     # This is intentionally not exposed as a public SDK API in Ruby yet. It exists
     # to let framework integrations such as posthog-rails propagate request-scoped
@@ -21,11 +23,19 @@ module PostHog
       end
 
       def self.current
-        Thread.current[STORAGE_KEY]
+        if defined?(ActiveSupport::IsolatedExecutionState)
+          ActiveSupport::IsolatedExecutionState[STORAGE_KEY]
+        else
+          Thread.current[STORAGE_KEY]
+        end
       end
 
       def self.current=(context)
-        Thread.current[STORAGE_KEY] = context
+        if defined?(ActiveSupport::IsolatedExecutionState)
+          ActiveSupport::IsolatedExecutionState[STORAGE_KEY] = context
+        else
+          Thread.current[STORAGE_KEY] = context
+        end
       end
 
       def self.with_context(data = nil, fresh: false, **kwargs)
