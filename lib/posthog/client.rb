@@ -192,7 +192,7 @@ module PostHog
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
-      apply_context_to_capture_attrs!(attrs)
+      enrich_capture_attrs_with_context(attrs)
 
       # Precedence: an explicit `flags` snapshot always wins, regardless of
       # `send_feature_flags`. The snapshot guarantees the event carries the same
@@ -686,7 +686,7 @@ module PostHog
 
     private
 
-    def apply_context_to_capture_attrs!(attrs)
+    def enrich_capture_attrs_with_context(attrs)
       context = Internal::Context.current
       explicit_properties = attrs[:properties]
       properties_are_hash = explicit_properties.nil? || explicit_properties.is_a?(Hash)
