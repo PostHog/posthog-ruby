@@ -2,6 +2,7 @@
 
 require 'posthog/rails/configuration'
 require 'posthog/rails/tracing_headers'
+require 'posthog/rails/request_metadata'
 require 'posthog/rails/request_context'
 require 'posthog/rails/capture_exceptions'
 require 'posthog/rails/rescued_exception_interceptor'

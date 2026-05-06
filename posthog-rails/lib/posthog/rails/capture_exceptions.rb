@@ -2,7 +2,7 @@
 
 require 'posthog/internal/context'
 require 'posthog/rails/parameter_filter'
-require 'posthog/rails/tracing_headers'
+require 'posthog/rails/request_metadata'
 
 module PostHog
   module Rails
@@ -104,11 +104,8 @@ module PostHog
 
       def build_properties(request, env)
         properties = {
-          '$exception_source' => 'rails',
-          '$current_url' => safe_serialize(request.url),
-          '$request_method' => safe_serialize(request.method),
-          '$request_path' => safe_serialize(request.path)
-        }
+          '$exception_source' => 'rails'
+        }.merge(request_metadata_properties(request))
 
         # Add controller and action if available
         if env['action_controller.instance']
@@ -124,13 +121,6 @@ module PostHog
           properties['$request_params'] = safe_serialize(filtered_params) unless filtered_params.empty?
         end
 
-        # Add user agent
-        user_agent = TracingHeaders.sanitize_header_value(request.user_agent)
-        properties['$user_agent'] = safe_serialize(user_agent) if user_agent
-
-        ip_address = client_ip(request)
-        properties['$ip'] = safe_serialize(ip_address) if ip_address
-
         response_status_code = env['posthog.response_status_code']
         properties['$response_status_code'] = response_status_code if response_status_code
 
@@ -140,17 +130,29 @@ module PostHog
         properties
       end
 
-      def client_ip(request)
-        trusted_ip = request.remote_ip
-        return trusted_ip if present?(trusted_ip)
+      REQUEST_METADATA_KEYS = %w[
+        $current_url
+        $request_method
+        $request_path
+        $user_agent
+        $ip
+      ].freeze
+      private_constant :REQUEST_METADATA_KEYS
 
-        forwarded_for = TracingHeaders.extract_header(request, 'X-Forwarded-For')
-        forwarded_ip = forwarded_for.split(',').first&.strip if forwarded_for
-        return forwarded_ip if present?(forwarded_ip)
+      def request_metadata_properties(request)
+        # When RequestContext is active, regular capture context already owns and
+        # applies these request properties. Fall back to direct extraction only
+        # when that context is unavailable, e.g. if capture_request_context is disabled.
+        return {} if request_metadata_in_context?
 
-        nil
-      rescue StandardError
-        nil
+        RequestMetadata.extract(request)
+      end
+
+      def request_metadata_in_context?
+        properties = Internal::Context.current&.properties
+        return false unless properties.is_a?(Hash)
+
+        REQUEST_METADATA_KEYS.any? { |key| properties.key?(key) || properties.key?(key.to_sym) }
       end
 
       def response_status(response)

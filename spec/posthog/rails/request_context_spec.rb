@@ -245,4 +245,37 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$request_path']).to eq('/boom')
     expect(message[:properties]['$user_agent']).to eq('Exception Agent')
   end
+
+  it 'preserves exception request metadata when request context capture is disabled' do
+    PostHog::Rails.config.auto_capture_exceptions = true
+    PostHog::Rails.config.capture_request_context = false
+
+    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
+      client.capture_exception(exception, distinct_id, properties)
+    end
+
+    app = lambda do |_env|
+      raise StandardError, 'boom'
+    end
+    middleware = described_class.new(PostHog::Rails::CaptureExceptions.new(app))
+
+    expect do
+      middleware.call(
+        env_for(
+          '/boom',
+          'HTTP_X_POSTHOG_DISTINCT_ID' => 'disabled-header-user',
+          'HTTP_USER_AGENT' => 'Disabled Context Agent',
+          'HTTP_X_FORWARDED_FOR' => '203.0.113.11, 10.0.0.2'
+        )
+      )
+    end.to raise_error(StandardError, 'boom')
+
+    message = client.dequeue_last_message
+    expect(message[:event]).to eq('$exception')
+    expect(message[:distinct_id]).not_to eq('disabled-header-user')
+    expect(message[:properties]['$process_person_profile']).to be false
+    expect(message[:properties]['$request_path']).to eq('/boom')
+    expect(message[:properties]['$user_agent']).to eq('Disabled Context Agent')
+    expect(message[:properties]['$ip']).to eq('203.0.113.11')
+  end
 end
