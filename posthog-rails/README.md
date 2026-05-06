@@ -50,7 +50,7 @@ PostHog::Rails.configure do |config|
   config.auto_capture_exceptions = true           # Enable automatic exception capture (default: false)
   config.report_rescued_exceptions = true         # Report exceptions Rails rescues (default: false)
   config.auto_instrument_active_job = true        # Instrument background jobs (default: false)
-  config.capture_request_context = true           # Apply tracing headers/request metadata to captures (default: true)
+  config.capture_tracing_headers = true           # Use PostHog tracing headers for identity/session context (default: true)
   config.capture_user_context = true              # Include authenticated user info in exceptions
   config.current_user_method = :current_user      # Method to get current user
   config.user_id_method = nil                     # Method to get ID from user (auto-detect)
@@ -253,7 +253,7 @@ Configure these via `PostHog::Rails.configure` or `PostHog::Rails.config`:
 | `auto_capture_exceptions` | Boolean | `false` | Automatically capture exceptions |
 | `report_rescued_exceptions` | Boolean | `false` | Report exceptions Rails rescues |
 | `auto_instrument_active_job` | Boolean | `false` | Instrument ActiveJob |
-| `capture_request_context` | Boolean | `true` | Apply PostHog tracing headers and request metadata to captures during Rails requests |
+| `capture_tracing_headers` | Boolean | `true` | Use PostHog tracing headers as request-scoped default `distinct_id` and `$session_id` values |
 | `capture_user_context` | Boolean | `true` | Include authenticated user info in exceptions |
 | `current_user_method` | Symbol | `:current_user` | Controller method for user |
 | `user_id_method` | Symbol | `nil` | Method to extract ID from user object (auto-detect if nil) |
@@ -310,12 +310,12 @@ You can add more with `PostHog::Rails.config.excluded_exceptions = ['MyException
 
 ## Request Context
 
-PostHog Rails automatically applies request-scoped context to events captured during web requests. When present, PostHog tracing headers (`X-PostHog-Distinct-Id` and `X-PostHog-Session-Id`) are used as default `distinct_id` and `$session_id` values, and request metadata such as `$current_url`, `$request_method`, `$request_path`, `$user_agent`, and `$ip` is added to event properties. Explicit `distinct_id` and properties passed to `PostHog.capture` always take precedence.
+PostHog Rails automatically applies request-scoped context to events captured during web requests. Request metadata such as `$current_url`, `$request_method`, `$request_path`, `$user_agent`, and `$ip` is added to event properties. When present, PostHog tracing headers (`X-PostHog-Distinct-Id` and `X-PostHog-Session-Id`) are also used as default `distinct_id` and `$session_id` values. Explicit `distinct_id` and properties passed to `PostHog.capture` always take precedence.
 
-Disable this automatic request context if you do not want these headers or request metadata captured:
+Disable tracing header identity/session capture if you do not want client-supplied PostHog tracing headers used for server-side events. Request metadata is still captured:
 
 ```ruby
-PostHog::Rails.config.capture_request_context = false
+PostHog::Rails.config.capture_tracing_headers = false
 ```
 
 ## User Context
@@ -415,7 +415,7 @@ PostHog Rails uses the following components:
 
 - **Railtie** - Hooks into Rails initialization
 - **Middleware** - Three middleware components provide request context and capture exceptions:
-  - `RequestContext` - Applies PostHog tracing headers and request metadata during Rails requests
+  - `RequestContext` - Applies request metadata and optional PostHog tracing header identity/session context during Rails requests
   - `RescuedExceptionInterceptor` - Catches rescued exceptions
   - `CaptureExceptions` - Reports all exceptions to PostHog
 - **ActiveJob** - Prepends exception handling to `perform_now`
