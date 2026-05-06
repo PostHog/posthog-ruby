@@ -24,7 +24,7 @@ module PostHog
 
       def context_data(request)
         data = { properties: request_properties(request) }
-        return data unless capture_tracing_headers?
+        return data unless use_tracing_headers?
 
         data.merge(
           distinct_id: tracing_header(request, 'X-POSTHOG-DISTINCT-ID'),
@@ -32,8 +32,8 @@ module PostHog
         )
       end
 
-      def capture_tracing_headers?
-        PostHog::Rails.config&.capture_tracing_headers != false
+      def use_tracing_headers?
+        PostHog::Rails.config&.use_tracing_headers != false
       end
 
       def request_properties(request)

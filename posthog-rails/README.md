@@ -50,7 +50,7 @@ PostHog::Rails.configure do |config|
   config.auto_capture_exceptions = true           # Enable automatic exception capture (default: false)
   config.report_rescued_exceptions = true         # Report exceptions Rails rescues (default: false)
   config.auto_instrument_active_job = true        # Instrument background jobs (default: false)
-  config.capture_tracing_headers = true           # Use PostHog tracing headers for identity/session context (default: true)
+  config.use_tracing_headers = true           # Use PostHog tracing headers for identity/session context (default: true)
   config.capture_user_context = true              # Include authenticated user info in exceptions
   config.current_user_method = :current_user      # Method to get current user
   config.user_id_method = nil                     # Method to get ID from user (auto-detect)
@@ -253,7 +253,7 @@ Configure these via `PostHog::Rails.configure` or `PostHog::Rails.config`:
 | `auto_capture_exceptions` | Boolean | `false` | Automatically capture exceptions |
 | `report_rescued_exceptions` | Boolean | `false` | Report exceptions Rails rescues |
 | `auto_instrument_active_job` | Boolean | `false` | Instrument ActiveJob |
-| `capture_tracing_headers` | Boolean | `true` | Use PostHog tracing headers as request-scoped default `distinct_id` and `$session_id` values |
+| `use_tracing_headers` | Boolean | `true` | Use PostHog tracing headers as request-scoped default `distinct_id` and `$session_id` values |
 | `capture_user_context` | Boolean | `true` | Include authenticated user info in exceptions |
 | `current_user_method` | Symbol | `:current_user` | Controller method for user |
 | `user_id_method` | Symbol | `nil` | Method to extract ID from user object (auto-detect if nil) |
@@ -315,7 +315,7 @@ PostHog Rails automatically applies request-scoped context to events captured du
 Disable tracing header identity/session capture if you do not want client-supplied PostHog tracing headers used for server-side events. Request metadata is still captured:
 
 ```ruby
-PostHog::Rails.config.capture_tracing_headers = false
+PostHog::Rails.config.use_tracing_headers = false
 ```
 
 ## User Context

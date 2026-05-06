@@ -65,7 +65,7 @@ RSpec.describe PostHog::Rails::RequestContext do
   end
 
   it 'can disable tracing header capture while preserving request metadata' do
-    PostHog::Rails.config.capture_tracing_headers = false
+    PostHog::Rails.config.use_tracing_headers = false
 
     call_with(
       'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
@@ -248,7 +248,7 @@ RSpec.describe PostHog::Rails::RequestContext do
 
   it 'disables tracing headers for exceptions while preserving request metadata' do
     PostHog::Rails.config.auto_capture_exceptions = true
-    PostHog::Rails.config.capture_tracing_headers = false
+    PostHog::Rails.config.use_tracing_headers = false
 
     allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
       client.capture_exception(exception, distinct_id, properties)

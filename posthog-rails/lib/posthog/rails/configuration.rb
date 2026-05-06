@@ -16,7 +16,7 @@ module PostHog
       attr_accessor :excluded_exceptions
 
       # Whether to use PostHog tracing headers for request-scoped identity/session context
-      attr_accessor :capture_tracing_headers
+      attr_accessor :use_tracing_headers
 
       # Whether to capture the current user context in exceptions
       attr_accessor :capture_user_context
@@ -33,7 +33,7 @@ module PostHog
         @report_rescued_exceptions = false
         @auto_instrument_active_job = false
         @excluded_exceptions = []
-        @capture_tracing_headers = true
+        @use_tracing_headers = true
         @capture_user_context = true
         @current_user_method = :current_user
         @user_id_method = nil
