@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require 'posthog/internal/context'
 require 'posthog/rails/parameter_filter'
-require 'posthog/rails/request_metadata'
 
 module PostHog
   module Rails
@@ -54,7 +52,7 @@ module PostHog
 
       def capture_exception(exception, env)
         request = ActionDispatch::Request.new(env)
-        distinct_id = extract_distinct_id(env, request)
+        distinct_id = extract_distinct_id(env)
         additional_properties = build_properties(request, env)
 
         PostHog.capture_exception(exception, distinct_id, additional_properties)
@@ -63,8 +61,9 @@ module PostHog
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
       end
 
-      def extract_distinct_id(env, _request)
-        # Prefer authenticated Rails user context over client-supplied tracing headers.
+      def extract_distinct_id(env)
+        # Prefer authenticated Rails user context. Request/tracing context is
+        # applied later by the core capture path if this returns nil.
         if PostHog::Rails.config&.capture_user_context && env['action_controller.instance']
           controller = env['action_controller.instance']
           method_name = PostHog::Rails.config&.current_user_method || :current_user
@@ -75,9 +74,6 @@ module PostHog
             return user_id if present?(user_id)
           end
         end
-
-        context_distinct_id = Internal::Context.current&.distinct_id
-        return context_distinct_id if present?(context_distinct_id)
 
         nil
       end
@@ -105,7 +101,7 @@ module PostHog
       def build_properties(request, env)
         properties = {
           '$exception_source' => 'rails'
-        }.merge(request_metadata_properties(request))
+        }
 
         # Add controller and action if available
         if env['action_controller.instance']
@@ -128,31 +124,6 @@ module PostHog
         properties['$referrer'] = safe_serialize(request.referrer) if request.referrer
 
         properties
-      end
-
-      REQUEST_METADATA_KEYS = %w[
-        $current_url
-        $request_method
-        $request_path
-        $user_agent
-        $ip
-      ].freeze
-      private_constant :REQUEST_METADATA_KEYS
-
-      def request_metadata_properties(request)
-        # When RequestContext is active, regular capture context already owns and
-        # applies these request properties. Fall back to direct extraction only
-        # when that context is unavailable, e.g. if capture_request_context is disabled.
-        return {} if request_metadata_in_context?
-
-        RequestMetadata.extract(request)
-      end
-
-      def request_metadata_in_context?
-        properties = Internal::Context.current&.properties
-        return false unless properties.is_a?(Hash)
-
-        REQUEST_METADATA_KEYS.any? { |key| properties.key?(key) || properties.key?(key.to_sym) }
       end
 
       def response_status(response)

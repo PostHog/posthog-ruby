@@ -4,10 +4,7 @@ require 'posthog/rails/tracing_headers'
 
 module PostHog
   module Rails
-    # Internal helpers for extracting request metadata shared by request context
-    # and exception capture. Kept separate so exception capture can reuse the
-    # already-extracted request context when available and fall back to direct
-    # extraction when request context capture is disabled.
+    # Internal helpers for extracting request metadata owned by RequestContext.
     module RequestMetadata
       module_function
 

@@ -13,8 +13,6 @@ module PostHog
       end
 
       def call(env)
-        return @app.call(env) if PostHog::Rails.config&.capture_request_context == false
-
         request = build_request(env)
 
         Internal::Context.with_context(context_data(request), fresh: true) do
@@ -25,14 +23,17 @@ module PostHog
       private
 
       def context_data(request)
-        session_id = tracing_header(request, 'X-POSTHOG-SESSION-ID')
-        distinct_id = tracing_header(request, 'X-POSTHOG-DISTINCT-ID')
+        data = { properties: request_properties(request) }
+        return data unless capture_tracing_headers?
 
-        {
-          distinct_id: distinct_id,
-          session_id: session_id,
-          properties: request_properties(request)
-        }
+        data.merge(
+          distinct_id: tracing_header(request, 'X-POSTHOG-DISTINCT-ID'),
+          session_id: tracing_header(request, 'X-POSTHOG-SESSION-ID')
+        )
+      end
+
+      def capture_tracing_headers?
+        PostHog::Rails.config&.capture_tracing_headers != false
       end
 
       def request_properties(request)

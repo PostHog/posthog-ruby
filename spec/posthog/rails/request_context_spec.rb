@@ -64,8 +64,8 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$ip']).to eq('203.0.113.10')
   end
 
-  it 'can disable automatic Rails request context capture' do
-    PostHog::Rails.config.capture_request_context = false
+  it 'can disable tracing header capture while preserving request metadata' do
+    PostHog::Rails.config.capture_tracing_headers = false
 
     call_with(
       'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
@@ -78,8 +78,8 @@ RSpec.describe PostHog::Rails::RequestContext do
     message = client.dequeue_last_message
     expect(message[:distinct_id]).not_to eq('header-user')
     expect(message[:properties]['$session_id']).to be_nil
-    expect(message[:properties]['$request_path']).to be_nil
-    expect(message[:properties]['$user_agent']).to be_nil
+    expect(message[:properties]['$request_path']).to eq('/api/test')
+    expect(message[:properties]['$user_agent']).to eq('RSpec Agent')
     expect(message[:properties]['$process_person_profile']).to be false
   end
 
@@ -246,9 +246,9 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$user_agent']).to eq('Exception Agent')
   end
 
-  it 'preserves exception request metadata when request context capture is disabled' do
+  it 'disables tracing headers for exceptions while preserving request metadata' do
     PostHog::Rails.config.auto_capture_exceptions = true
-    PostHog::Rails.config.capture_request_context = false
+    PostHog::Rails.config.capture_tracing_headers = false
 
     allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
       client.capture_exception(exception, distinct_id, properties)
