@@ -64,6 +64,18 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$ip']).to eq('203.0.113.10')
   end
 
+  it 'does not include query parameters in $current_url' do
+    call_with(path: '/api/test?token=secret&email=user@example.com') do
+      client.capture(event: 'query_event')
+    end
+
+    message = client.dequeue_last_message
+    expect(message[:properties]['$current_url']).to include('/api/test')
+    expect(message[:properties]['$current_url']).not_to include('?')
+    expect(message[:properties]['$current_url']).not_to include('token=secret')
+    expect(message[:properties]['$current_url']).not_to include('user@example.com')
+  end
+
   it 'can disable tracing header capture while preserving request metadata' do
     PostHog::Rails.config.use_tracing_headers = false
 

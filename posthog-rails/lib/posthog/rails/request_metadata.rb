@@ -10,7 +10,7 @@ module PostHog
 
       def extract(request)
         properties = {}
-        add_property(properties, '$current_url', request_value(request, :url))
+        add_property(properties, '$current_url', current_url(request))
         request_method = request_value(request, :request_method) || request_value(request, :method)
         add_property(properties, '$request_method', request_method)
         add_property(properties, '$request_path', request_value(request, :path) || request_value(request, :path_info))
@@ -18,6 +18,14 @@ module PostHog
         add_property(properties, '$ip', client_ip(request))
         properties
       end
+
+      def current_url(request)
+        url = request_value(request, :url)
+        return if url.nil?
+
+        url.to_s.split('?', 2).first
+      end
+      private_class_method :current_url
 
       def client_ip(request)
         trusted_ip = request_value(request, :remote_ip) || request_value(request, :ip)
