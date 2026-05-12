@@ -364,15 +364,15 @@ module PostHog
       !!response
     end
 
-    # @param [String] flag_key The unique flag key of the feature flag
+    # @param [String, Symbol] flag_key The unique flag key of the feature flag
     # @return [String] The decrypted value of the feature flag payload
     def get_remote_config_payload(flag_key)
-      @feature_flags_poller.get_remote_config_payload(flag_key)
+      @feature_flags_poller.get_remote_config_payload(flag_key.to_s)
     end
 
     # Returns whether the given feature flag is enabled for the given user or not
     #
-    # @param [String] key The key of the feature flag
+    # @param [String, Symbol] key The key of the feature flag
     # @param [String] distinct_id The distinct id of the user
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
@@ -455,7 +455,7 @@ module PostHog
     # @param [Hash] group_properties
     # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely
     # @param [Boolean] disable_geoip Stamped on captured access events
-    # @param [Array<String>] flag_keys When set, scopes the underlying /flags
+    # @param [Array<String, Symbol>, String, Symbol] flag_keys When set, scopes the underlying /flags
     #   request to only these flag keys (sent as `flag_keys_to_evaluate`).
     #   Distinct from {FeatureFlagEvaluations#only}, which filters the
     #   already-fetched snapshot in memory.
@@ -479,9 +479,11 @@ module PostHog
         distinct_id, groups, person_properties, group_properties
       )
 
+      flag_keys = Array(flag_keys).map(&:to_s) if flag_keys
+
       records = {}
       locally_evaluated_keys = Set.new
-      flag_keys_set = flag_keys&.to_set(&:to_s)
+      flag_keys_set = flag_keys&.to_set
 
       @feature_flags_poller.load_feature_flags
       poller_flags_by_key = @feature_flags_poller.feature_flags_by_key || {}
@@ -598,7 +600,7 @@ module PostHog
     # @deprecated Use {#get_feature_flag_result} instead, which returns both the flag value and payload
     #   and properly raises the $feature_flag_called event.
     #
-    # @param [String] key The key of the feature flag
+    # @param [String, Symbol] key The key of the feature flag
     # @param [String] distinct_id The distinct id of the user
     # @option [String or boolean] match_value The value of the feature flag to be matched
     # @option [Hash] groups
@@ -623,6 +625,7 @@ module PostHog
         'instead — this consolidates flag evaluation into a single `/flags` request per ' \
         'incoming request.'
       )
+      key = key.to_s
       person_properties, group_properties = add_local_person_and_group_properties(distinct_id, groups,
                                                                                   person_properties, group_properties)
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties,
@@ -725,6 +728,7 @@ module PostHog
       only_evaluate_locally: false,
       send_feature_flag_events: true
     )
+      key = key.to_s
       person_properties, group_properties = add_local_person_and_group_properties(
         distinct_id, groups, person_properties, group_properties
       )

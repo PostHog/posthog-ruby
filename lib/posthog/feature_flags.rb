@@ -125,6 +125,7 @@ module PostHog
 
     def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil,
                   disable_geoip = nil)
+      flag_keys = Array(flag_keys).map(&:to_s) if flag_keys
       request_data = {
         distinct_id: distinct_id,
         groups: groups,
@@ -160,7 +161,7 @@ module PostHog
     end
 
     def get_remote_config_payload(flag_key)
-      _request_remote_config_payload(flag_key)
+      _request_remote_config_payload(flag_key.to_s)
     end
 
     def get_feature_flag(
@@ -171,6 +172,8 @@ module PostHog
       group_properties = {},
       only_evaluate_locally = false
     )
+      key = key.to_s
+
       # make sure they're loaded on first run
       load_feature_flags
 
@@ -363,6 +366,8 @@ module PostHog
       group_properties = {},
       only_evaluate_locally = false
     )
+      key = key.to_s
+
       if match_value.nil?
         match_value = get_feature_flag(
           key,
@@ -377,7 +382,7 @@ module PostHog
       response = _compute_flag_payload_locally(key, match_value) unless match_value.nil?
       if response.nil? && !only_evaluate_locally
         flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
-        response = flags_payloads[key.downcase] || nil
+        response = flags_payloads.key?(key) ? flags_payloads[key] : flags_payloads[key.downcase]
       end
       response
     end
@@ -923,6 +928,7 @@ module PostHog
     def _compute_flag_payload_locally(key, match_value)
       return nil if @feature_flags_by_key.nil?
 
+      key = key.to_s
       response = nil
       if [true, false].include? match_value
         response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_s.to_sym)
