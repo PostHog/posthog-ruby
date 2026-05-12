@@ -125,7 +125,7 @@ module PostHog
 
     def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil,
                   disable_geoip = nil)
-      flag_keys = Array(flag_keys).map(&:to_s) if flag_keys
+      flag_keys = flag_keys.map(&:to_s) if flag_keys.is_a?(Array)
       request_data = {
         distinct_id: distinct_id,
         groups: groups,
@@ -382,7 +382,7 @@ module PostHog
       response = _compute_flag_payload_locally(key, match_value) unless match_value.nil?
       if response.nil? && !only_evaluate_locally
         flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
-        response = flags_payloads.key?(key) ? flags_payloads[key] : flags_payloads[key.downcase]
+        response = flags_payloads[key.downcase] || nil
       end
       response
     end

@@ -455,7 +455,7 @@ module PostHog
     # @param [Hash] group_properties
     # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely
     # @param [Boolean] disable_geoip Stamped on captured access events
-    # @param [Array<String, Symbol>, String, Symbol] flag_keys When set, scopes the underlying /flags
+    # @param [Array<String, Symbol>] flag_keys When set, scopes the underlying /flags
     #   request to only these flag keys (sent as `flag_keys_to_evaluate`).
     #   Distinct from {FeatureFlagEvaluations#only}, which filters the
     #   already-fetched snapshot in memory.
@@ -479,11 +479,9 @@ module PostHog
         distinct_id, groups, person_properties, group_properties
       )
 
-      flag_keys = Array(flag_keys).map(&:to_s) if flag_keys
-
       records = {}
       locally_evaluated_keys = Set.new
-      flag_keys_set = flag_keys&.to_set
+      flag_keys_set = flag_keys&.to_set(&:to_s)
 
       @feature_flags_poller.load_feature_flags
       poller_flags_by_key = @feature_flags_poller.feature_flags_by_key || {}

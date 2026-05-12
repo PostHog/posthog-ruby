@@ -166,9 +166,9 @@ module PostHog
         )
       end
 
-      it 'accepts a symbol flag_keys filter' do
+      it 'accepts symbol keys in the flag_keys filter array' do
         stub_flags(flags_response)
-        client.evaluate_flags('user-1', flag_keys: :'boolean-flag')
+        client.evaluate_flags('user-1', flag_keys: [:'boolean-flag'])
         expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).with(
           body: hash_including(flag_keys_to_evaluate: %w[boolean-flag])
         )
