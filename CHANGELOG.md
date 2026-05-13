@@ -1,3 +1,9 @@
+## 3.8.1
+
+### Patch Changes
+
+- 4b3c2a8: Accept symbol feature flag keys in flag APIs.
+
 ## 3.8.0
 
 ### Minor Changes
