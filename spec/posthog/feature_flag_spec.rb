@@ -57,6 +57,42 @@ module PostHog
                                 person_properties: { 'region' => 'Canada' })).to eq(false)
     end
 
+    it 'accepts symbol flag keys when evaluating locally' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Symbol Flag',
+            'key' => 'symbol-flag',
+            'is_simple_flag' => true,
+            'active' => true,
+            'filters' => {
+              'groups' => [{ 'rollout_percentage' => 100 }],
+              'payloads' => { 'true' => '{"source":"local"}' }
+            }
+          }
+        ]
+      }
+      stub_request(
+        :get,
+        'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+      expect(c.get_feature_flag(:'symbol-flag', 'some-distinct-id',
+                                send_feature_flag_events: false)).to eq(true)
+      expect(c.is_feature_enabled(:'symbol-flag', 'some-distinct-id',
+                                  send_feature_flag_events: false)).to eq(true)
+
+      result = c.get_feature_flag_result(:'symbol-flag', 'some-distinct-id', send_feature_flag_events: false)
+      expect(result.key).to eq('symbol-flag')
+      expect(result.value).to eq(true)
+      expect(c.get_feature_flag_payload(:'symbol-flag', 'some-distinct-id')).to eq('{"source":"local"}')
+      assert_not_requested :post, flags_endpoint
+    end
+
     it 'evaluates group properties' do
       api_feature_flag_res = {
         'flags' => [

@@ -361,6 +361,15 @@ module PostHog
              })
         )
       end
+
+      it 'accepts symbol flag keys' do
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: flags_v4_response.to_json)
+
+        expect(client.get_feature_flag(:'enabled-flag', 'test-distinct-id',
+                                       send_feature_flag_events: false)).to eq(true)
+        expect(client.get_feature_flag_payload(:'enabled-flag', 'test-distinct-id')).to eq('{"foo": 1}')
+      end
     end
   end
 
@@ -398,6 +407,17 @@ module PostHog
       expect(result[:test]).to eq('payload')
 
       # Verify the request was made to the correct URL with token parameter
+      expect(WebMock).to have_requested(:get, remote_config_endpoint)
+    end
+
+    it 'accepts a symbol flag key' do
+      remote_config_response = { test: 'payload' }
+      stub_request(:get, remote_config_endpoint)
+        .to_return(status: 200, body: remote_config_response.to_json)
+
+      result = poller.get_remote_config_payload(:'test-flag')
+
+      expect(result[:test]).to eq('payload')
       expect(WebMock).to have_requested(:get, remote_config_endpoint)
     end
   end

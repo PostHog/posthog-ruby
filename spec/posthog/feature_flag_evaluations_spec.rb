@@ -104,6 +104,16 @@ module PostHog
         expect(unknown[:properties]['$feature_flag_error']).to eq('flag_missing')
       end
 
+      it 'accepts symbol flag keys when reading a snapshot' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+
+        expect(snapshot.enabled?(:'boolean-flag')).to be(true)
+        expect(snapshot.get_flag(:'variant-flag')).to eq('variant-value')
+        expect(snapshot.get_flag_payload(:'variant-flag')).to eq('key' => 'value')
+        expect(snapshot.only(:'boolean-flag').keys).to eq(['boolean-flag'])
+      end
+
       it 'enabled? returns false for unknown flags' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
@@ -151,6 +161,14 @@ module PostHog
       it 'forwards flag_keys to the /flags request body as flag_keys_to_evaluate' do
         stub_flags(flags_response)
         client.evaluate_flags('user-1', flag_keys: %w[boolean-flag])
+        expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).with(
+          body: hash_including(flag_keys_to_evaluate: %w[boolean-flag])
+        )
+      end
+
+      it 'accepts symbol keys in the flag_keys filter array' do
+        stub_flags(flags_response)
+        client.evaluate_flags('user-1', flag_keys: [:'boolean-flag'])
         expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).with(
           body: hash_including(flag_keys_to_evaluate: %w[boolean-flag])
         )
