@@ -18,6 +18,7 @@ module PostHog
         PostHog::Rails.enter_web_request
 
         response = @app.call(env)
+        env['posthog.response_status_code'] = response_status(response)
 
         # Check if there was an exception that Rails handled
         exception = collect_exception(env)
@@ -51,7 +52,7 @@ module PostHog
 
       def capture_exception(exception, env)
         request = ActionDispatch::Request.new(env)
-        distinct_id = extract_distinct_id(env, request)
+        distinct_id = extract_distinct_id(env)
         additional_properties = build_properties(request, env)
 
         PostHog.capture_exception(exception, distinct_id, additional_properties)
@@ -60,20 +61,21 @@ module PostHog
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
       end
 
-      def extract_distinct_id(env, request)
-        # Try to get user from controller if capture_user_context is enabled
+      def extract_distinct_id(env)
+        # Prefer authenticated Rails user context. Request/tracing context is
+        # applied later by the core capture path if this returns nil.
         if PostHog::Rails.config&.capture_user_context && env['action_controller.instance']
           controller = env['action_controller.instance']
           method_name = PostHog::Rails.config&.current_user_method || :current_user
 
           if controller.respond_to?(method_name, true)
             user = controller.send(method_name)
-            return extract_user_id(user) if user
+            user_id = extract_user_id(user) if user
+            return user_id if present?(user_id)
           end
         end
 
-        # Fallback to session ID or nil
-        request.session&.id&.to_s
+        nil
       end
 
       def extract_user_id(user)
@@ -98,10 +100,7 @@ module PostHog
 
       def build_properties(request, env)
         properties = {
-          '$exception_source' => 'rails',
-          '$current_url' => safe_serialize(request.url),
-          '$request_method' => safe_serialize(request.method),
-          '$request_path' => safe_serialize(request.path)
+          '$exception_source' => 'rails'
         }
 
         # Add controller and action if available
@@ -118,13 +117,22 @@ module PostHog
           properties['$request_params'] = safe_serialize(filtered_params) unless filtered_params.empty?
         end
 
-        # Add user agent
-        properties['$user_agent'] = safe_serialize(request.user_agent) if request.user_agent
+        response_status_code = env['posthog.response_status_code']
+        properties['$response_status_code'] = response_status_code if response_status_code
 
         # Add referrer
         properties['$referrer'] = safe_serialize(request.referrer) if request.referrer
 
         properties
+      end
+
+      def response_status(response)
+        status = response.respond_to?(:[]) ? response[0] : nil
+        status if status.is_a?(Integer)
+      end
+
+      def present?(value)
+        !(value.nil? || (value.respond_to?(:empty?) && value.empty?))
       end
     end
   end

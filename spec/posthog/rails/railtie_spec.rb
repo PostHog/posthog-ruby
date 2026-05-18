@@ -25,12 +25,14 @@ RSpec.describe PostHog::Rails::Railtie do
       # defined as an instance method (or delegated to one).
       railtie = PostHog::Rails::Railtie.instance
       expect(railtie).to respond_to(:insert_middleware_after)
+      expect(railtie).to respond_to(:insert_middleware_before)
     end
 
     it 'successfully calls insert_middleware_after when the initializer runs' do
       # Stub the middleware constants referenced in the initializer block
       stub_const('ActionDispatch::DebugExceptions', Class.new)
       stub_const('ActionDispatch::ShowExceptions', Class.new)
+      stub_const('PostHog::Rails::RequestContext', Class.new)
       stub_const('PostHog::Rails::RescuedExceptionInterceptor', Class.new)
       stub_const('PostHog::Rails::CaptureExceptions', Class.new)
 
@@ -41,7 +43,7 @@ RSpec.describe PostHog::Rails::Railtie do
       # During initialization, app.config.middleware is a MiddlewareStackProxy
       # which only supports recording operations — NOT query methods like include?.
       # The mock must reflect this accurately.
-      middleware_proxy = double('MiddlewareStackProxy', insert_after: true)
+      middleware_proxy = double('MiddlewareStackProxy', insert_after: true, insert_before: true)
       app = double('app', config: double('config', middleware: middleware_proxy))
 
       # Reproduce the exact execution context: the block is run via instance_exec
