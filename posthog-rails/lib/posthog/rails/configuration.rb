@@ -3,31 +3,33 @@
 module PostHog
   module Rails
     class Configuration
-      # Whether to automatically capture exceptions from Rails
+      # @return [Boolean] Whether to automatically capture exceptions from Rails. Defaults to false.
       attr_accessor :auto_capture_exceptions
 
-      # Whether to capture exceptions that Rails rescues (e.g., with rescue_from)
+      # @return [Boolean] Whether to capture exceptions that Rails rescues (e.g., with rescue_from). Defaults to false.
       attr_accessor :report_rescued_exceptions
 
-      # Whether to automatically instrument ActiveJob
+      # @return [Boolean] Whether to automatically instrument ActiveJob. Defaults to false.
       attr_accessor :auto_instrument_active_job
 
-      # List of exception classes to ignore (in addition to default)
+      # @return [Array<String>] Exception class names to ignore in addition to the defaults.
       attr_accessor :excluded_exceptions
 
-      # Whether to use PostHog tracing headers for request-scoped identity/session context
+      # @return [Boolean] Whether to use PostHog tracing headers for request-scoped identity/session context.
+      #   Defaults to true.
       attr_accessor :use_tracing_headers
 
-      # Whether to capture the current user context in exceptions
+      # @return [Boolean] Whether to capture the current user context in exceptions. Defaults to true.
       attr_accessor :capture_user_context
 
-      # Method name to call on controller to get user ID (default: :current_user)
+      # @return [Symbol] Method name to call on controller to get the current user. Defaults to :current_user.
       attr_accessor :current_user_method
 
-      # Method name to call on user object to get distinct_id (default: auto-detect)
-      # When nil, tries: posthog_distinct_id, distinct_id, id, pk, uuid in order
+      # @return [Symbol, nil] Method name to call on the user object to get distinct_id. When nil, tries:
+      #   posthog_distinct_id, distinct_id, id, pk, uuid in order.
       attr_accessor :user_id_method
 
+      # @return [PostHog::Rails::Configuration]
       def initialize
         @auto_capture_exceptions = false
         @report_rescued_exceptions = false
@@ -39,7 +41,9 @@ module PostHog
         @user_id_method = nil
       end
 
-      # Default exceptions that Rails apps typically don't want to track
+      # Default exceptions that Rails apps typically don't want to track.
+      #
+      # @return [Array<String>]
       def default_excluded_exceptions
         [
           'AbstractController::ActionNotFound',
@@ -58,6 +62,8 @@ module PostHog
         ]
       end
 
+      # @param exception [Exception] The exception to check.
+      # @return [Boolean] Whether the exception should be captured.
       def should_capture_exception?(exception)
         exception_name = exception.class.name
         !all_excluded_exceptions.include?(exception_name)

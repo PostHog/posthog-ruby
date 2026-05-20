@@ -6,6 +6,9 @@ require 'posthog/transport'
 require 'posthog/utils'
 
 module PostHog
+  # Background worker that batches and sends queued events.
+  #
+  # @api private
   class SendWorker
     include PostHog::Utils
     include PostHog::Defaults
@@ -16,12 +19,13 @@ module PostHog
     # The worker continuously takes messages off the queue
     # and makes requests to the posthog.com api
     #
-    # queue   - Queue synchronized between client and worker
-    # api_key  - String of the project's API key
-    # options - Hash of worker options
-    #           batch_size - Fixnum of how many items to send in a batch
-    #           on_error   - Proc of what to do on an error
-    #
+    # @param queue [Queue] Queue synchronized between client and worker.
+    # @param api_key [String] Project API key.
+    # @param options [Hash] Worker options.
+    # @option options [Integer] :batch_size How many items to send in a batch.
+    # @option options [Proc] :on_error Callback invoked as `on_error.call(status, error)`.
+    # @option options [String] :host PostHog API host URL.
+    # @option options [Boolean] :skip_ssl_verification Disable SSL certificate verification.
     def initialize(queue, api_key, options = {})
       symbolize_keys! options
       @queue = queue
@@ -33,8 +37,9 @@ module PostHog
       @transport = Transport.new api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification]
     end
 
-    # public: Continuously runs the loop to check for new events
+    # Continuously runs the loop to check for new events.
     #
+    # @return [void]
     def run
       until Thread.current[:should_exit]
         return if @queue.empty?
@@ -54,12 +59,14 @@ module PostHog
       @transport.shutdown
     end
 
+    # @return [void]
     def shutdown
       @transport.shutdown
     end
 
     # public: Check whether we have outstanding requests.
     #
+    # @return [Boolean] Whether the worker has outstanding requests.
     # TODO: Rename to `requesting?` in future version
     def is_requesting? # rubocop:disable Naming/PredicateName
       @lock.synchronize { !@batch.empty? }

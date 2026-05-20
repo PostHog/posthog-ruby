@@ -13,7 +13,12 @@ module PostHog
       end
 
       module ClassMethods
-        # DSL for defining how to extract distinct_id from job arguments
+        # DSL for defining how to extract distinct_id from job arguments.
+        #
+        # @param proc [Proc, nil] Callable that receives the job's perform arguments.
+        # @yield The block receives the job's perform arguments.
+        # @return [Proc, nil] The configured extractor.
+        #
         # Example:
         #   class MyJob < ApplicationJob
         #     posthog_distinct_id ->(user, arg1, arg2) { user.id }
@@ -25,6 +30,7 @@ module PostHog
           @posthog_distinct_id_proc = proc || block
         end
 
+        # @return [Proc, nil] The configured distinct_id extractor.
         def posthog_distinct_id_proc
           @posthog_distinct_id_proc
         end

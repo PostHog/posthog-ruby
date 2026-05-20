@@ -14,26 +14,31 @@ module PostHog
   #
   # == Required Methods
   #
-  # [+flag_definitions+]
+  # @!method flag_definitions
   #   Retrieve cached flag definitions. Return a Hash with +:flags+,
   #   +:group_type_mapping+, and +:cohorts+ keys, or +nil+ if the cache
   #   is empty. Returning +nil+ triggers an API fetch when no flags are
   #   loaded yet (emergency fallback).
+  #   @return [Hash, nil]
   #
-  # [+should_fetch_flag_definitions?+]
+  # @!method should_fetch_flag_definitions?
   #   Return +true+ if this instance should fetch new definitions from the
   #   API, +false+ to read from cache instead. Use for distributed lock
   #   coordination so only one worker fetches at a time.
+  #   @return [Boolean]
   #
-  # [+on_flag_definitions_received(data)+]
+  # @!method on_flag_definitions_received(data)
   #   Called after successfully fetching new definitions from the API.
   #   +data+ is a Hash with +:flags+, +:group_type_mapping+, and +:cohorts+
   #   keys (plain Ruby types, not Concurrent:: wrappers). Store it in your
   #   external cache.
+  #   @param data [Hash]
+  #   @return [void]
   #
-  # [+shutdown+]
+  # @!method shutdown
   #   Called when the PostHog client shuts down. Release any distributed
   #   locks and clean up resources.
+  #   @return [void]
   #
   # == Error Handling
   #
@@ -66,6 +71,7 @@ module PostHog
     #
     # @param provider [Object] the cache provider to validate
     # @raise [ArgumentError] if any required methods are missing
+    # @return [void]
     def self.validate!(provider)
       missing = REQUIRED_METHODS.reject { |m| provider.respond_to?(m) }
       return if missing.empty?

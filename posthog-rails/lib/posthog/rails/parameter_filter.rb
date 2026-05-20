@@ -9,6 +9,8 @@ module PostHog
     # It automatically detects the correct Rails parameter filtering API based on
     # the Rails version.
     #
+    # @api private
+    #
     # @example Usage in a class
     #   class MyClass
     #     include PostHog::Rails::ParameterFilter
@@ -24,10 +26,12 @@ module PostHog
       MAX_DEPTH = 10
 
       if ::Rails.version.to_f >= 6.0
+        # @return [Class] Rails parameter filter backend.
         def self.backend
           ActiveSupport::ParameterFilter
         end
       else
+        # @return [Class] Rails parameter filter backend.
         def self.backend
           ActionDispatch::Http::ParameterFilter
         end

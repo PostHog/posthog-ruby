@@ -3,10 +3,13 @@
 require 'posthog/defaults'
 
 module PostHog
+  # Retry backoff policy used by the SDK transport.
+  #
+  # @api private
   class BackoffPolicy
     include PostHog::Defaults::BackoffPolicy
 
-    # @param [Hash] opts
+    # @param opts [Hash]
     # @option opts [Numeric] :min_timeout_ms The minimum backoff timeout
     # @option opts [Numeric] :max_timeout_ms The maximum backoff timeout
     # @option opts [Numeric] :multiplier The value to multiply the current

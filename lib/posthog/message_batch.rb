@@ -4,7 +4,9 @@ require 'forwardable'
 require 'posthog/logging'
 
 module PostHog
-  # A batch of `Message`s to be sent to the API
+  # A batch of messages to be sent to the API.
+  #
+  # @api private
   class MessageBatch
     class JSONGenerationError < StandardError
     end
@@ -13,12 +15,15 @@ module PostHog
     include PostHog::Logging
     include PostHog::Defaults::MessageBatch
 
+    # @param max_message_count [Integer] Maximum number of messages in the batch.
     def initialize(max_message_count)
       @messages = []
       @max_message_count = max_message_count
       @json_size = 0
     end
 
+    # @param message [Hash] Message to add to the batch.
+    # @return [Array<Hash>, nil]
     def <<(message)
       begin
         message_json = message.to_json
@@ -35,10 +40,12 @@ module PostHog
       end
     end
 
+    # @return [Boolean] Whether the batch is full.
     def full?
       item_count_exhausted? || size_exhausted?
     end
 
+    # @return [void]
     def clear
       @messages.clear
       @json_size = 0

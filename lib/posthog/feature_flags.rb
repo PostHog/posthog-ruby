@@ -20,10 +20,20 @@ module PostHog
   class RequiresServerEvaluation < StandardError
   end
 
+  # Polls and evaluates feature flag definitions for {PostHog::Client}.
+  #
+  # @api private
   class FeatureFlagsPoller
     include PostHog::Logging
     include PostHog::Utils
 
+    # @param polling_interval [Integer, nil] Seconds between local feature flag definition polls.
+    # @param personal_api_key [String, nil] Personal API key used to fetch local evaluation definitions.
+    # @param project_api_key [String] Project API key.
+    # @param host [String] PostHog API host URL.
+    # @param feature_flag_request_timeout_seconds [Integer] Timeout for feature flag requests.
+    # @param on_error [Proc, nil] Callback invoked as `on_error.call(status, error)`.
+    # @param flag_definition_cache_provider [Object, nil] Optional {FlagDefinitionCacheProvider} implementation.
     def initialize(
       polling_interval,
       personal_api_key,

@@ -4,14 +4,19 @@ require 'posthog/rails/parameter_filter'
 
 module PostHog
   module Rails
-    # Middleware that captures exceptions and sends them to PostHog
+    # Middleware that captures exceptions and sends them to PostHog.
+    #
+    # @api private
     class CaptureExceptions
       include ParameterFilter
 
+      # @param app [#call] Rack application.
       def initialize(app)
         @app = app
       end
 
+      # @param env [Hash] Rack environment.
+      # @return [Array] Rack response.
       def call(env)
         # Signal that we're in a web request context
         # ErrorSubscriber will skip capture for web requests to avoid duplicates

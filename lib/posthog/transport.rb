@@ -10,11 +10,24 @@ require 'net/https'
 require 'json'
 
 module PostHog
+  # HTTP transport used by the SDK workers.
+  #
+  # @api private
   class Transport
     include PostHog::Defaults::Request
     include PostHog::Utils
     include PostHog::Logging
 
+    # @param options [Hash] Transport configuration.
+    # @option options [String] :api_host Full PostHog API host URL.
+    # @option options [String] :host Hostname to connect to.
+    # @option options [Integer] :port Port to connect to.
+    # @option options [Boolean] :ssl Whether to use HTTPS.
+    # @option options [Hash] :headers HTTP headers for batch requests.
+    # @option options [String] :path HTTP path for batch requests.
+    # @option options [Integer] :retries Number of retry attempts for retryable failures.
+    # @option options [PostHog::BackoffPolicy] :backoff_policy Backoff policy used between retries.
+    # @option options [Boolean] :skip_ssl_verification Disable SSL certificate verification.
     def initialize(options = {})
       if options[:api_host]
         uri = URI.parse(options[:api_host])
@@ -43,6 +56,8 @@ module PostHog
 
     # Sends a batch of messages to the API
     #
+    # @param api_key [String] Project API key.
+    # @param batch [PostHog::MessageBatch, Array<Hash>] Batch of messages to send.
     # @return [Response] API response
     def send(api_key, batch)
       logger.debug("Sending request for #{batch.length} items")
@@ -72,7 +87,9 @@ module PostHog
       end
     end
 
-    # Closes a persistent connection if it exists
+    # Closes a persistent connection if it exists.
+    #
+    # @return [void]
     def shutdown
       @http.finish if @http.started?
     end
