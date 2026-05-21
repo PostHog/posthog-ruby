@@ -1,3 +1,9 @@
+## 3.9.1
+
+### Patch Changes
+
+- d3ecc20: Reject semver values with leading zeros (e.g. `1.07.3`, `01.02.03`) during local feature flag evaluation, per semver 2.0.0 §2. Both override values and flag values are validated; invalid inputs raise `InconclusiveMatchError` so the condition does not match.
+
 ## 3.9.0
 
 ### Minor Changes
