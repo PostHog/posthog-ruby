@@ -1888,10 +1888,47 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property2, { 'version' => '1.2.3' })).to be true
     end
 
-    it 'with semver operators and leading zeros' do
+    it 'with semver operators rejects override values with leading zeros' do
       property = { 'key' => 'version', 'value' => '1.2.3', 'operator' => 'semver_eq' }
-      expect(FeatureFlagsPoller.match_property(property, { 'version' => '01.02.03' })).to be true
-      expect(FeatureFlagsPoller.match_property(property, { 'version' => '001.002.003' })).to be true
+
+      ['01.2.3', '1.02.3', '1.2.03', '1.07.3', '001.2.3', '01.02.03', '001.002.003'].each do |bad|
+        expect do
+          FeatureFlagsPoller.match_property(property, { 'version' => bad })
+        end.to raise_error(InconclusiveMatchError), "expected #{bad.inspect} to be rejected"
+      end
+    end
+
+    it 'with semver operators rejects flag values with leading zeros' do
+      gt = { 'key' => 'version', 'value' => '1.07.3', 'operator' => 'semver_gt' }
+      expect do
+        FeatureFlagsPoller.match_property(gt, { 'version' => '2.0.0' })
+      end.to raise_error(InconclusiveMatchError)
+
+      caret = { 'key' => 'version', 'value' => '01.2.3', 'operator' => 'semver_caret' }
+      expect do
+        FeatureFlagsPoller.match_property(caret, { 'version' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+
+      tilde = { 'key' => 'version', 'value' => '1.02.3', 'operator' => 'semver_tilde' }
+      expect do
+        FeatureFlagsPoller.match_property(tilde, { 'version' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+
+      wildcard = { 'key' => 'version', 'value' => '01.*', 'operator' => 'semver_wildcard' }
+      expect do
+        FeatureFlagsPoller.match_property(wildcard, { 'version' => '1.2.3' })
+      end.to raise_error(InconclusiveMatchError)
+    end
+
+    it 'with semver operators accepts literal zero components' do
+      eq_zero = { 'key' => 'version', 'value' => '0.1.0', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(eq_zero, { 'version' => '0.1.0' })).to be true
+
+      eq_zero_zero = { 'key' => 'version', 'value' => '0.0.0', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(eq_zero_zero, { 'version' => '0.0.0' })).to be true
+
+      eq_major_zero = { 'key' => 'version', 'value' => '1.0.0', 'operator' => 'semver_eq' }
+      expect(FeatureFlagsPoller.match_property(eq_major_zero, { 'version' => '1.0.0' })).to be true
     end
 
     it 'with semver operators and partial versions' do

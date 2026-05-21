@@ -456,6 +456,16 @@ module PostHog
       parsed_dt
     end
 
+    # Parse a single semver numeric identifier, rejecting empty, non-digit, or
+    # leading-zero values per semver 2.0.0 §2.
+    def self.parse_semver_numeric(part)
+      raise InconclusiveMatchError, 'Invalid semver format' if part.nil? || part.empty? || part !~ /^\d+$/
+      # Semver 2.0.0 §2: numeric identifiers MUST NOT include leading zeros.
+      raise InconclusiveMatchError, 'Invalid semver format' if part.length > 1 && part[0] == '0'
+
+      part.to_i
+    end
+
     # Parse a semver string into a comparable [major, minor, patch] integer array.
     # Handles v-prefix, whitespace, pre-release suffixes. Defaults missing components to 0.
     def self.parse_semver(value)
@@ -471,14 +481,9 @@ module PostHog
 
       raise InconclusiveMatchError, 'Invalid semver format' if parts.empty? || parts[0].to_s.empty?
 
-      # Check for leading dot or non-numeric parts
-      parts.each do |part|
-        raise InconclusiveMatchError, 'Invalid semver format' if part.empty? || part !~ /^\d+$/
-      end
-
-      major = parts[0].to_i
-      minor = parts.length > 1 ? parts[1].to_i : 0
-      patch = parts.length > 2 ? parts[2].to_i : 0
+      major = parse_semver_numeric(parts[0])
+      minor = parts.length > 1 ? parse_semver_numeric(parts[1]) : 0
+      patch = parts.length > 2 ? parse_semver_numeric(parts[2]) : 0
 
       [major, minor, patch]
     end
@@ -535,20 +540,22 @@ module PostHog
 
       raise InconclusiveMatchError, 'Invalid semver wildcard format' if parts.empty?
 
-      parts.each do |part|
-        raise InconclusiveMatchError, 'Invalid semver wildcard format' if part !~ /^\d+$/
+      numeric = parts.map do |part|
+        parse_semver_numeric(part)
+      rescue InconclusiveMatchError
+        raise InconclusiveMatchError, 'Invalid semver wildcard format'
       end
 
-      major = parts[0].to_i
-      case parts.length
+      major = numeric[0]
+      case numeric.length
       when 1
         [[major, 0, 0], [major + 1, 0, 0]]
       when 2
-        minor = parts[1].to_i
+        minor = numeric[1]
         [[major, minor, 0], [major, minor + 1, 0]]
       else
-        minor = parts[1].to_i
-        patch = parts[2].to_i
+        minor = numeric[1]
+        patch = numeric[2]
         [[major, minor, patch], [major, minor, patch + 1]]
       end
     end
