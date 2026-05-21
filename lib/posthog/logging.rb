@@ -3,8 +3,12 @@
 require 'logger'
 
 module PostHog
-  # Wraps an existing logger and adds a prefix to all messages
+  # Wraps an existing logger and adds a prefix to all messages.
+  #
+  # @api private
   class PrefixedLogger
+    # @param logger [Logger, #debug, #info, #warn, #error]
+    # @param prefix [String]
     def initialize(logger, prefix)
       @logger = logger
       @prefix = prefix
@@ -37,6 +41,7 @@ module PostHog
 
   module Logging
     class << self
+      # @return [Logger, PostHog::PrefixedLogger] The logger used by the SDK.
       def logger
         return @logger if @logger
 
@@ -52,6 +57,7 @@ module PostHog
         @logger = PrefixedLogger.new(base_logger, '[posthog-ruby]')
       end
 
+      # @param logger [Logger, #debug, #info, #warn, #error] Custom logger used by the SDK.
       attr_writer :logger
     end
 
@@ -63,6 +69,7 @@ module PostHog
       end
     end
 
+    # @return [Logger, PostHog::PrefixedLogger] The logger used by the SDK.
     def logger
       Logging.logger
     end

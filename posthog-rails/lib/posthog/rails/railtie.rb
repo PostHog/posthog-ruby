@@ -21,7 +21,11 @@ module PostHog
               get_all_flags
             ].freeze
 
-            # Initialize PostHog client with a block configuration
+            # Initialize the singleton PostHog client used by Rails delegators.
+            #
+            # @param options [Hash] Core {PostHog::Client} options.
+            # @yieldparam config [PostHog::Rails::InitConfig] Block-based core SDK configuration.
+            # @return [PostHog::Client]
             def init(options = {})
               # If block given, yield to configuration
               if block_given?
@@ -42,11 +46,14 @@ module PostHog
               end
             end
 
+            # @return [Boolean] Whether {PostHog.init} has created a client.
             def initialized?
               !@client.nil?
             end
 
-            # Fallback for any client methods not explicitly defined
+            # Fallback for any client methods not explicitly defined.
+            #
+            # @api private
             # rubocop:disable Lint/RedundantSafeNavigation
             def method_missing(method_name, ...)
               if client&.respond_to?(method_name)
@@ -57,6 +64,7 @@ module PostHog
               end
             end
 
+            # @api private
             def respond_to_missing?(method_name, include_private = false)
               client&.respond_to?(method_name) || super
             end
@@ -118,6 +126,8 @@ module PostHog
         at_exit { PostHog.client&.shutdown if PostHog.initialized? }
       end
 
+      # @api private
+      # @return [void]
       def insert_middleware_after(app, target, middleware)
         # During initialization, app.config.middleware is a MiddlewareStackProxy
         # which only supports recording operations (insert_after, use, etc.)
@@ -125,6 +135,8 @@ module PostHog
         app.config.middleware.insert_after(target, middleware)
       end
 
+      # @api private
+      # @return [void]
       def insert_middleware_before(app, target, middleware)
         # During initialization, app.config.middleware is a MiddlewareStackProxy
         # which only supports recording operations (insert_before, use, etc.)
@@ -132,6 +144,8 @@ module PostHog
         app.config.middleware.insert_before(target, middleware)
       end
 
+      # @api private
+      # @return [void]
       def self.register_error_subscriber
         return unless PostHog::Rails.config&.auto_capture_exceptions
 
@@ -142,6 +156,8 @@ module PostHog
         PostHog::Logging.logger.warn("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
       end
 
+      # @api private
+      # @return [Boolean]
       def self.rails_version_above_7?
         ::Rails.version.to_f >= 7.0
       end
@@ -149,51 +165,74 @@ module PostHog
 
     # Configuration wrapper for the init block
     class InitConfig
+      # @param base_options [Hash] Initial core SDK options.
       def initialize(base_options = {})
         @base_options = base_options
       end
 
       # Core PostHog options
+      #
+      # @param value [String]
+      # @return [String]
       def api_key=(value)
         @base_options[:api_key] = value
       end
 
+      # @param value [String, nil]
+      # @return [String, nil]
       def personal_api_key=(value)
         @base_options[:personal_api_key] = value
       end
 
+      # @param value [String]
+      # @return [String]
       def host=(value)
         @base_options[:host] = value
       end
 
+      # @param value [Integer]
+      # @return [Integer]
       def max_queue_size=(value)
         @base_options[:max_queue_size] = value
       end
 
+      # @param value [Boolean]
+      # @return [Boolean]
       def test_mode=(value)
         @base_options[:test_mode] = value
       end
 
+      # @param value [Boolean]
+      # @return [Boolean]
       def sync_mode=(value)
         @base_options[:sync_mode] = value
       end
 
+      # @param value [Proc]
+      # @return [Proc]
       def on_error=(value)
         @base_options[:on_error] = value
       end
 
+      # @param value [Integer]
+      # @return [Integer]
       def feature_flags_polling_interval=(value)
         @base_options[:feature_flags_polling_interval] = value
       end
 
+      # @param value [Integer]
+      # @return [Integer]
       def feature_flag_request_timeout_seconds=(value)
         @base_options[:feature_flag_request_timeout_seconds] = value
       end
 
+      # @param value [Proc]
+      # @return [Proc]
       def before_send=(value)
         @base_options[:before_send] = value
       end
 
+      # @return [Hash] Core SDK options suitable for {PostHog::Client.new}.
       def to_client_options
         @base_options
       end

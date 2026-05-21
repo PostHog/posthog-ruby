@@ -17,6 +17,7 @@ module PostHog
   #
   # For API errors with status codes, use the api_error() method which returns
   # a string like "api_error_500".
+  # @api private
   class FeatureFlagError
     ERRORS_WHILE_COMPUTING = 'errors_while_computing_flags'
     FLAG_MISSING = 'flag_missing'

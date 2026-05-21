@@ -7,11 +7,16 @@ require 'posthog/rails/request_metadata'
 module PostHog
   module Rails
     # Rack middleware that creates a request-local PostHog context from tracing headers.
+    #
+    # @api private
     class RequestContext
+      # @param app [#call] Rack application.
       def initialize(app)
         @app = app
       end
 
+      # @param env [Hash] Rack environment.
+      # @return [Array] Rack response.
       def call(env)
         request = build_request(env)
 

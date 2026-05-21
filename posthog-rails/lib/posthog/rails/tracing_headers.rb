@@ -3,12 +3,16 @@
 module PostHog
   module Rails
     # Helpers for extracting and sanitizing PostHog tracing headers from Rack/Rails requests.
+    #
+    # @api private
     module TracingHeaders
       MAX_HEADER_VALUE_LENGTH = 1000
       CONTROL_CHARACTERS = /[[:cntrl:]]/
 
       module_function
 
+      # @param value [Object]
+      # @return [String, nil]
       def sanitize_header_value(value)
         return nil unless value.is_a?(String)
 
@@ -18,6 +22,9 @@ module PostHog
         sanitized[0, MAX_HEADER_VALUE_LENGTH]
       end
 
+      # @param request_or_env [Object, Hash] Rack request, Rails request, or Rack env hash.
+      # @param header_name [String]
+      # @return [String, nil]
       def extract_header(request_or_env, header_name)
         candidates = header_candidates(header_name)
 

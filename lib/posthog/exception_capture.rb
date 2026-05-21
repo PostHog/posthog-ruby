@@ -11,6 +11,9 @@
 # 💖 open source (under MIT License)
 
 module PostHog
+  # Builds PostHog exception payloads from Ruby exception objects.
+  #
+  # @api private
   module ExceptionCapture
     RUBY_INPUT_FORMAT = /
         ^ \s* (?: [a-zA-Z]: | uri:classloader: )? ([^:]+ | <.*>):
@@ -18,6 +21,8 @@ module PostHog
         (?: :in\s('|`)(?:([\w:]+)\#)?([^']+)')?$
       /x
 
+    # @param value [Exception, String, Object] Exception input to parse.
+    # @return [Hash, nil] Parsed exception payload, or nil when the input is unsupported.
     def self.build_parsed_exception(value)
       title, message, backtrace = coerce_exception_input(value)
       return nil if title.nil?
@@ -25,6 +30,10 @@ module PostHog
       build_single_exception_from_data(title, message, backtrace)
     end
 
+    # @param title [String]
+    # @param message [String, nil]
+    # @param backtrace [Array<String>, nil]
+    # @return [Hash]
     def self.build_single_exception_from_data(title, message, backtrace)
       {
         'type' => title,
@@ -37,6 +46,8 @@ module PostHog
       }
     end
 
+    # @param backtrace [Array<String>, nil]
+    # @return [Hash, nil]
     def self.build_stacktrace(backtrace)
       return nil unless backtrace && !backtrace.empty?
 
@@ -50,6 +61,8 @@ module PostHog
       }
     end
 
+    # @param line [String]
+    # @return [Hash, nil]
     def self.parse_backtrace_line(line)
       match = line.match(RUBY_INPUT_FORMAT)
       return nil unless match
@@ -72,6 +85,8 @@ module PostHog
       frame
     end
 
+    # @param path [String]
+    # @return [Boolean]
     def self.gem_path?(path)
       path.include?('/gems/') ||
         path.include?('/ruby/') ||
@@ -79,6 +94,11 @@ module PostHog
         path.include?('/.rvm/')
     end
 
+    # @param frame [Hash]
+    # @param file_path [String]
+    # @param lineno [Integer]
+    # @param context_size [Integer]
+    # @return [void]
     def self.add_context_lines(frame, file_path, lineno, context_size = 5)
       lines = File.readlines(file_path)
       return if lines.empty?
@@ -97,6 +117,8 @@ module PostHog
       # Silently ignore file read errors
     end
 
+    # @param value [Exception, String, Object]
+    # @return [Array] Three-item array of title, message, and backtrace.
     def self.coerce_exception_input(value)
       if value.is_a?(String)
         title = 'Error'

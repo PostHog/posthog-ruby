@@ -50,29 +50,28 @@ module PostHog
       end
     end
 
-    # @param [Hash] opts
-    # @option opts [String] :api_key Your project's api_key
-    # @option opts [String] :personal_api_key Your personal API key
-    # @option opts [FixNum] :max_queue_size Maximum number of calls to be
-    #   remain queued. Defaults to 10_000.
-    # @option opts [Bool] :test_mode +true+ if messages should remain
-    #   queued for testing. Defaults to +false+.
-    # @option opts [Bool] :sync_mode +true+ to send events synchronously
-    #   on the calling thread. Useful in forking environments like Sidekiq
-    #   and Resque. Defaults to +false+.
-    # @option opts [Proc] :on_error Handles error calls from the API.
-    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`
-    # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes.
-    #   Measured in seconds, defaults to 30.
-    # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation.
-    #   Measured in seconds, defaults to 3.
-    # @option opts [Proc] :before_send A block that receives the event hash and should return either a modified hash
-    #   to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`
-    # @option opts [Bool] :disable_singleton_warning +true+ to suppress the warning when multiple clients
-    #   share the same API key. Use only when you intentionally need multiple clients. Defaults to +false+.
-    # @option opts [Object] :flag_definition_cache_provider An object implementing the
-    #   {FlagDefinitionCacheProvider} interface for distributed flag definition caching.
-    #   EXPERIMENTAL: This API may change in future minor version bumps.
+    # @param opts [Hash] Client configuration.
+    # @option opts [String] :api_key Your project's API key. Required.
+    # @option opts [String, nil] :personal_api_key Your personal API key. Required for local feature flag evaluation.
+    # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`.
+    # @option opts [Integer] :max_queue_size Maximum number of calls to remain queued. Defaults to 10_000.
+    # @option opts [Integer] :batch_size Maximum number of events to send in one async batch.
+    # @option opts [Boolean] :test_mode +true+ if messages should remain queued for testing. Defaults to +false+.
+    # @option opts [Boolean] :sync_mode +true+ to send events synchronously on the calling thread. Useful in
+    #   forking environments like Sidekiq and Resque. Defaults to +false+.
+    # @option opts [Proc] :on_error Callback invoked as `on_error.call(status, error)` for API or serialization errors.
+    # @option opts [Integer] :feature_flags_polling_interval How often to poll for feature flag definition changes,
+    #   in seconds. Defaults to 30.
+    # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation,
+    #   in seconds. Defaults to 3.
+    # @option opts [Proc] :before_send A callback that receives the event hash and should return either a modified
+    #   hash to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`.
+    # @option opts [Boolean] :disable_singleton_warning +true+ to suppress the warning when multiple clients share
+    #   the same API key. Use only when you intentionally need multiple clients. Defaults to +false+.
+    # @option opts [Boolean] :skip_ssl_verification +true+ to disable SSL certificate verification for requests.
+    #   Intended only for local development or custom deployments.
+    # @option opts [Object] :flag_definition_cache_provider An object implementing the {FlagDefinitionCacheProvider}
+    #   interface for distributed flag definition caching. EXPERIMENTAL: This API may change in future minor versions.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -143,7 +142,9 @@ module PostHog
     # Synchronously waits until the worker has cleared the queue.
     #
     # Use only for scripts which are not long-running, and will specifically
-    # exit
+    # exit.
+    #
+    # @return [void]
     def flush
       if @sync_mode
         # Wait for any in-flight sync send to complete
@@ -159,7 +160,9 @@ module PostHog
 
     # Clears the queue without waiting.
     #
-    # Use only in test mode
+    # Use only in test mode.
+    #
+    # @return [void]
     def clear
       @queue.clear
     end
@@ -176,8 +179,10 @@ module PostHog
     #
     # @option attrs [String] :event Event name
     # @option attrs [Hash] :properties Event properties (optional)
-    # @option attrs [Bool, Hash, SendFeatureFlagsOptions] :send_feature_flags
-    #   Whether to send feature flags with this event, or configuration for feature flag evaluation (optional)
+    # @option attrs [Hash] :groups Group analytics mapping from group type to group key (optional)
+    # @option attrs [Boolean, Hash, SendFeatureFlagsOptions] :send_feature_flags
+    #   Deprecated. Whether to send feature flags with this event, or configuration for feature flag evaluation
+    #   (optional)
     # @option attrs [PostHog::FeatureFlagEvaluations] :flags A snapshot returned by
     #   {#evaluate_flags}. When present, `$feature/<key>` and `$active_feature_flags` are
     #   attached from the snapshot without making an additional /flags request, and this
@@ -189,6 +194,7 @@ module PostHog
     # @note If `:distinct_id` is omitted, request/context distinct_id is used when
     #   available; otherwise a UUID is generated and the event is marked personless
     #   with `$process_person_profile: false`.
+    # @return [Boolean] Whether the event was queued or sent.
     # @macro common_attrs
     def capture(attrs)
       symbolize_keys! attrs
@@ -268,9 +274,10 @@ module PostHog
     # @param [String] distinct_id The ID for the user (optional, defaults to request/context distinct_id
     #   or a generated UUID)
     # @param [Hash] additional_properties Additional properties to include with the exception event (optional)
-    # @param [PostHog::FeatureFlagEvaluations] flags A snapshot returned by {#evaluate_flags}.
+    # @param flags [PostHog::FeatureFlagEvaluations, nil] A snapshot returned by {#evaluate_flags}.
     #   Forwarded to the inner {#capture} call so the captured `$exception` event carries the
     #   same `$feature/<key>` and `$active_feature_flags` properties as the snapshot.
+    # @return [Boolean, nil] Whether the exception event was queued or sent, or nil if the input could not be parsed.
     def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil)
       exception_info = ExceptionCapture.build_parsed_exception(exception)
 
@@ -295,6 +302,7 @@ module PostHog
     # @param [Hash] attrs
     #
     # @option attrs [Hash] :properties User properties (optional)
+    # @return [Boolean] Whether the identify event was queued or sent.
     # @macro common_attrs
     def identify(attrs)
       symbolize_keys! attrs
@@ -309,6 +317,7 @@ module PostHog
     # @option attrs [String] :group_key Group key
     # @option attrs [Hash] :properties Group properties (optional)
     # @option attrs [String] :distinct_id Distinct ID (optional)
+    # @return [Boolean] Whether the group identify event was queued or sent.
     # @macro common_attrs
     def group_identify(attrs)
       symbolize_keys! attrs
@@ -320,23 +329,32 @@ module PostHog
     # @param [Hash] attrs
     #
     # @option attrs [String] :alias The alias to give the distinct id
+    # @return [Boolean] Whether the alias event was queued or sent.
     # @macro common_attrs
     def alias(attrs)
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_alias(attrs))
     end
 
-    # @return [Hash] pops the last message from the queue
+    # @return [Hash] Pops the last message from the queue. Intended for test mode.
     def dequeue_last_message
       @queue.pop
     end
 
-    # @return [Fixnum] number of messages in the queue
+    # @return [Integer] Number of messages in the queue. Intended for test mode.
     def queued_messages
       @queue.length
     end
 
-    # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#is_enabled} instead.
+    # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#enabled?} instead.
+    # @param flag_key [String, Symbol] The unique key of the feature flag.
+    # @param distinct_id [String] The distinct id of the user.
+    # @param groups [Hash] Group analytics mapping from group type to group key.
+    # @param person_properties [Hash] Properties to use when evaluating the user locally or remotely.
+    # @param group_properties [Hash] Properties to use when evaluating groups locally or remotely.
+    # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
+    # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
+    # @return [Boolean, nil] Whether the flag is enabled, or nil when the flag could not be evaluated.
     # TODO: In future version, rename to `feature_flag_enabled?`
     def is_feature_enabled( # rubocop:disable Naming/PredicateName
       flag_key,
@@ -366,8 +384,8 @@ module PostHog
       !!response
     end
 
-    # @param [String, Symbol] flag_key The unique flag key of the feature flag
-    # @return [String] The decrypted value of the feature flag payload
+    # @param flag_key [String, Symbol] The unique flag key of the remote config feature flag.
+    # @return [Hash] The parsed remote config payload response.
     def get_remote_config_payload(flag_key)
       @feature_flags_poller.get_remote_config_payload(flag_key.to_s)
     end
@@ -379,8 +397,10 @@ module PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
+    # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
+    # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
     #
-    # @return [String, nil] The value of the feature flag
+    # @return [String, Boolean, nil] The value of the feature flag
     #
     # The provided properties are used to calculate feature flags locally, if possible.
     #
@@ -420,6 +440,14 @@ module PostHog
 
     # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#get_flag} /
     #   {FeatureFlagEvaluations#get_flag_payload} instead.
+    # @param key [String, Symbol] The unique key of the feature flag.
+    # @param distinct_id [String] The distinct id of the user.
+    # @param groups [Hash] Group analytics mapping from group type to group key.
+    # @param person_properties [Hash] Properties to use when evaluating the user locally or remotely.
+    # @param group_properties [Hash] Properties to use when evaluating groups locally or remotely.
+    # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
+    # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
+    # @return [PostHog::FeatureFlagResult, nil]
     def get_feature_flag_result(
       key,
       distinct_id,
@@ -456,7 +484,8 @@ module PostHog
     # @param [Hash] person_properties key-value pairs of properties to associate with the user
     # @param [Hash] group_properties
     # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely
-    # @param [Boolean] disable_geoip Stamped on captured access events
+    # @param [Boolean, nil] disable_geoip When true, disables GeoIP lookup for remote evaluation and stamps captured
+    #   access events.
     # @param [Array<String, Symbol>] flag_keys When set, scopes the underlying /flags
     #   request to only these flag keys (sent as `flag_keys_to_evaluate`).
     #   Distinct from {FeatureFlagEvaluations#only}, which filters the
@@ -580,6 +609,7 @@ module PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
+    # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
     #
     # @return [Hash] String (not symbol) key value pairs of flag and their values
     def get_all_flags(
@@ -602,11 +632,12 @@ module PostHog
     #
     # @param [String, Symbol] key The key of the feature flag
     # @param [String] distinct_id The distinct id of the user
-    # @option [String or boolean] match_value The value of the feature flag to be matched
-    # @option [Hash] groups
-    # @option [Hash] person_properties key-value pairs of properties to associate with the user.
-    # @option [Hash] group_properties
-    # @option [Boolean] only_evaluate_locally
+    # @param match_value [String, Boolean, nil] The value of the feature flag to be matched
+    # @param groups [Hash]
+    # @param person_properties [Hash] key-value pairs of properties to associate with the user.
+    # @param group_properties [Hash]
+    # @param only_evaluate_locally [Boolean]
+    # @return [Object, nil] The parsed payload for the matched flag value.
     #
     # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#get_flag_payload} instead.
     def get_feature_flag_payload(
@@ -639,10 +670,10 @@ module PostHog
     #   featureFlagPayloads: A hash of feature flag payloads
     #
     # @param [String] distinct_id The distinct id of the user
-    # @option [Hash] groups
-    # @option [Hash] person_properties key-value pairs of properties to associate with the user.
-    # @option [Hash] group_properties
-    # @option [Boolean] only_evaluate_locally
+    # @param groups [Hash]
+    # @param person_properties [Hash] key-value pairs of properties to associate with the user.
+    # @param group_properties [Hash]
+    # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
     #
     def get_all_flags_and_payloads(
       distinct_id,
@@ -664,6 +695,9 @@ module PostHog
       response
     end
 
+    # Reload locally cached feature flag definitions.
+    #
+    # @return [void]
     def reload_feature_flags
       unless @personal_api_key
         logger.error(
@@ -674,6 +708,9 @@ module PostHog
       @feature_flags_poller.load_feature_flags(true)
     end
 
+    # Flush pending events and stop background resources.
+    #
+    # @return [void]
     def shutdown
       self.class._decrement_instance_count(@api_key) if @api_key
       @feature_flags_poller.shutdown_poller

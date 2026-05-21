@@ -3,6 +3,9 @@
 require 'posthog/logging'
 
 module PostHog
+  # Converts public SDK method arguments into PostHog API event payloads.
+  #
+  # @api private
   class FieldParser
     class << self
       include PostHog::Utils
@@ -14,6 +17,8 @@ module PostHog
       # - "properties"
       # - "groups"
       # - "uuid"
+      # @param fields [Hash]
+      # @return [Hash]
       def parse_for_capture(fields)
         common = parse_common_fields(fields)
 
@@ -45,6 +50,8 @@ module PostHog
       # In addition to the common fields, identify accepts:
       #
       # - "properties"
+      # @param fields [Hash]
+      # @return [Hash]
       def parse_for_identify(fields)
         common = parse_common_fields(fields)
 
@@ -63,6 +70,8 @@ module PostHog
         )
       end
 
+      # @param fields [Hash]
+      # @return [Hash]
       def parse_for_group_identify(fields)
         properties = fields[:properties] || {}
         group_type = fields[:group_type]
@@ -92,6 +101,8 @@ module PostHog
       # In addition to the common fields, alias accepts:
       #
       # - "alias"
+      # @param fields [Hash]
+      # @return [Hash]
       def parse_for_alias(fields)
         common = parse_common_fields(fields)
 

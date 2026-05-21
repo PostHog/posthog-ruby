@@ -6,6 +6,9 @@ module PostHog
   class InconclusiveMatchError < StandardError
   end
 
+  # Utility helpers used internally by the SDK.
+  #
+  # @api private
   module Utils
     module_function
 
@@ -145,12 +148,19 @@ module PostHog
       end
     end
 
+    # Hash that clears itself when it reaches a maximum length.
+    #
+    # @api private
     class SizeLimitedHash < Hash
+      # @param max_length [Integer]
       def initialize(max_length, ...)
         super(...)
         @max_length = max_length
       end
 
+      # @param key [Object]
+      # @param value [Object]
+      # @return [Object]
       def []=(key, value)
         clear if length >= @max_length
         super

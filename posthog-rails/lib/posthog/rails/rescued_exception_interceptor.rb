@@ -2,14 +2,19 @@
 
 module PostHog
   module Rails
-    # Middleware that intercepts exceptions that are rescued by Rails
+    # Middleware that intercepts exceptions that are rescued by Rails.
     # This middleware runs before ShowExceptions and captures the exception
-    # so we can report it even if Rails rescues it
+    # so we can report it even if Rails rescues it.
+    #
+    # @api private
     class RescuedExceptionInterceptor
+      # @param app [#call] Rack application.
       def initialize(app)
         @app = app
       end
 
+      # @param env [Hash] Rack environment.
+      # @return [Array] Rack response.
       def call(env)
         @app.call(env)
       rescue StandardError => e

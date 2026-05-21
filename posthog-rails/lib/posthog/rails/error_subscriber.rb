@@ -4,11 +4,19 @@ require 'posthog/rails/parameter_filter'
 
 module PostHog
   module Rails
-    # Rails 7.0+ error reporter integration
-    # This integrates with Rails.error.handle and Rails.error.record
+    # Rails 7.0+ error reporter integration.
+    # This integrates with Rails.error.handle and Rails.error.record.
+    #
+    # @api private
     class ErrorSubscriber
       include ParameterFilter
 
+      # @param error [Exception] Error reported by Rails.
+      # @param handled [Boolean]
+      # @param severity [Symbol, String]
+      # @param context [Hash]
+      # @param source [String, nil]
+      # @return [void]
       def report(error, handled:, severity:, context:, source: nil)
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config&.should_capture_exception?(error)

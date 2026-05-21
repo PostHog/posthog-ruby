@@ -5,9 +5,13 @@ require 'posthog/rails/tracing_headers'
 module PostHog
   module Rails
     # Internal helpers for extracting request metadata owned by RequestContext.
+    #
+    # @api private
     module RequestMetadata
       module_function
 
+      # @param request [Object] Rack or Rails request object.
+      # @return [Hash] Event properties extracted from the request.
       def extract(request)
         properties = {}
         add_property(properties, '$current_url', current_url(request))
