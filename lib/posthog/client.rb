@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'json'
 require 'securerandom'
 
 require 'posthog/defaults'
@@ -760,11 +761,22 @@ module PostHog
     # Shared by the legacy single-flag path ({#get_feature_flag_result}) and the
     # snapshot's access-recording. Owns dedup-key construction, the
     # per-distinct_id sent-flags cache, and the `$feature_flag_called` capture call.
+    # Group context is included in the dedup key so group-scoped flags fire a
+    # separate event for each group a user is evaluated under.
     def _capture_feature_flag_called_if_needed(
       distinct_id: nil, key: nil, response: nil, properties: nil,
       groups: nil, disable_geoip: nil
     )
-      reported_key = "#{key}_#{response.nil? ? '::null::' : response}"
+      response_repr = response.nil? ? '::null::' : response
+      groups_repr =
+        if groups && !groups.empty?
+          # Canonicalize so two equal hashes with keys inserted in a different
+          # order produce the same dedup key.
+          "_#{groups.sort.to_json}"
+        else
+          ''
+        end
+      reported_key = "#{key}_#{response_repr}#{groups_repr}"
       return if @distinct_id_has_sent_flag_calls[distinct_id].include?(reported_key)
 
       msg = {
