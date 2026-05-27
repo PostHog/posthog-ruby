@@ -575,6 +575,67 @@ module PostHog
                )).to eq(true)
       end
 
+      context '$feature_flag_called group-context deduplication' do
+        let(:group_flag_api_res) do
+          {
+            'flags' => [
+              {
+                'id' => 1,
+                'name' => 'Group flag',
+                'key' => 'group-flag',
+                'active' => true,
+                'filters' => {
+                  'groups' => [
+                    { 'properties' => [], 'rollout_percentage' => 100 }
+                  ]
+                }
+              }
+            ]
+          }
+        end
+
+        let(:group_flag_client) do
+          stub_request(
+            :get,
+            'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+          ).to_return(status: 200, body: group_flag_api_res.to_json)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+          allow(c).to receive(:capture)
+          c
+        end
+
+        it 'fires once per distinct group context' do
+          expect(group_flag_client).to receive(:capture).with(hash_including(
+                                                                distinct_id: 'user-1',
+                                                                event: '$feature_flag_called',
+                                                                groups: { organization: 'org-a' }
+                                                              )).exactly(1).times
+          expect(group_flag_client).to receive(:capture).with(hash_including(
+                                                                distinct_id: 'user-1',
+                                                                event: '$feature_flag_called',
+                                                                groups: { organization: 'org-b' }
+                                                              )).exactly(1).times
+
+          group_flag_client.get_feature_flag('group-flag', 'user-1', groups: { organization: 'org-a' })
+          group_flag_client.get_feature_flag('group-flag', 'user-1', groups: { organization: 'org-b' })
+        end
+
+        [
+          ['repeated calls with the same context', { organization: 'org-a' }, { organization: 'org-a' }],
+          ['same groups in different key order',
+           { organization: 'org-a', team: 'red' },
+           { team: 'red', organization: 'org-a' }]
+        ].each do |description, first_groups, second_groups|
+          it "dedupes on #{description}" do
+            expect(group_flag_client)
+              .to receive(:capture).with(hash_including(event: '$feature_flag_called')).exactly(1).times
+
+            group_flag_client.get_feature_flag('group-flag', 'user-1', groups: first_groups)
+            group_flag_client.get_feature_flag('group-flag', 'user-1', groups: second_groups)
+          end
+        end
+      end
+
       it 'captures groups' do
         client.capture(
           {
