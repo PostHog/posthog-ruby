@@ -72,7 +72,7 @@ module PostHog
     # @option opts [Boolean] :skip_ssl_verification +true+ to disable SSL certificate verification for requests.
     #   Intended only for local development or custom deployments.
     # @option opts [Object] :flag_definition_cache_provider An object implementing the {FlagDefinitionCacheProvider}
-    #   interface for distributed flag definition caching. EXPERIMENTAL: This API may change in future minor versions.
+    #   interface for distributed flag definition caching.
     def initialize(opts = {})
       symbolize_keys!(opts)
 

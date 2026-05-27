@@ -3,8 +3,6 @@
 module PostHog
   # Interface for external caching of feature flag definitions.
   #
-  # EXPERIMENTAL: This API may change in future minor version bumps.
-  #
   # Enables multi-worker environments (Kubernetes, load-balanced servers,
   # serverless functions) to share flag definitions via an external cache,
   # reducing redundant API calls.
