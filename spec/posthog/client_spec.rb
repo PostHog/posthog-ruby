@@ -622,10 +622,13 @@ module PostHog
 
         [
           ['repeated calls with the same context', { organization: 'org-a' }, { organization: 'org-a' }],
-          ['same groups in different key order', { organization: 'org-a', team: 'red' }, { team: 'red', organization: 'org-a' }]
+          ['same groups in different key order',
+           { organization: 'org-a', team: 'red' },
+           { team: 'red', organization: 'org-a' }]
         ].each do |description, first_groups, second_groups|
           it "dedupes on #{description}" do
-            expect(group_flag_client).to receive(:capture).with(hash_including(event: '$feature_flag_called')).exactly(1).times
+            expect(group_flag_client)
+              .to receive(:capture).with(hash_including(event: '$feature_flag_called')).exactly(1).times
 
             group_flag_client.get_feature_flag('group-flag', 'user-1', groups: first_groups)
             group_flag_client.get_feature_flag('group-flag', 'user-1', groups: second_groups)
