@@ -30,24 +30,42 @@ module PostHog
         expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
       end
 
-      it 'creates a disabled client if api_key is nil, empty, or blank after trimming' do
-        [{ api_key: nil }, { api_key: '' }, { api_key: " \n\t " }].each do |opts|
-          client = Client.new(opts)
+      shared_examples 'a disabled client for an invalid api_key' do |api_key|
+        it 'creates a disabled client' do
+          client = Client.new(api_key: api_key)
 
           expect(client.instance_variable_get(:@disabled)).to eq(true)
           expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
           expect(client.capture(Queued::CAPTURE)).to eq(false)
           expect(client.queued_messages).to eq(0)
         end
-      end
 
-      it 'does not start a sender or sync transport when api_key is nil, empty, or blank after trimming' do
-        expect(PostHog::SendWorker).not_to receive(:new)
-        expect(PostHog::Transport).not_to receive(:new)
+        it 'does not start a sender or sync transport' do
+          expect(PostHog::SendWorker).not_to receive(:new)
+          expect(PostHog::Transport).not_to receive(:new)
 
-        [nil, '', " \n\t "].each do |api_key|
           Client.new(api_key: api_key, sync_mode: true)
         end
+
+        it 'logs that the api_key is missing or empty after trimming whitespace' do
+          Client.new(api_key: api_key, test_mode: true)
+
+          expect(logger).to have_received(:error)
+            .with(include('api_key is missing or empty after trimming whitespace'))
+            .once
+        end
+      end
+
+      context 'when api_key is nil' do
+        include_examples 'a disabled client for an invalid api_key', nil
+      end
+
+      context 'when api_key is empty' do
+        include_examples 'a disabled client for an invalid api_key', ''
+      end
+
+      context 'when api_key is blank after trimming' do
+        include_examples 'a disabled client for an invalid api_key', " \n\t "
       end
 
       it 'does not error if a api_key is supplied' do
@@ -81,16 +99,6 @@ module PostHog
         client = Client.new(api_key: API_KEY, host: " \n\t ", test_mode: true)
 
         expect(client.instance_variable_get(:@feature_flags_poller).instance_variable_get(:@host)).to eq('https://us.i.posthog.com')
-      end
-
-      it 'logs when the api_key is missing or empty after trimming whitespace' do
-        [nil, '', " \n\t "].each do |api_key|
-          Client.new(api_key: api_key, test_mode: true)
-        end
-
-        expect(logger).to have_received(:error)
-          .with(include('api_key is empty after trimming whitespace'))
-          .exactly(3).times
       end
 
       context 'singleton warning' do

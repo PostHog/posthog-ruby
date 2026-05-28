@@ -82,7 +82,7 @@ module PostHog
 
       @queue = Queue.new
       @api_key = opts[:api_key]
-      @disabled = @api_key.nil? || (@api_key.respond_to?(:empty?) && @api_key.empty?)
+      @disabled = @api_key.nil? || @api_key.empty?
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
       @sync_mode = opts[:sync_mode] == true && !opts[:test_mode] && !@disabled
@@ -106,7 +106,7 @@ module PostHog
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
 
-      logger.error('api_key is empty after trimming whitespace; check your project API key') if @disabled
+      logger.error('api_key is missing or empty after trimming whitespace; check your project API key') if @disabled
 
       # Warn when multiple clients are created with the same API key (can cause dropped events)
       unless @disabled || opts[:test_mode] || opts[:disable_singleton_warning]
