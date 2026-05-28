@@ -12,18 +12,18 @@ RSpec.describe PostHog::Rails::Configuration do
   subject(:config) { described_class.new }
 
   describe '#should_capture_exception?' do
-    it 'excludes ActionController::RoutingError by default' do
-      exception = ActionController::RoutingError.new('No route matches')
-      expect(config.should_capture_exception?(exception)).to be false
-    end
-
-    it 'excludes ActionDispatch::Http::MimeNegotiation::InvalidType by default' do
-      # Raised when a client sends a malformed Accept / Content-Type header
-      # (typically scanner traffic). Rails maps it to a 406 — see
-      # ActionDispatch::ExceptionWrapper.rescue_responses — so it is not a
-      # bug worth capturing.
-      exception = ActionDispatch::Http::MimeNegotiation::InvalidType.new('"foo" is not a valid MIME type')
-      expect(config.should_capture_exception?(exception)).to be false
+    # MimeNegotiation::InvalidType is raised when a client sends a malformed
+    # Accept / Content-Type header (typically scanner traffic). Rails maps it
+    # to a 406 — see ActionDispatch::ExceptionWrapper.rescue_responses — so it
+    # is not a bug worth capturing.
+    {
+      'ActionController::RoutingError' => ActionController::RoutingError.new('No route matches'),
+      'ActionDispatch::Http::MimeNegotiation::InvalidType' =>
+        ActionDispatch::Http::MimeNegotiation::InvalidType.new('"foo" is not a valid MIME type')
+    }.each do |name, exception|
+      it "excludes #{name} by default" do
+        expect(config.should_capture_exception?(exception)).to be false
+      end
     end
 
     it 'captures application exceptions that are not in the excluded list' do
