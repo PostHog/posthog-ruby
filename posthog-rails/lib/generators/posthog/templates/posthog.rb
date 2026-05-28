@@ -130,6 +130,7 @@ end
 # - ActionController::RoutingError
 # - ActionController::UnknownFormat
 # - ActionController::UnknownHttpMethod
+# - ActionDispatch::Http::MimeNegotiation::InvalidType
 # - ActionDispatch::Http::Parameters::ParseError
 # - ActiveRecord::RecordNotFound
 # - ActiveRecord::RecordNotUnique
