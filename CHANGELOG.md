@@ -1,3 +1,9 @@
+## 3.9.3
+
+### Patch Changes
+
+- 999bd1c: Initialize disabled no-op clients instead of raising or sending requests when the API key is missing or blank.
+
 ## 3.9.2
 
 ### Patch Changes
