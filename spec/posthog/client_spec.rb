@@ -21,8 +21,52 @@ module PostHog
     end
 
     describe '#initialize' do
-      it 'errors if no api_key is supplied' do
-        expect { Client.new }.to raise_error(ArgumentError)
+      it 'creates a disabled client if no api_key is supplied' do
+        client = nil
+
+        expect { client = Client.new }.to_not raise_error
+
+        expect(client.instance_variable_get(:@disabled)).to eq(true)
+        expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
+      end
+
+      shared_examples 'a disabled client for an invalid api_key' do |api_key|
+        it 'creates a disabled client' do
+          client = Client.new(api_key: api_key)
+
+          expect(client.instance_variable_get(:@disabled)).to eq(true)
+          expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
+          expect(FieldParser).not_to receive(:parse_for_capture)
+          expect(client.capture(Queued::CAPTURE)).to eq(false)
+          expect(client.queued_messages).to eq(0)
+        end
+
+        it 'does not start a sender or sync transport' do
+          expect(PostHog::SendWorker).not_to receive(:new)
+          expect(PostHog::Transport).not_to receive(:new)
+
+          Client.new(api_key: api_key, sync_mode: true)
+        end
+
+        it 'logs that the api_key is missing or empty after trimming whitespace' do
+          Client.new(api_key: api_key, test_mode: true)
+
+          expect(logger).to have_received(:error)
+            .with(include('api_key is missing or empty after trimming whitespace'))
+            .once
+        end
+      end
+
+      context 'when api_key is nil' do
+        include_examples 'a disabled client for an invalid api_key', nil
+      end
+
+      context 'when api_key is empty' do
+        include_examples 'a disabled client for an invalid api_key', ''
+      end
+
+      context 'when api_key is blank after trimming' do
+        include_examples 'a disabled client for an invalid api_key', " \n\t "
       end
 
       it 'does not error if a api_key is supplied' do
@@ -56,12 +100,6 @@ module PostHog
         client = Client.new(api_key: API_KEY, host: " \n\t ", test_mode: true)
 
         expect(client.instance_variable_get(:@feature_flags_poller).instance_variable_get(:@host)).to eq('https://us.i.posthog.com')
-      end
-
-      it 'logs when the api_key is empty after trimming whitespace' do
-        Client.new(api_key: " \n\t ", test_mode: true)
-
-        expect(logger).to have_received(:error).with(include('api_key is empty after trimming whitespace'))
       end
 
       context 'singleton warning' do
@@ -1379,6 +1417,29 @@ module PostHog
     end
 
     describe 'feature flags' do
+      it 'returns defaults without requests when the client is disabled' do
+        disabled_client = Client.new(api_key: " \n\t ", test_mode: true)
+
+        expect(disabled_client.instance_variable_get(:@feature_flags_poller)).to be_nil
+        expect(disabled_client.get_remote_config_payload('remote-config')).to be_nil
+        expect(disabled_client.get_feature_flag('flag', 'some id')).to be_nil
+        expect(disabled_client.get_feature_flag_result('flag', 'some id')).to be_nil
+        expect(disabled_client.get_feature_flag_payload('flag', 'some id')).to be_nil
+        expect(disabled_client.get_all_flags('some id')).to eq({})
+        expect(disabled_client.get_all_flags_and_payloads('some id')).to eq(
+          { featureFlags: {}, featureFlagPayloads: {} }
+        )
+
+        flags = disabled_client.evaluate_flags('some id')
+        expect(flags.keys).to eq([])
+        expect(flags.enabled?('flag')).to eq(false)
+        expect(flags.get_flag('flag')).to be_nil
+        expect(flags.get_flag_payload('flag')).to be_nil
+
+        expect(WebMock).not_to have_requested(:get, /.*/)
+        expect(WebMock).not_to have_requested(:post, /.*/)
+      end
+
       it 'evaluates flags correctly' do
         api_feature_flag_res = {
           flags: [
