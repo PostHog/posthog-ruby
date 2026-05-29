@@ -36,6 +36,7 @@ module PostHog
 
           expect(client.instance_variable_get(:@disabled)).to eq(true)
           expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
+          expect(FieldParser).not_to receive(:parse_for_capture)
           expect(client.capture(Queued::CAPTURE)).to eq(false)
           expect(client.queued_messages).to eq(0)
         end

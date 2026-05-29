@@ -200,6 +200,8 @@ module PostHog
     # @return [Boolean] Whether the event was queued or sent.
     # @macro common_attrs
     def capture(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enrich_capture_attrs_with_context(attrs)
 
