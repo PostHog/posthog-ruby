@@ -54,10 +54,10 @@ module PostHog
             # Fallback for any client methods not explicitly defined.
             #
             # @api private
-            # rubocop:disable Lint/RedundantSafeNavigation
             def method_missing(method_name, ...)
-              if client&.respond_to?(method_name)
-                ensure_initialized!
+              ensure_initialized!
+
+              if client.respond_to?(method_name)
                 client.public_send(method_name, ...)
               else
                 super
@@ -66,16 +66,16 @@ module PostHog
 
             # @api private
             def respond_to_missing?(method_name, include_private = false)
-              client&.respond_to?(method_name) || super
+              ensure_initialized!
+              client.respond_to?(method_name, include_private) || super
             end
-            # rubocop:enable Lint/RedundantSafeNavigation
 
             private
 
             def ensure_initialized!
               return if initialized?
 
-              raise 'PostHog is not initialized. Call PostHog.init in an initializer.'
+              @client = PostHog::Client.new(api_key: nil)
             end
           end
         end

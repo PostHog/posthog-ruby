@@ -284,6 +284,8 @@ module PostHog
     #   same `$feature/<key>` and `$active_feature_flags` properties as the snapshot.
     # @return [Boolean, nil] Whether the exception event was queued or sent, or nil if the input could not be parsed.
     def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil)
+      return false if @disabled
+
       exception_info = ExceptionCapture.build_parsed_exception(exception)
 
       return if exception_info.nil?
@@ -310,6 +312,8 @@ module PostHog
     # @return [Boolean] Whether the identify event was queued or sent.
     # @macro common_attrs
     def identify(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_identify(attrs))
     end
@@ -325,6 +329,8 @@ module PostHog
     # @return [Boolean] Whether the group identify event was queued or sent.
     # @macro common_attrs
     def group_identify(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_group_identify(attrs))
     end
@@ -337,6 +343,8 @@ module PostHog
     # @return [Boolean] Whether the alias event was queued or sent.
     # @macro common_attrs
     def alias(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_alias(attrs))
     end

@@ -55,6 +55,19 @@ module PostHog
             .with(include('api_key is missing or empty after trimming whitespace'))
             .once
         end
+
+        it 'no-ops event methods before validating payloads' do
+          client = Client.new(api_key: api_key)
+
+          expect { client.identify({}) }.not_to raise_error
+          expect { client.group_identify({}) }.not_to raise_error
+          expect { client.alias({}) }.not_to raise_error
+          expect { client.capture_exception(StandardError.new('boom'), nil, 'not a hash') }.not_to raise_error
+          expect(client.identify({})).to eq(false)
+          expect(client.group_identify({})).to eq(false)
+          expect(client.alias({})).to eq(false)
+          expect(client.capture_exception(StandardError.new('boom'), nil, 'not a hash')).to eq(false)
+        end
       end
 
       context 'when api_key is nil' do
