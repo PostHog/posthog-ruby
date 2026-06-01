@@ -106,7 +106,9 @@ module PostHog
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
 
-      logger.error('api_key is missing or empty after trimming whitespace; check your project API key') if @disabled
+      if @disabled && !opts[:silence_disabled_client_error]
+        logger.error('api_key is missing or empty after trimming whitespace; check your project API key')
+      end
 
       # Warn when multiple clients are created with the same API key (can cause dropped events)
       unless @disabled || opts[:test_mode] || opts[:disable_singleton_warning]

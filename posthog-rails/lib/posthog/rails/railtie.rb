@@ -75,7 +75,7 @@ module PostHog
             def ensure_initialized!
               return if initialized?
 
-              @client = PostHog::Client.new(api_key: nil)
+              @client = PostHog::Client.new(api_key: nil, silence_disabled_client_error: true)
             end
           end
         end

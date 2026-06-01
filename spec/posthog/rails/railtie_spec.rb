@@ -28,7 +28,10 @@ RSpec.describe PostHog::Rails::Railtie do
       PostHog.client = nil
     end
 
-    it 'no-ops delegated calls before explicit init' do
+    it 'no-ops delegated calls before explicit init without logging a missing api_key error' do
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+
       expect { PostHog.capture(event: 'event', distinct_id: 'user') }.not_to raise_error
       expect(PostHog.capture(event: 'event', distinct_id: 'user')).to eq(false)
       expect(PostHog.identify(distinct_id: 'user')).to eq(false)
@@ -37,6 +40,7 @@ RSpec.describe PostHog::Rails::Railtie do
       expect(PostHog.get_feature_flag('flag', 'user')).to be_nil
       expect(PostHog.get_all_flags('user')).to eq({})
       expect(PostHog.evaluate_flags('user').keys).to eq([])
+      expect(logger).not_to have_received(:error)
     end
   end
 
