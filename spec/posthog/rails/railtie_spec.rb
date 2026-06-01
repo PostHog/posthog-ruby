@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 # Minimal requires for testing the Railtie in isolation
+require 'logger'
 require 'posthog'
 require 'rails/railtie'
 
@@ -15,6 +16,34 @@ require 'posthog/rails/configuration'
 require 'posthog/rails/railtie'
 
 RSpec.describe PostHog::Rails::Railtie do
+  describe 'posthog.set_configs initializer' do
+    before do
+      initializer = PostHog::Rails::Railtie.initializers.find { |i| i.name == 'posthog.set_configs' }
+      PostHog::Rails::Railtie.instance.instance_exec(double('app'), &initializer.block)
+      PostHog::Logging.logger = Logger.new(File::NULL)
+      PostHog.client = nil
+    end
+
+    after do
+      PostHog.client = nil
+    end
+
+    it 'no-ops delegated calls before explicit init without logging a missing api_key error' do
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+
+      expect { PostHog.capture(event: 'event', distinct_id: 'user') }.not_to raise_error
+      expect(PostHog.capture(event: 'event', distinct_id: 'user')).to eq(false)
+      expect(PostHog.identify(distinct_id: 'user')).to eq(false)
+      expect(PostHog.alias(alias: 'anon', distinct_id: 'user')).to eq(false)
+      expect(PostHog.group_identify(group_type: 'organization', group_key: 'id:5')).to eq(false)
+      expect(PostHog.get_feature_flag('flag', 'user')).to be_nil
+      expect(PostHog.get_all_flags('user')).to eq({})
+      expect(PostHog.evaluate_flags('user').keys).to eq([])
+      expect(logger).not_to have_received(:error)
+    end
+  end
+
   describe 'posthog.insert_middlewares initializer' do
     it 'has insert_middleware_after accessible from initializer context' do
       # Rails initializer blocks are executed via instance_exec on the Railtie

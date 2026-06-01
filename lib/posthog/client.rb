@@ -106,7 +106,9 @@ module PostHog
       @feature_flags_poller = nil
       @personal_api_key = opts[:personal_api_key]
 
-      logger.error('api_key is missing or empty after trimming whitespace; check your project API key') if @disabled
+      if @disabled && !opts[:silence_disabled_client_error]
+        logger.error('api_key is missing or empty after trimming whitespace; check your project API key')
+      end
 
       # Warn when multiple clients are created with the same API key (can cause dropped events)
       unless @disabled || opts[:test_mode] || opts[:disable_singleton_warning]
@@ -284,6 +286,8 @@ module PostHog
     #   same `$feature/<key>` and `$active_feature_flags` properties as the snapshot.
     # @return [Boolean, nil] Whether the exception event was queued or sent, or nil if the input could not be parsed.
     def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil)
+      return false if @disabled
+
       exception_info = ExceptionCapture.build_parsed_exception(exception)
 
       return if exception_info.nil?
@@ -310,6 +314,8 @@ module PostHog
     # @return [Boolean] Whether the identify event was queued or sent.
     # @macro common_attrs
     def identify(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_identify(attrs))
     end
@@ -325,6 +331,8 @@ module PostHog
     # @return [Boolean] Whether the group identify event was queued or sent.
     # @macro common_attrs
     def group_identify(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_group_identify(attrs))
     end
@@ -337,6 +345,8 @@ module PostHog
     # @return [Boolean] Whether the alias event was queued or sent.
     # @macro common_attrs
     def alias(attrs)
+      return false if @disabled
+
       symbolize_keys! attrs
       enqueue(FieldParser.parse_for_alias(attrs))
     end
