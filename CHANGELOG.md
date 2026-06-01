@@ -1,3 +1,9 @@
+## 3.9.4
+
+### Patch Changes
+
+- 80e2c13: No-op when the SDK is disabled or the Rails facade is used before initialization.
+
 ## 3.9.3
 
 ### Patch Changes

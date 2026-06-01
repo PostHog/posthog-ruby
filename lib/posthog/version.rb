@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module PostHog
-  VERSION = '3.9.3'
+  VERSION = '3.9.4'
 end
