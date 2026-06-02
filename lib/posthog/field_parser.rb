@@ -149,7 +149,8 @@ module PostHog
           distinct_id: distinct_id,
           properties: {
             '$lib' => 'posthog-ruby',
-            '$lib_version' => PostHog::VERSION.to_s
+            '$lib_version' => PostHog::VERSION.to_s,
+            '$is_server' => true
           }
         }
 

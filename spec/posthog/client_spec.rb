@@ -264,6 +264,13 @@ module PostHog
         expect(message[:properties]['$process_person_profile']).to be true
       end
 
+      it 'sets $is_server to true on captured events' do
+        client.capture(distinct_id: 'user', event: 'Event')
+
+        message = client.dequeue_last_message
+        expect(message[:properties]['$is_server']).to be true
+      end
+
       it 'errors if properties is not a hash' do
         expect do
           client.capture(
@@ -504,6 +511,7 @@ module PostHog
             '$feature_flag_response' => true,
             '$lib' => 'posthog-ruby',
             '$lib_version' => '1.2.4',
+            '$is_server' => true,
             '$groups' => {},
             'locally_evaluated' => true
           )
