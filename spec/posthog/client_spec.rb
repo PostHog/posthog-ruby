@@ -271,6 +271,14 @@ module PostHog
         expect(message[:properties]['$is_server']).to be true
       end
 
+      it 'omits $is_server when initialized with is_server: false' do
+        client = Client.new(api_key: API_KEY, test_mode: true, is_server: false)
+        client.capture(distinct_id: 'user', event: 'Event')
+
+        message = client.dequeue_last_message
+        expect(message[:properties]).not_to have_key('$is_server')
+      end
+
       it 'errors if properties is not a hash' do
         expect do
           client.capture(
