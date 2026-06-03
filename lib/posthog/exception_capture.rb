@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# Portions of this file are derived from getsentry/sentry-ruby by Software, Inc. dba Sentry
-# Licensed under the MIT License
+# Portions of this file are derived from getsentry/sentry-ruby
+# Copyright (c) 2020 Sentry
+# Licensed under the MIT License: https://github.com/getsentry/sentry-ruby/blob/master/LICENSE
 # - sentry-ruby/lib/sentry/interfaces/single_exception.rb
 # - sentry-ruby/lib/sentry/interfaces/stacktrace_builder.rb
 # - sentry-ruby/lib/sentry/backtrace.rb
