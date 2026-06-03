@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+# Portions of this file are derived from getsentry/sentry-ruby by Software, Inc. dba Sentry
+# Licensed under the MIT License
+
 module PostHog
   module Rails
     # Middleware that intercepts exceptions that are rescued by Rails.
