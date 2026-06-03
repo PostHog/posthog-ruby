@@ -1373,6 +1373,14 @@ module PostHog
         expect(msg[:properties][:$group_type]).to eq('organization')
         expect(msg[:properties][:$group_set][:trait]).to eq('value')
       end
+
+      it 'sets $is_server at the top level, not inside $group_set' do
+        client.group_identify(group_type: 'organization', group_key: 'id:5', properties: { trait: 'value' })
+        msg = client.dequeue_last_message
+
+        expect(msg[:properties][:$is_server]).to be true
+        expect(msg[:properties][:$group_set]).not_to have_key(:$is_server)
+      end
     end
 
     describe '#alias' do

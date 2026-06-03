@@ -89,11 +89,11 @@ module PostHog
         common.merge(
           {
             event: '$groupidentify',
-            properties: {
+            properties: (common[:properties] || {}).merge(
               '$group_type': group_type,
               '$group_key': group_key,
-              '$group_set': properties.merge(common[:properties] || {})
-            }
+              '$group_set': properties
+            )
           }
         )
       end
@@ -141,8 +141,6 @@ module PostHog
         check_timestamp! timestamp
         check_presence! distinct_id, 'distinct_id'
 
-        # Default to true so direct callers (and the historical behavior) still mark events
-        # as server-side; the client passes is_server: false to opt out.
         is_server = fields.fetch(:is_server, true) != false
 
         properties = {
