@@ -1378,8 +1378,8 @@ module PostHog
         client.group_identify(group_type: 'organization', group_key: 'id:5', properties: { trait: 'value' })
         msg = client.dequeue_last_message
 
-        expect(msg[:properties][:$is_server]).to be true
-        expect(msg[:properties][:$group_set]).not_to have_key(:$is_server)
+        expect(msg[:properties]['$is_server']).to be true
+        expect(msg[:properties][:$group_set]).not_to have_key('$is_server')
       end
     end
 
