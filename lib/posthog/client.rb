@@ -73,6 +73,9 @@ module PostHog
     #   Intended only for local development or custom deployments.
     # @option opts [Object] :flag_definition_cache_provider An object implementing the {FlagDefinitionCacheProvider}
     #   interface for distributed flag definition caching.
+    # @option opts [Boolean] :is_server +true+ to stamp captured events with `$is_server => true` so PostHog
+    #   attributes them as server-side. Defaults to +true+. Set to +false+ when running posthog-ruby as a
+    #   client/CLI so the device OS is attributed normally and `$is_server` is omitted.
     def initialize(opts = {})
       symbolize_keys!(opts)
 
@@ -141,6 +144,7 @@ module PostHog
       end
 
       @before_send = opts[:before_send]
+      @is_server = opts.fetch(:is_server, true) != false
       @deprecation_emitted_for = Concurrent::Set.new
     end
 
@@ -272,6 +276,7 @@ module PostHog
         attrs[:feature_variants] = feature_variants if feature_variants
       end
 
+      attrs[:is_server] = @is_server
       enqueue(FieldParser.parse_for_capture(attrs))
     end
 
@@ -317,6 +322,7 @@ module PostHog
       return false if @disabled
 
       symbolize_keys! attrs
+      attrs[:is_server] = @is_server
       enqueue(FieldParser.parse_for_identify(attrs))
     end
 
@@ -334,6 +340,7 @@ module PostHog
       return false if @disabled
 
       symbolize_keys! attrs
+      attrs[:is_server] = @is_server
       enqueue(FieldParser.parse_for_group_identify(attrs))
     end
 
@@ -348,6 +355,7 @@ module PostHog
       return false if @disabled
 
       symbolize_keys! attrs
+      attrs[:is_server] = @is_server
       enqueue(FieldParser.parse_for_alias(attrs))
     end
 

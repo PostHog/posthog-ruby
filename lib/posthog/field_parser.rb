@@ -89,11 +89,11 @@ module PostHog
         common.merge(
           {
             event: '$groupidentify',
-            properties: {
+            properties: (common[:properties] || {}).merge(
               '$group_type': group_type,
               '$group_key': group_key,
-              '$group_set': properties.merge(common[:properties] || {})
-            }
+              '$group_set': properties
+            )
           }
         )
       end
@@ -141,16 +141,21 @@ module PostHog
         check_timestamp! timestamp
         check_presence! distinct_id, 'distinct_id'
 
+        is_server = fields.fetch(:is_server, true) != false
+
+        properties = {
+          '$lib' => 'posthog-ruby',
+          '$lib_version' => PostHog::VERSION.to_s
+        }
+        properties['$is_server'] = true if is_server
+
         parsed = {
           timestamp: datetime_in_iso8601(timestamp),
           library: 'posthog-ruby',
           library_version: PostHog::VERSION.to_s,
           messageId: message_id,
           distinct_id: distinct_id,
-          properties: {
-            '$lib' => 'posthog-ruby',
-            '$lib_version' => PostHog::VERSION.to_s
-          }
+          properties: properties
         }
 
         if send_feature_flags && fields[:feature_variants]

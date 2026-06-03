@@ -264,6 +264,21 @@ module PostHog
         expect(message[:properties]['$process_person_profile']).to be true
       end
 
+      it 'sets $is_server to true on captured events' do
+        client.capture(distinct_id: 'user', event: 'Event')
+
+        message = client.dequeue_last_message
+        expect(message[:properties]['$is_server']).to be true
+      end
+
+      it 'omits $is_server when initialized with is_server: false' do
+        client = Client.new(api_key: API_KEY, test_mode: true, is_server: false)
+        client.capture(distinct_id: 'user', event: 'Event')
+
+        message = client.dequeue_last_message
+        expect(message[:properties]).not_to have_key('$is_server')
+      end
+
       it 'errors if properties is not a hash' do
         expect do
           client.capture(
@@ -504,6 +519,7 @@ module PostHog
             '$feature_flag_response' => true,
             '$lib' => 'posthog-ruby',
             '$lib_version' => '1.2.4',
+            '$is_server' => true,
             '$groups' => {},
             'locally_evaluated' => true
           )
@@ -1356,6 +1372,14 @@ module PostHog
         expect(msg[:event]).to eq('$groupidentify')
         expect(msg[:properties][:$group_type]).to eq('organization')
         expect(msg[:properties][:$group_set][:trait]).to eq('value')
+      end
+
+      it 'sets $is_server at the top level, not inside $group_set' do
+        client.group_identify(group_type: 'organization', group_key: 'id:5', properties: { trait: 'value' })
+        msg = client.dequeue_last_message
+
+        expect(msg[:properties]['$is_server']).to be true
+        expect(msg[:properties][:$group_set]).not_to have_key('$is_server')
       end
     end
 

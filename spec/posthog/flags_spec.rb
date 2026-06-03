@@ -356,6 +356,7 @@ module PostHog
                '$feature_flag_evaluated_at' => 1_704_067_200_000,
                '$lib' => 'posthog-ruby',
                '$lib_version' => '2.8.0',
+               '$is_server' => true,
                '$groups' => {},
                'locally_evaluated' => false
              })
