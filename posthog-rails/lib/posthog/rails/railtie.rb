@@ -118,12 +118,20 @@ module PostHog
         register_error_subscriber if rails_version_above_7?
       end
 
+      # Opt-in: forward logs to PostHog Logs over OTLP
+      config.after_initialize do
+        install_posthog_logs if PostHog::Rails.config&.logs_enabled
+      end
+
       # Ensure PostHog shuts down gracefully (register only once)
       config.after_initialize do
         next if @posthog_at_exit_registered
 
         @posthog_at_exit_registered = true
-        at_exit { PostHog.client&.shutdown if PostHog.initialized? }
+        at_exit do
+          PostHog::Rails::Logs::Setup.shutdown!
+          PostHog.client&.shutdown if PostHog.initialized?
+        end
       end
 
       # @api private
@@ -142,6 +150,41 @@ module PostHog
         # which only supports recording operations (insert_before, use, etc.)
         # and does NOT support query methods like include?.
         app.config.middleware.insert_before(target, middleware)
+      end
+
+      # Build the PostHog Logs pipeline and broadcast Rails.logger into it.
+      #
+      # @api private
+      # @return [void]
+      def self.install_posthog_logs
+        return unless PostHog.initialized?
+
+        appender = PostHog::Rails::Logs::Setup.install!
+        return if appender.nil?
+
+        broadcast_rails_logger(appender) if PostHog::Rails.config&.forward_rails_logger
+      rescue StandardError => e
+        PostHog::Logging.logger.warn("Failed to set up PostHog Logs: #{e.message}")
+      end
+
+      # Attach the appender to Rails.logger, supporting both the Rails 7.1+
+      # BroadcastLogger and the older ActiveSupport::Logger.broadcast mechanism.
+      #
+      # @api private
+      # @return [void]
+      def self.broadcast_rails_logger(appender)
+        logger = ::Rails.logger
+        return unless logger
+
+        if logger.respond_to?(:broadcast_to)
+          logger.broadcast_to(appender)
+        elsif defined?(ActiveSupport::Logger) && ActiveSupport::Logger.respond_to?(:broadcast)
+          logger.extend(ActiveSupport::Logger.broadcast(appender))
+        else
+          PostHog::Logging.logger.warn(
+            'PostHog Logs could not broadcast Rails.logger; no compatible broadcast mechanism found.'
+          )
+        end
       end
 
       # @api private

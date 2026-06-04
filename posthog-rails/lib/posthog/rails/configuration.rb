@@ -33,6 +33,20 @@ module PostHog
       #   posthog_distinct_id, distinct_id, id, pk, uuid in order.
       attr_accessor :user_id_method
 
+      # @return [Boolean] Master switch for forwarding logs to PostHog Logs over OTLP. Defaults to false.
+      attr_accessor :logs_enabled
+
+      # @return [Boolean] Whether to broadcast Rails.logger output into the PostHog Logs sink. Defaults to true
+      #   (only takes effect when {#logs_enabled} is true).
+      attr_accessor :forward_rails_logger
+
+      # @return [Integer, Symbol, nil] Minimum severity to forward to PostHog Logs. When nil, inherits the
+      #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
+      attr_accessor :logs_level
+
+      # @return [Hash] Extra OpenTelemetry resource attributes merged with auto-detected service metadata.
+      attr_accessor :logs_resource_attributes
+
       # @return [PostHog::Rails::Configuration]
       def initialize
         @auto_capture_exceptions = false
@@ -43,6 +57,10 @@ module PostHog
         @capture_user_context = true
         @current_user_method = :current_user
         @user_id_method = nil
+        @logs_enabled = false
+        @forward_rails_logger = true
+        @logs_level = nil
+        @logs_resource_attributes = {}
       end
 
       # Default exceptions that Rails apps typically don't want to track.

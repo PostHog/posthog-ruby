@@ -39,4 +39,13 @@ RSpec.describe PostHog::Rails::Configuration do
       expect(config.should_capture_exception?(ActionController::RoutingError.new('x'))).to be false
     end
   end
+
+  describe 'PostHog Logs defaults' do
+    it 'defaults logs to disabled with forwarding ready' do
+      expect(config.logs_enabled).to be false
+      expect(config.forward_rails_logger).to be true
+      expect(config.logs_level).to be_nil
+      expect(config.logs_resource_attributes).to eq({})
+    end
+  end
 end

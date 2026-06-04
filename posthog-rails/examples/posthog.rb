@@ -43,6 +43,32 @@ PostHog::Rails.configure do |config|
   #   # 'MyCustom404Error',
   #   # 'MyCustomValidationError'
   # ]
+
+  # --------------------------------------------------------------------------
+  # POSTHOG LOGS (OpenTelemetry) - opt-in
+  # --------------------------------------------------------------------------
+  # Forward Rails.logger output to PostHog Logs over OTLP, automatically
+  # correlated with the request's distinct_id and session_id.
+  #
+  # Requires the OpenTelemetry gems (Ruby 3.3+) in your Gemfile:
+  #   gem 'opentelemetry-sdk'
+  #   gem 'opentelemetry-logs-sdk'
+  #   gem 'opentelemetry-exporter-otlp-logs'
+  #
+  # Enable log forwarding (default: false)
+  # config.logs_enabled = true
+
+  # Broadcast Rails.logger into PostHog Logs (default: true when logs enabled)
+  # config.forward_rails_logger = true
+
+  # Minimum severity to forward; nil inherits Rails.logger's level (default: nil)
+  # config.logs_level = :info
+
+  # Logs reuse the same project token (api_key) and host configured below, so
+  # there is nothing extra to set. Logs are sent to <host>/i/v1/logs.
+
+  # Extra OpenTelemetry resource attributes merged with service metadata
+  # config.logs_resource_attributes = { 'service.namespace' => 'my-team' }
 end
 
 # You can also configure Rails options directly:
