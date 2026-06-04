@@ -1641,6 +1641,80 @@ module PostHog
     end
   end
 
+  describe 'FeatureFlagsPoller#match_feature_flag_properties early_exit' do
+    let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
+    let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+    let(:distinct_id) { 'test-user' }
+    let(:properties) { { email: 'test@example.com' } }
+    let(:evaluation_cache) { {} }
+
+    before do
+      # Stub the initial feature flag definitions request
+      stub_request(:get, 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true')
+        .to_return(status: 200, body: { flags: [] }.to_json)
+    end
+
+    # First group: properties match (none) but rollout 0% excludes the user
+    # (OUT_OF_ROLLOUT_BOUND). Second group: properties match and rollout 100%
+    # includes the user (would MATCH).
+    def build_flag(early_exit:)
+      filters = {
+        groups: [
+          { properties: [], rollout_percentage: 0 },
+          { properties: [], rollout_percentage: 100 }
+        ]
+      }
+      filters[:early_exit] = early_exit unless early_exit.nil?
+      { key: 'test-flag', filters: filters }
+    end
+
+    context 'when early_exit is enabled' do
+      it 'returns false without evaluating a later matching group' do
+        flag = build_flag(early_exit: true)
+        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
+        expect(result).to be false
+      end
+    end
+
+    context 'when early_exit is unset' do
+      it 'falls through to the later matching group and returns true' do
+        flag = build_flag(early_exit: nil)
+        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
+        expect(result).to be true
+      end
+    end
+
+    context 'when early_exit is explicitly false' do
+      it 'falls through to the later matching group and returns true' do
+        flag = build_flag(early_exit: false)
+        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
+        expect(result).to be true
+      end
+    end
+
+    context 'when a group fails on a property filter (not rollout) and early_exit is enabled' do
+      it 'does not early-exit and falls through to a later matching group' do
+        flag = {
+          key: 'test-flag',
+          filters: {
+            early_exit: true,
+            groups: [
+              # Property filter does NOT match -> NO_MATCH (must fall through
+              # even with early_exit enabled), despite rollout 0%.
+              {
+                properties: [{ key: 'email', value: 'other@example.com', operator: 'exact', type: 'person' }],
+                rollout_percentage: 0
+              },
+              { properties: [], rollout_percentage: 100 }
+            ]
+          }
+        }
+        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
+        expect(result).to be true
+      end
+    end
+  end
+
   describe 'FeatureFlagsPoller ETag support' do
     let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
     let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
