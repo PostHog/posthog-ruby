@@ -37,12 +37,24 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(record[:severity_text]).to eq('INFO')
     end
 
-    it 'maps error severity' do
-      appender.error('boom')
+    # Covers every entry in Severity::MAPPING so a regression in any level
+    # (including the UNKNOWN -> INFO fallback) is caught.
+    {
+      debug: [5, 'DEBUG'],
+      info: [9, 'INFO'],
+      warn: [13, 'WARN'],
+      error: [17, 'ERROR'],
+      fatal: [21, 'FATAL'],
+      unknown: [9, 'INFO']
+    }.each do |level_method, (number, text)|
+      it "maps #{level_method} to severity #{number} (#{text})" do
+        # Use a DEBUG-level appender so even debug records are emitted.
+        described_class.new(otel_logger, level: Logger::DEBUG).public_send(level_method, 'msg')
 
-      record = otel_logger.emitted.first
-      expect(record[:severity_number]).to eq(17)
-      expect(record[:severity_text]).to eq('ERROR')
+        record = otel_logger.emitted.first
+        expect(record[:severity_number]).to eq(number)
+        expect(record[:severity_text]).to eq(text)
+      end
     end
 
     it 'drops messages below the configured level' do
