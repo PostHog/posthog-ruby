@@ -133,9 +133,13 @@ module PostHog
           end
 
           def resource_attributes(config)
+            # service.version is intentionally omitted. Per OpenTelemetry semantic
+            # conventions it is the deployed application's version, not this gem's.
+            # The posthog-rails name/version travel with each record via the
+            # instrumentation scope (see LoggerProvider#logger above). Users can
+            # still set service.version through logs_resource_attributes.
             attrs = {
               'service.name' => service_name,
-              'service.version' => PostHog::VERSION,
               'deployment.environment' => ::Rails.env.to_s
             }
             attrs.merge(stringify_keys(config.logs_resource_attributes || {}))
