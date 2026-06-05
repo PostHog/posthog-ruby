@@ -961,11 +961,6 @@ module PostHog
 
       flag_conditions = flag_filters[:groups] || []
       flag_aggregation = flag_filters[:aggregation_group_type_index]
-      # When early_exit is enabled, evaluation stops and returns a definitive
-      # disabled result as soon as a condition group's property filters match
-      # (or it has none) but the rollout percentage excludes the user, instead
-      # of falling through to later condition groups. Mirrors the server-side
-      # Rust evaluation engine (and posthog-node / posthog-python).
       early_exit = flag_filters[:early_exit] == true
       is_inconclusive = false
       result = nil
@@ -1017,10 +1012,6 @@ module PostHog
           result = variant || true
           break
         when :out_of_rollout_bound
-          # Property filters matched (or there were none) but the rollout
-          # percentage excluded the user. With early_exit enabled, stop and
-          # return a definitive disabled result instead of evaluating later
-          # condition groups.
           break if early_exit
         end
       rescue RequiresServerEvaluation

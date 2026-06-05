@@ -1713,6 +1713,24 @@ module PostHog
         expect(result).to be true
       end
     end
+
+    context 'when early_exit is enabled on a multivariate flag' do
+      it 'returns false without leaking a variant from a later group' do
+        flag = {
+          key: 'mv-flag',
+          filters: {
+            early_exit: true,
+            multivariate: { variants: [{ key: 'control', rollout_percentage: 100 }] },
+            groups: [
+              { properties: [], rollout_percentage: 0 },
+              { properties: [], rollout_percentage: 100 }
+            ]
+          }
+        }
+        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
+        expect(result).to be false
+      end
+    end
   end
 
   describe 'FeatureFlagsPoller ETag support' do
