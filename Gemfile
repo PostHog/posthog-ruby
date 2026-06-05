@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
-source 'https://rubygems.org'
+required_bundler = Gem::Version.new('4.0.13')
+if Gem::Version.new(Bundler::VERSION) < required_bundler
+  abort "Bundler #{required_bundler}+ is required because this Gemfile enforces a 7-day RubyGems cooldown."
+end
+
+source 'https://rubygems.org', cooldown: 7
 gemspec
 
 gem 'concurrent-ruby', require: 'concurrent'
