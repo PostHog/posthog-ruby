@@ -61,9 +61,11 @@ jobs:
     environment: "Release"
     permissions:
       contents: write
+      id-token: write
     outputs:
       commit-hash: ${{ steps.commit-version-bump.outputs.commit-hash }}
       new-version: ${{ steps.apply-changesets.outputs.new-version }}
+      published: ${{ steps.release-outputs.outputs.published }}
     steps:
       - name: Notify Slack - Approved
         if: needs.notify-approval-needed.outputs.slack_ts != ''
@@ -140,6 +142,90 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.releaser.outputs.token }}
 
+      - name: Sync checkout to release commit
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        env:
+          COMMIT_HASH: ${{ steps.commit-version-bump.outputs.commit-hash }}
+        run: |
+          git fetch origin main
+          git reset --hard "$COMMIT_HASH"
+
+      - name: Set up Ruby for publishing
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
+        with:
+          ruby-version: ruby
+          bundler: 4.0.13
+          bundler-cache: true
+
+      - name: Configure trusted publishing credentials
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
+
+      - name: Build posthog-ruby
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: gem build posthog-ruby.gemspec
+
+      - name: Publish posthog-ruby
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: gem push posthog-ruby-*.gem
+
+      - name: Wait for posthog-ruby to be available
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: gem exec rubygems-await posthog-ruby-*.gem
+
+      - name: Build posthog-rails
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: gem build posthog-rails.gemspec
+        working-directory: posthog-rails
+
+      - name: Publish posthog-rails
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: gem push posthog-rails/posthog-rails-*.gem
+
+      - name: Wait for posthog-rails to be available
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: gem exec rubygems-await posthog-rails/posthog-rails-*.gem
+
+      - name: Tag repository
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        env:
+          NEW_VERSION: ${{ steps.apply-changesets.outputs.new-version }}
+          COMMIT_HASH: ${{ steps.commit-version-bump.outputs.commit-hash }}
+        run: |
+          git tag -a "$NEW_VERSION" "$COMMIT_HASH" -m "$NEW_VERSION"
+          git push origin "$NEW_VERSION"
+
+      - name: Create GitHub Release
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_VERSION: ${{ steps.apply-changesets.outputs.new-version }}
+        run: |
+          CHANGELOG_ENTRY=$(awk -v defText="see CHANGELOG.md" '/^## /{if (flag) exit; flag=1; next} flag; END{if (!flag) print defText}' CHANGELOG.md | sed '/[^[:space:]]/,$!d' | tac | sed '/[^[:space:]]/,$!d' | tac)
+          gh release create "$NEW_VERSION" \
+            --title "$NEW_VERSION" \
+            --notes "$CHANGELOG_ENTRY"
+
+      - name: Set release outputs
+        id: release-outputs
+        if: steps.commit-version-bump.outputs.commit-hash != ''
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Send failure event to PostHog
+        if: ${{ failure() }}
+        uses: PostHog/posthog-github-action@58dea254b598fb5d469c0699c98af8288a7f7650 # v1.2.0
+        with:
+          posthog-token: "${{ secrets.POSTHOG_PROJECT_API_KEY }}"
+          event: "posthog-ruby-github-release-workflow-failure"
+          properties: >-
+            {
+              "commitSha": "${{ github.sha }}",
+              "jobStatus": "${{ job.status }}",
+              "ref": "${{ github.ref }}",
+              "version": "${{ steps.apply-changesets.outputs.new-version }}"
+            }
+
       - name: Notify Slack - Failed
         if: ${{ failure() && needs.notify-approval-needed.outputs.slack_ts != '' }}
         uses: posthog/.github/.github/actions/slack-thread-reply@5fc4680761e8ac29a61b212756230eba0e276d8c
@@ -147,7 +233,7 @@ jobs:
           slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
           slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
           thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
-          message: "❌ Failed to bump version for `posthog-ruby@${{ steps.apply-changesets.outputs.new-version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
+          message: "❌ Failed to release `posthog-ruby@${{ steps.apply-changesets.outputs.new-version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
           emoji_reaction: "x"
 
   notify-rejected:
@@ -189,102 +275,11 @@ jobs:
           message: '${{ steps.check-rejection.outputs.message }}'
           emoji_reaction: "no_entry_sign"
 
-  publish:
-    name: Release and publish
-    needs: [version-bump, notify-approval-needed]
-    runs-on: ubuntu-latest
-    if: always() && needs.version-bump.outputs.commit-hash != ''
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
-        with:
-          ruby-version: ruby
-          bundler: 4.0.13
-          bundler-cache: true
-
-      - name: Configure trusted publishing credentials
-        uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
-
-      - name: Build posthog-ruby
-        run: gem build posthog-ruby.gemspec
-
-      - name: Publish posthog-ruby
-        run: gem push posthog-ruby-*.gem
-
-      - name: Wait for posthog-ruby to be available
-        run: gem exec rubygems-await posthog-ruby-*.gem
-
-      - name: Build posthog-rails
-        run: gem build posthog-rails.gemspec
-        working-directory: posthog-rails
-
-      - name: Publish posthog-rails
-        run: gem push posthog-rails/posthog-rails-*.gem
-
-      - name: Wait for posthog-rails to be available
-        run: gem exec rubygems-await posthog-rails/posthog-rails-*.gem
-
-      - name: Tag repository
-        env:
-          NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
-          COMMIT_HASH: ${{ needs.version-bump.outputs.commit-hash }}
-        run: |
-          git tag -a "$NEW_VERSION" "$COMMIT_HASH" -m "$NEW_VERSION"
-          git push origin "$NEW_VERSION"
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
-        run: |
-          CHANGELOG_ENTRY=$(awk -v defText="see CHANGELOG.md" '/^## /{if (flag) exit; flag=1; next} flag; END{if (!flag) print defText}' CHANGELOG.md | sed '/[^[:space:]]/,$!d' | tac | sed '/[^[:space:]]/,$!d' | tac)
-          gh release create "$NEW_VERSION" \
-            --title "$NEW_VERSION" \
-            --notes "$CHANGELOG_ENTRY"
-
-      - name: Send failure event to PostHog
-        if: ${{ failure() }}
-        uses: PostHog/posthog-github-action@58dea254b598fb5d469c0699c98af8288a7f7650 # v1.2.0
-        with:
-          posthog-token: "${{ secrets.POSTHOG_PROJECT_API_KEY }}"
-          event: "posthog-ruby-github-release-workflow-failure"
-          properties: >-
-            {
-              "commitSha": "${{ github.sha }}",
-              "jobStatus": "${{ job.status }}",
-              "ref": "${{ github.ref }}",
-              "version": "${{ needs.version-bump.outputs.new-version }}"
-            }
-
-      - name: Notify Slack - Failed
-        if: ${{ failure() && needs.notify-approval-needed.outputs.slack_ts != '' }}
-        uses: posthog/.github/.github/actions/slack-thread-reply@5fc4680761e8ac29a61b212756230eba0e276d8c
-        with:
-          slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
-          slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
-          thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
-          message: "❌ Failed to release `posthog-ruby@${{ needs.version-bump.outputs.new-version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
-          emoji_reaction: "x"
-
   notify-released:
     name: Notify Slack - Released
-    needs: [version-bump, publish, notify-approval-needed]
+    needs: [version-bump, notify-approval-needed]
     runs-on: ubuntu-latest
-    if: always() && needs.publish.result == 'success' && needs.notify-approval-needed.outputs.slack_ts != ''
+    if: always() && needs.version-bump.result == 'success' && needs.version-bump.outputs.published == 'true' && needs.notify-approval-needed.outputs.slack_ts != ''
     steps:
       - name: Notify Slack - Released
         uses: posthog/.github/.github/actions/slack-thread-reply@5fc4680761e8ac29a61b212756230eba0e276d8c
