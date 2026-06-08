@@ -1668,27 +1668,17 @@ module PostHog
       { key: 'test-flag', filters: filters }
     end
 
-    context 'when early_exit is enabled' do
-      it 'returns false without evaluating a later matching group' do
-        flag = build_flag(early_exit: true)
-        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
-        expect(result).to be false
-      end
-    end
-
-    context 'when early_exit is unset' do
-      it 'falls through to the later matching group and returns true' do
-        flag = build_flag(early_exit: nil)
-        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
-        expect(result).to be true
-      end
-    end
-
-    context 'when early_exit is explicitly false' do
-      it 'falls through to the later matching group and returns true' do
-        flag = build_flag(early_exit: false)
-        result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
-        expect(result).to be true
+    [
+      [true,  false, 'enabled'],
+      [nil,   true,  'unset'],
+      [false, true,  'explicitly false']
+    ].each do |early_exit_val, expected, description|
+      context "when early_exit is #{description}" do
+        it "returns #{expected}" do
+          flag = build_flag(early_exit: early_exit_val)
+          result = poller.send(:match_feature_flag_properties, flag, distinct_id, properties, evaluation_cache)
+          expect(result).to be expected
+        end
       end
     end
 
