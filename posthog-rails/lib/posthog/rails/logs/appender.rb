@@ -17,6 +17,13 @@ module PostHog
       # with the request-scoped PostHog identity captured by
       # {PostHog::Rails::RequestContext}.
       #
+      # Thread-safety: intentionally lock-free. Emitting touches no shared
+      # mutable state (`@otel_logger` is assigned once, attributes are built
+      # per call, and `Internal::Context.current` is thread/fiber-local), and
+      # the OTel BatchLogRecordProcessor synchronizes its buffer internally —
+      # the same split as stdlib `Logger`, which locks in `LogDevice`, not
+      # `Logger#add`. A mutex here would serialize all app logging needlessly.
+      #
       # @api private
       class Appender < ::Logger
         SELF_LOG_PREFIX = '[posthog-ruby]'
