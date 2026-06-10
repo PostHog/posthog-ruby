@@ -81,6 +81,12 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted).to be_empty
     end
 
+    it 'does not suppress app logs that merely mention the SDK mid-string' do
+      appender.info('upstream failed: [posthog-ruby] timeout')
+
+      expect(otel_logger.emitted.size).to eq(1)
+    end
+
     it 'suppresses logs emitted under the PostHog progname' do
       appender.info('PostHog') { 'internal diagnostic' }
 

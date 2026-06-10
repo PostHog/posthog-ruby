@@ -104,7 +104,10 @@ module PostHog
         def self_log?(message, progname)
           return true if progname.to_s == SELF_LOG_PROGNAME
 
-          message.is_a?(String) && message.include?(SELF_LOG_PREFIX)
+          # PrefixedLogger always places the prefix at the start of the message,
+          # so start_with? suffices and avoids suppressing app logs that merely
+          # mention the SDK mid-string.
+          message.is_a?(String) && message.start_with?(SELF_LOG_PREFIX)
         end
       end
     end
