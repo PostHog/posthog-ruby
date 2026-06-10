@@ -48,7 +48,12 @@ module PostHog
             @provider = build_provider(config, token)
             otel_logger = @provider.logger(name: 'posthog-rails', version: PostHog::VERSION)
             level = resolve_level(config.logs_level) || rails_logger_level
-            @appender = Appender.new(otel_logger, level: level, rate_limiter: build_rate_limiter(config))
+            @appender = Appender.new(
+              otel_logger,
+              level: level,
+              rate_limiter: build_rate_limiter(config),
+              before_send: config.logs_before_send
+            )
           rescue StandardError => e
             warn_once("Failed to initialize PostHog Logs: #{e.message}")
             nil

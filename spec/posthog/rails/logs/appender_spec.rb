@@ -132,6 +132,54 @@ RSpec.describe PostHog::Rails::Logs::Appender do
     end
   end
 
+  describe 'before_send' do
+    it 'sends the record returned by the callback' do
+      before_send = proc { |record| record.merge(body: record[:body].gsub('secret', '[redacted]')) }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      appender.info('the secret token')
+
+      expect(otel_logger.emitted.first[:body]).to eq('the [redacted] token')
+    end
+
+    it 'drops the record when the callback returns nil' do
+      before_send = proc { |record| record[:body].include?('secret') ? nil : record }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      appender.info('the secret token')
+      appender.info('all clear')
+
+      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['all clear'])
+    end
+
+    it 'drops the record (rather than sending it unscrubbed) when the callback raises' do
+      before_send = proc { |_record| raise 'scrubber bug' }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      expect { appender.info('the secret token') }.not_to raise_error
+      expect(otel_logger.emitted).to be_empty
+    end
+
+    it 'is not invoked for records already dropped by the rate cap' do
+      calls = 0
+      before_send = proc do |record|
+        calls += 1
+        record
+      end
+      appender = described_class.new(
+        otel_logger,
+        level: Logger::INFO,
+        rate_limiter: PostHog::Rails::Logs::RateLimiter.new(1),
+        before_send: before_send
+      )
+
+      3.times { appender.info('msg') }
+
+      # Invoked for the one allowed record and the cap notice, not the drops.
+      expect(calls).to eq(2)
+    end
+  end
+
   describe 'context correlation' do
     it 'stamps the request distinct_id, session_id, and request metadata' do
       context_class.with_context(

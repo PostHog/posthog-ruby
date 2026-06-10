@@ -3,6 +3,7 @@
 require 'logger'
 require 'time'
 require 'posthog/internal/context'
+require 'posthog/logging'
 require 'posthog/rails/logs/severity'
 
 module PostHog
@@ -36,10 +37,15 @@ module PostHog
         # @param level [Integer, nil] Minimum severity to forward.
         # @param rate_limiter [PostHog::Rails::Logs::RateLimiter, nil] Optional cap on
         #   forwarded records, protecting the ingestion quota from runaway log volume.
-        def initialize(otel_logger, level: nil, rate_limiter: nil)
+        # @param before_send [#call, nil] Optional callback invoked with each record hash
+        #   (:timestamp, :severity_number, :severity_text, :body, :attributes) before it
+        #   is emitted. Return a (possibly modified) hash to send, or nil to drop —
+        #   useful for scrubbing PII. If the callback raises, the record is dropped.
+        def initialize(otel_logger, level: nil, rate_limiter: nil, before_send: nil)
           super(nil)
           @otel_logger = otel_logger
           @rate_limiter = rate_limiter
+          @before_send = before_send
           self.level = level unless level.nil?
         end
 
@@ -88,12 +94,43 @@ module PostHog
 
         def emit(severity, message, progname)
           severity_number, severity_text = Severity.for(severity)
-          @otel_logger.on_emit(
+          record = {
             timestamp: Time.now,
             severity_number: severity_number,
             severity_text: severity_text,
             body: body_for(message),
             attributes: attributes_for(progname)
+          }
+          record = apply_before_send(record)
+          return if record.nil?
+
+          @otel_logger.on_emit(**record)
+        end
+
+        # Runs after the rate-cap check so a log flood does not pay scrubbing
+        # costs for records that would be dropped anyway.
+        #
+        # Unlike the events before_send (which sends the original event when the
+        # callback raises), a failing callback drops the record: the likeliest
+        # use is PII scrubbing, where shipping the unscrubbed original is worse
+        # than losing the line.
+        def apply_before_send(record)
+          return record unless @before_send
+
+          result = @before_send.call(record)
+          result.is_a?(Hash) ? result : nil
+        rescue StandardError => e
+          warn_before_send_error(e)
+          nil
+        end
+
+        def warn_before_send_error(error)
+          # Benign race: concurrent first failures may warn more than once.
+          return if @before_send_error_warned
+
+          @before_send_error_warned = true
+          PostHog::Logging.logger.warn(
+            "logs_before_send raised (#{error.class}: #{error.message}); dropping records that fail the callback"
           )
         end
 

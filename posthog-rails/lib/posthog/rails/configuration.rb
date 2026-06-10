@@ -48,6 +48,12 @@ module PostHog
       #   ingestion quota from runaway log volume. Defaults to 6000. Set to nil to disable the cap.
       attr_accessor :logs_max_records_per_minute
 
+      # @return [Proc, nil] Callback invoked with each log record hash (:timestamp, :severity_number,
+      #   :severity_text, :body, :attributes) before it is sent to PostHog Logs. Return a (possibly
+      #   modified) hash to send, or nil to drop the record — useful for scrubbing PII. If the callback
+      #   raises, the record is dropped. Defaults to nil.
+      attr_accessor :logs_before_send
+
       # @return [Hash] Extra OpenTelemetry resource attributes merged with auto-detected service metadata.
       attr_accessor :logs_resource_attributes
 
@@ -65,6 +71,7 @@ module PostHog
         @forward_rails_logger = true
         @logs_level = nil
         @logs_max_records_per_minute = 6_000
+        @logs_before_send = nil
         @logs_resource_attributes = {}
       end
 

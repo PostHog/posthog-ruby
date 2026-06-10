@@ -68,6 +68,15 @@ PostHog::Rails.configure do |config|
   # runaway log volume (default: 6000; set to nil to disable the cap)
   # config.logs_max_records_per_minute = 6_000
 
+  # Modify or drop log records before they are sent, e.g. to scrub PII.
+  # Receives a hash (:timestamp, :severity_number, :severity_text, :body,
+  # :attributes); return the (modified) hash to send or nil to drop. Records
+  # are dropped if the callback raises. (default: nil)
+  # config.logs_before_send = proc { |record|
+  #   record[:body] = record[:body].gsub(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/, '[redacted email]')
+  #   record
+  # }
+
   # Logs reuse the same project token (api_key) and host configured below, so
   # there is nothing extra to set. Logs are sent to <host>/i/v1/logs.
 

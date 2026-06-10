@@ -39,3 +39,8 @@ ingestion quota from runaway log volume; when the cap trips, one warning record
 is emitted and further records are dropped for the remainder of the window.
 Tune or disable it with `config.logs_max_records_per_minute` (set to `nil` to
 disable).
+
+To scrub PII (or drop records entirely) before they leave the app, set
+`config.logs_before_send` to a proc that receives each record hash and returns
+a modified hash to send or `nil` to drop it. If the callback raises, the
+record is dropped.
