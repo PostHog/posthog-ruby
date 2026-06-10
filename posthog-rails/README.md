@@ -33,3 +33,9 @@ end
 
 When the OpenTelemetry gems are absent, the feature logs a single warning and
 no-ops, so it is safe to enable conditionally.
+
+Forwarding is capped at 6,000 records per minute by default to protect your
+ingestion quota from runaway log volume; when the cap trips, one warning record
+is emitted and further records are dropped for the remainder of the window.
+Tune or disable it with `config.logs_max_records_per_minute` (set to `nil` to
+disable).

@@ -64,6 +64,10 @@ PostHog::Rails.configure do |config|
   # Minimum severity to forward; nil inherits Rails.logger's level (default: nil)
   # config.logs_level = :info
 
+  # Maximum records forwarded per minute, protecting your ingestion quota from
+  # runaway log volume (default: 6000; set to nil to disable the cap)
+  # config.logs_max_records_per_minute = 6_000
+
   # Logs reuse the same project token (api_key) and host configured below, so
   # there is nothing extra to set. Logs are sent to <host>/i/v1/logs.
 

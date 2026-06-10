@@ -17,12 +17,14 @@ module PostHog
       # with the request-scoped PostHog identity captured by
       # {PostHog::Rails::RequestContext}.
       #
-      # Thread-safety: intentionally lock-free. Emitting touches no shared
-      # mutable state (`@otel_logger` is assigned once, attributes are built
-      # per call, and `Internal::Context.current` is thread/fiber-local), and
-      # the OTel BatchLogRecordProcessor synchronizes its buffer internally —
-      # the same split as stdlib `Logger`, which locks in `LogDevice`, not
-      # `Logger#add`. A mutex here would serialize all app logging needlessly.
+      # Thread-safety: intentionally lock-free apart from the optional rate
+      # limiter's counter. Emitting touches no shared mutable state
+      # (`@otel_logger` is assigned once, attributes are built per call, and
+      # `Internal::Context.current` is thread/fiber-local), and the OTel
+      # BatchLogRecordProcessor synchronizes its buffer internally — the same
+      # split as stdlib `Logger`, which locks in `LogDevice`, not
+      # `Logger#add`. A mutex around emit would serialize all app logging
+      # needlessly.
       #
       # @api private
       class Appender < ::Logger
@@ -32,9 +34,12 @@ module PostHog
 
         # @param otel_logger [#on_emit] An OpenTelemetry logger.
         # @param level [Integer, nil] Minimum severity to forward.
-        def initialize(otel_logger, level: nil)
+        # @param rate_limiter [PostHog::Rails::Logs::RateLimiter, nil] Optional cap on
+        #   forwarded records, protecting the ingestion quota from runaway log volume.
+        def initialize(otel_logger, level: nil, rate_limiter: nil)
           super(nil)
           @otel_logger = otel_logger
+          @rate_limiter = rate_limiter
           self.level = level unless level.nil?
         end
 
@@ -57,6 +62,20 @@ module PostHog
 
           return true if message.nil?
           return true if self_log?(message, progname)
+
+          case @rate_limiter&.record
+          when :reject
+            return true
+          when :reject_first
+            # One discoverable notice per window so truncation isn't silent.
+            emit(
+              ::Logger::WARN,
+              "PostHog Logs rate cap reached (#{@rate_limiter.limit} records/minute); " \
+              'dropping further records for the remainder of this window',
+              nil
+            )
+            return true
+          end
 
           emit(severity, message, progname)
           true

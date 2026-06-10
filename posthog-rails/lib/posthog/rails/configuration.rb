@@ -44,6 +44,10 @@ module PostHog
       #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
       attr_accessor :logs_level
 
+      # @return [Integer, nil] Maximum log records forwarded to PostHog Logs per minute, protecting the
+      #   ingestion quota from runaway log volume. Defaults to 6000. Set to nil to disable the cap.
+      attr_accessor :logs_max_records_per_minute
+
       # @return [Hash] Extra OpenTelemetry resource attributes merged with auto-detected service metadata.
       attr_accessor :logs_resource_attributes
 
@@ -60,6 +64,7 @@ module PostHog
         @logs_enabled = false
         @forward_rails_logger = true
         @logs_level = nil
+        @logs_max_records_per_minute = 6_000
         @logs_resource_attributes = {}
       end
 

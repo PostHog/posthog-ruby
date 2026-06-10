@@ -3,6 +3,7 @@
 require 'logger'
 require 'posthog/logging'
 require 'posthog/rails/logs/appender'
+require 'posthog/rails/logs/rate_limiter'
 
 module PostHog
   module Rails
@@ -47,7 +48,7 @@ module PostHog
             @provider = build_provider(config, token)
             otel_logger = @provider.logger(name: 'posthog-rails', version: PostHog::VERSION)
             level = resolve_level(config.logs_level) || rails_logger_level
-            @appender = Appender.new(otel_logger, level: level)
+            @appender = Appender.new(otel_logger, level: level, rate_limiter: build_rate_limiter(config))
           rescue StandardError => e
             warn_once("Failed to initialize PostHog Logs: #{e.message}")
             nil
@@ -113,6 +114,13 @@ module PostHog
             normalize(@client_host) ||
               normalize(ENV.fetch('POSTHOG_HOST', nil)) ||
               'https://us.i.posthog.com'
+          end
+
+          def build_rate_limiter(config)
+            limit = config.logs_max_records_per_minute
+            return nil unless limit.is_a?(Numeric) && limit.positive?
+
+            RateLimiter.new(limit.to_i)
           end
 
           def require_otel_gems

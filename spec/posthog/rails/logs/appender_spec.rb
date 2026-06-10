@@ -5,6 +5,7 @@ require 'spec_helper'
 $LOAD_PATH.unshift File.expand_path('../../../../posthog-rails/lib', __dir__)
 
 require 'posthog/rails/logs/appender'
+require 'posthog/rails/logs/rate_limiter'
 
 RSpec.describe PostHog::Rails::Logs::Appender do
   let(:context_class) { PostHog.const_get(:Internal).const_get(:Context) }
@@ -98,6 +99,36 @@ RSpec.describe PostHog::Rails::Logs::Appender do
 
       expect { appender.info('hello') }.not_to raise_error
       expect(appender.info('hello')).to be(true)
+    end
+  end
+
+  describe 'rate limiting' do
+    let(:rate_limiter) { PostHog::Rails::Logs::RateLimiter.new(2) }
+
+    subject(:appender) { described_class.new(otel_logger, level: Logger::INFO, rate_limiter: rate_limiter) }
+
+    it 'forwards records while under the cap' do
+      2.times { appender.info('fine') }
+
+      expect(otel_logger.emitted.size).to eq(2)
+    end
+
+    it 'emits a single cap notice, then drops silently for the rest of the window' do
+      5.times { |i| appender.info("msg #{i}") }
+
+      expect(otel_logger.emitted.size).to eq(3)
+      notice = otel_logger.emitted.last
+      expect(notice[:body]).to include('rate cap reached (2 records/minute)')
+      expect(notice[:severity_text]).to eq('WARN')
+    end
+
+    it 'does not count records filtered by level or self-log suppression' do
+      appender.debug('below level')
+      appender.info('[posthog-ruby] internal diagnostic')
+      2.times { appender.info('fine') }
+
+      expect(otel_logger.emitted.size).to eq(2)
+      expect(otel_logger.emitted.map { |r| r[:body] }).to all(eq('fine'))
     end
   end
 
