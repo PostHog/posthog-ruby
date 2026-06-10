@@ -107,6 +107,17 @@ RSpec.describe PostHog::Rails::Railtie do
 
     after { PostHog.client = nil }
 
+    describe 'PostHog.init' do
+      it 'remembers the init options for the logs pipeline' do
+        allow(PostHog::Rails::Logs::Setup).to receive(:remember_client_options)
+
+        PostHog.init(api_key: 'phc_test', host: 'https://eu.i.posthog.com', test_mode: true)
+
+        expect(PostHog::Rails::Logs::Setup).to have_received(:remember_client_options)
+          .with(hash_including(api_key: 'phc_test', host: 'https://eu.i.posthog.com'))
+      end
+    end
+
     describe '.install_posthog_logs' do
       it 'no-ops when PostHog is not initialized' do
         allow(PostHog::Rails::Logs::Setup).to receive(:install!)

@@ -86,9 +86,8 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         stub_const('OpenTelemetry::Exporter::OTLP::Logs::LogsExporter', exporter_class)
       end
 
-      it 'derives the OTLP endpoint and bearer token from the configured client' do
-        allow(PostHog).to receive(:client)
-          .and_return(double('client', api_key: 'phc_token', host: 'https://us.i.posthog.com'))
+      it 'derives the OTLP endpoint and bearer token from the remembered init options' do
+        described_class.remember_client_options(api_key: 'phc_token', host: 'https://us.i.posthog.com')
 
         appender = described_class.install!
 
@@ -97,16 +96,16 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         expect(exporter_args[:headers]).to eq('Authorization' => 'Bearer phc_token')
       end
 
-      it 'follows the client host, stripping a trailing slash' do
-        allow(PostHog).to receive(:client)
-          .and_return(double('client', api_key: 'phc_token', host: 'https://eu.i.posthog.com/'))
+      it 'supports string-keyed init options and strips a trailing slash from the host' do
+        described_class.remember_client_options('api_key' => 'phc_token', 'host' => 'https://eu.i.posthog.com/')
 
         described_class.install!
 
         expect(exporter_args[:endpoint]).to eq('https://eu.i.posthog.com/i/v1/logs')
+        expect(exporter_args[:headers]).to eq('Authorization' => 'Bearer phc_token')
       end
 
-      it 'falls back to ENV for token and host when no client is configured' do
+      it 'falls back to ENV for token and host when no init options were captured' do
         allow(ENV).to receive(:fetch).and_call_original
         allow(ENV).to receive(:fetch).with('POSTHOG_API_KEY', nil).and_return('phc_env')
         allow(ENV).to receive(:fetch).with('POSTHOG_HOST', nil).and_return('https://eu.i.posthog.com')
@@ -118,8 +117,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       end
 
       it 'is idempotent and returns the same appender' do
-        allow(PostHog).to receive(:client)
-          .and_return(double('client', api_key: 'phc_token', host: 'https://us.i.posthog.com'))
+        described_class.remember_client_options(api_key: 'phc_token', host: 'https://us.i.posthog.com')
 
         first = described_class.install!
         expect(described_class.install!).to be(first)

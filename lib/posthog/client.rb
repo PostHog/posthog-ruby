@@ -51,13 +51,6 @@ module PostHog
       end
     end
 
-    # @return [String, nil] The project API key this client was initialized with
-    #   (after whitespace trimming). Nil when the client is disabled.
-    attr_reader :api_key
-
-    # @return [String] The fully qualified PostHog host this client was initialized with.
-    attr_reader :host
-
     # @param opts [Hash] Client configuration.
     # @option opts [String, nil] :api_key Your project's API key. Missing or blank values disable the client.
     # @option opts [String, nil] :personal_api_key Your personal API key. Required for local feature flag evaluation.
@@ -92,7 +85,6 @@ module PostHog
 
       @queue = Queue.new
       @api_key = opts[:api_key]
-      @host = opts[:host]
       @disabled = @api_key.nil? || @api_key.empty?
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new

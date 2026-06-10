@@ -71,6 +71,20 @@ module PostHog
             logger.warn("Error shutting down PostHog Logs: #{e.message}")
           end
 
+          # Remembers the api_key/host the PostHog client was initialized with
+          # (called by PostHog.init) so the logs pipeline can reuse them without
+          # the core client exposing public readers.
+          #
+          # @api private
+          # @param options [Hash] The options passed to {PostHog::Client.new}.
+          # @return [void]
+          def remember_client_options(options)
+            return unless options.is_a?(Hash)
+
+            @client_api_key = options[:api_key] || options['api_key']
+            @client_host = options[:host] || options['host']
+          end
+
           # Resets memoized state. Intended for tests.
           #
           # @return [void]
@@ -79,31 +93,26 @@ module PostHog
             @provider = nil
             @appender = nil
             @warned = false
+            @client_api_key = nil
+            @client_host = nil
           end
 
           private
 
           # The logs token is the same project token the core client uses
-          # (i.e. config.api_key), falling back to ENV['POSTHOG_API_KEY'].
+          # (i.e. config.api_key, captured by PostHog.init), falling back to
+          # ENV['POSTHOG_API_KEY'].
           def resolve_token
-            normalize(client_attribute(:api_key)) || normalize(ENV.fetch('POSTHOG_API_KEY', nil))
+            normalize(@client_api_key) || normalize(ENV.fetch('POSTHOG_API_KEY', nil))
           end
 
-          # The logs host follows the core client's configured host, falling back
-          # to ENV['POSTHOG_HOST'] and finally the US cloud endpoint.
+          # The logs host follows the core client's configured host (captured by
+          # PostHog.init), falling back to ENV['POSTHOG_HOST'] and finally the
+          # US cloud endpoint.
           def resolve_host
-            normalize(client_attribute(:host)) ||
+            normalize(@client_host) ||
               normalize(ENV.fetch('POSTHOG_HOST', nil)) ||
               'https://us.i.posthog.com'
-          end
-
-          def client_attribute(name)
-            return nil unless PostHog.respond_to?(:client)
-
-            client = PostHog.client
-            client.respond_to?(name) ? client.public_send(name) : nil
-          rescue StandardError
-            nil
           end
 
           def require_otel_gems

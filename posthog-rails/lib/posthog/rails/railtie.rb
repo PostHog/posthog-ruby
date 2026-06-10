@@ -34,6 +34,10 @@ module PostHog
                 options = config.to_client_options
               end
 
+              # Let the PostHog Logs pipeline reuse the same api_key/host without
+              # the core client exposing public readers.
+              PostHog::Rails::Logs::Setup.remember_client_options(options) if defined?(PostHog::Rails::Logs::Setup)
+
               # Create the PostHog client
               @client = PostHog::Client.new(options)
             end
