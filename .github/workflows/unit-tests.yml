@@ -6,8 +6,13 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    name: RSpec (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -29,9 +34,40 @@ jobs:
           bundler-cache: true
 
       - name: Run RSpec tests
-        run: |
-          bundle exec rspec
+        run: bundle exec rspec
 
-      - name: Run Rubocop
-        run: |
-          bundle exec rubocop
+  rubocop:
+    name: RuboCop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Use Ruby 3.4
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
+        with:
+          ruby-version: 3.4
+          bundler: 4.0.13
+          bundler-cache: true
+
+      - name: Run RuboCop
+        run: bundle exec rubocop
+
+  gem-build:
+    name: Gem build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Use Ruby 3.4
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
+        with:
+          ruby-version: 3.4
+          bundler: 4.0.13
+          bundler-cache: true
+
+      - name: Build posthog-ruby gem
+        run: gem build posthog-ruby.gemspec
+
+      - name: Build posthog-rails gem
+        run: gem build posthog-rails.gemspec
+        working-directory: posthog-rails
