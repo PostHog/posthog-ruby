@@ -15,12 +15,6 @@ module PostHog
         module_function
 
         # @param severity [Integer, nil] A Ruby `Logger` severity constant.
-        # @return [Array(Integer, String)] OpenTelemetry severity number and text.
-        def for(severity)
-          for_name(name_for(severity))
-        end
-
-        # @param severity [Integer, nil] A Ruby `Logger` severity constant.
         # @return [Symbol] The severity name (:debug, :info, :warn, :error, :fatal).
         def name_for(severity)
           NAMES.fetch(severity, :info)
