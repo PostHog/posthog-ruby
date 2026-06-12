@@ -135,7 +135,11 @@ module PostHog
         end
 
         def body_for(message)
-          message.is_a?(String) ? message : message.inspect
+          str = message.is_a?(String) ? message.dup : message.inspect
+          unless str.encoding == Encoding::UTF_8
+              str = str.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
+          end
+          str.valid_encoding? ? str : str.scrub
         end
 
         def attributes_for(progname)
