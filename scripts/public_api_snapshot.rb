@@ -1,4 +1,3 @@
-#!/usr/bin/env ruby
 # frozen_string_literal: true
 
 require 'open3'
@@ -35,7 +34,7 @@ module PublicApiSnapshot
 
     return true if expected == actual
 
-    warn "Public API snapshot is out of date. Run `bundle exec rake public_api:generate` and review the diff."
+    warn 'Public API snapshot is out of date. Run `bundle exec rake public_api:generate` and review the diff.'
     print_diff(expected, actual)
     false
   end
@@ -141,7 +140,7 @@ module PublicApiSnapshot
   end
 
   def constant_type(value)
-    return 'Boolean' if value == true || value == false
+    return 'Boolean' if [true, false].include?(value)
     return 'nil' if value.nil?
 
     value.class.name
