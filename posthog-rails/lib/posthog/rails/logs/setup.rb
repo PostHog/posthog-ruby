@@ -17,6 +17,12 @@ module PostHog
       #
       # @api private
       module Setup
+        # Bounds the at_exit flush. Without a timeout, the batch processor
+        # joins its worker thread unbounded and the exporter retries each
+        # batch with backoff — during an outage that can eat the whole
+        # SIGTERM grace period and starve the events client of its flush.
+        SHUTDOWN_TIMEOUT_SECONDS = 2
+
         class << self
           # @return [OpenTelemetry::SDK::Logs::LoggerProvider, nil]
           attr_reader :provider
@@ -62,18 +68,20 @@ module PostHog
 
           # Flush any buffered log records.
           #
+          # @param timeout [Numeric, nil] Optional max seconds to spend flushing.
           # @return [void]
-          def force_flush
-            @provider&.force_flush
+          def force_flush(timeout: nil)
+            @provider&.force_flush(timeout: timeout)
           rescue StandardError => e
             logger.warn("Error flushing PostHog Logs: #{e.message}")
           end
 
           # Shut the pipeline down, flushing buffered records.
           #
+          # @param timeout [Numeric] Max seconds to spend; see {SHUTDOWN_TIMEOUT_SECONDS}.
           # @return [void]
-          def shutdown!
-            @provider&.shutdown
+          def shutdown!(timeout: SHUTDOWN_TIMEOUT_SECONDS)
+            @provider&.shutdown(timeout: timeout)
           rescue StandardError => e
             logger.warn("Error shutting down PostHog Logs: #{e.message}")
           end

@@ -125,6 +125,16 @@ RSpec.describe PostHog::Rails::Logs::Setup do
     end
   end
 
+  describe '.shutdown!' do
+    it 'bounds the final flush with a timeout so a hung exporter cannot eat the SIGTERM grace period' do
+      provider = double('provider')
+      described_class.instance_variable_set(:@provider, provider)
+      expect(provider).to receive(:shutdown).with(timeout: described_class::SHUTDOWN_TIMEOUT_SECONDS)
+
+      described_class.shutdown!
+    end
+  end
+
   describe '.build_rate_limiter' do
     let(:config) { PostHog::Rails.config }
 
