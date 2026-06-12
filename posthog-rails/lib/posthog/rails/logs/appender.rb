@@ -70,21 +70,18 @@ module PostHog
           return true if message.nil?
           return true if self_log?(message, progname)
 
+          record = apply_before_send(build_record(severity, message, progname))
+          return true if record.nil?
+
           case @rate_limiter&.record
           when :reject
             return true
           when :reject_first
-            # One discoverable notice per window so truncation isn't silent.
-            emit(
-              ::Logger::WARN,
-              "PostHog Logs rate cap reached (#{@rate_limiter.limit} records/minute); " \
-              'dropping further records for the remainder of this window',
-              nil
-            )
+            emit_rate_cap_notice
             return true
           end
 
-          emit(severity, message, progname)
+          emit(record)
           true
         rescue StandardError
           # Never let log forwarding break the calling code path.
@@ -93,18 +90,19 @@ module PostHog
 
         private
 
-        def emit(severity, message, progname)
-          record = {
+        def build_record(severity, message, progname)
+          {
             timestamp: Time.now,
             severity: Severity.name_for(severity),
             body: body_for(message),
             attributes: attributes_for(progname)
           }
-          record = apply_before_send(record)
-          return if record.nil?
+        end
 
-          # The callback sees a single :severity enum; the OTel number/text pair
-          # is derived here so the two can never be set inconsistently.
+        def emit(record)
+          # The before_send callback sees a single :severity enum; the OTel
+          # number/text pair is derived here so the two can never be set
+          # inconsistently.
           severity_number, severity_text = Severity.for_name(record[:severity])
           @otel_logger.on_emit(
             timestamp: record[:timestamp],
@@ -115,8 +113,23 @@ module PostHog
           )
         end
 
-        # Runs after the rate-cap check so a log flood does not pay scrubbing
-        # costs for records that would be dropped anyway.
+        # One discoverable notice per window so truncation isn't silent. Emitted
+        # directly (bypassing before_send) so a scrubber can't accidentally
+        # suppress the only signal that records are being dropped.
+        def emit_rate_cap_notice
+          emit(
+            timestamp: Time.now,
+            severity: :warn,
+            body: "PostHog Logs rate cap reached (#{@rate_limiter.limit} records/minute); " \
+                  'dropping further records for the remainder of this window',
+            attributes: {}
+          )
+        end
+
+        # Runs before the rate-cap check (matching the other PostHog SDKs) so
+        # records dropped by the callback never consume window budget — a
+        # before_send that drops noisy logs must not starve the legitimate
+        # records behind them.
         #
         # Unlike the events before_send (which sends the original event when the
         # callback raises), a failing callback drops the record: the likeliest

@@ -201,12 +201,26 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted).to be_empty
     end
 
-    it 'is not invoked for records already dropped by the rate cap' do
-      calls = 0
-      before_send = proc do |record|
-        calls += 1
-        record
-      end
+    # Cross-SDK spec: before_send runs before the rate cap, so callback-dropped
+    # records never consume window budget.
+    it 'does not charge callback-dropped records against the rate-cap budget' do
+      before_send = proc { |record| record[:body].include?('noise') ? nil : record }
+      appender = described_class.new(
+        otel_logger,
+        level: Logger::INFO,
+        rate_limiter: PostHog::Rails::Logs::RateLimiter.new(1),
+        before_send: before_send
+      )
+
+      appender.info('noise 1')
+      appender.info('noise 2')
+      appender.info('keep me')
+
+      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['keep me'])
+    end
+
+    it 'emits the cap notice directly, bypassing the callback' do
+      before_send = proc { |record| record.merge(body: record[:body].upcase) }
       appender = described_class.new(
         otel_logger,
         level: Logger::INFO,
@@ -216,8 +230,10 @@ RSpec.describe PostHog::Rails::Logs::Appender do
 
       3.times { appender.info('msg') }
 
-      # Invoked for the one allowed record and the cap notice, not the drops.
-      expect(calls).to eq(2)
+      expect(otel_logger.emitted.size).to eq(2)
+      expect(otel_logger.emitted.first[:body]).to eq('MSG')
+      # The notice body is untouched by the callback.
+      expect(otel_logger.emitted.last[:body]).to include('rate cap reached (1 records/minute)')
     end
   end
 
