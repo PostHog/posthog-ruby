@@ -144,7 +144,9 @@ module PostHog
 
         def attributes_for(progname)
           attributes = {}
-          attributes['logger.progname'] = progname.to_s if progname
+          # Ruby's progname is the closest analog to the OTel-world "logger name";
+          # logger.name is the key users coming from other ecosystems will expect.
+          attributes['logger.name'] = progname.to_s if progname
 
           context = Internal::Context.current
           return attributes unless context

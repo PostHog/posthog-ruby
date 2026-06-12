@@ -76,6 +76,12 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted.first[:body]).to eq('["a", "b"]')
     end
 
+    it 'stamps the progname as the OTel-conventional logger.name attribute' do
+      appender.info('MyJob') { 'job ran' }
+
+      expect(otel_logger.emitted.first[:attributes]['logger.name']).to eq('MyJob')
+    end
+
     it 'suppresses self-logs carrying the posthog-ruby prefix' do
       appender.info('[posthog-ruby] internal diagnostic')
 
