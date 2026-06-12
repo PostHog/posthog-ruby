@@ -250,8 +250,11 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       attributes = otel_logger.emitted.first[:attributes]
       expect(attributes['posthogDistinctId']).to eq('user-42')
       expect(attributes['sessionId']).to eq('session-99')
-      expect(attributes['$current_url']).to eq('https://example.com/widgets')
-      expect(attributes['$request_method']).to eq('GET')
+      # Request metadata uses OTel semconv names (matching the web SDK), not
+      # the $-prefixed PostHog event-property names stored in the context.
+      expect(attributes['url.full']).to eq('https://example.com/widgets')
+      expect(attributes['http.request.method']).to eq('GET')
+      expect(attributes).not_to have_key('$current_url')
     end
 
     it 'omits correlation attributes when there is no active context' do

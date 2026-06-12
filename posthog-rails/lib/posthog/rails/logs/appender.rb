@@ -31,7 +31,14 @@ module PostHog
       class Appender < ::Logger
         SELF_LOG_PREFIX = '[posthog-ruby]'
         SELF_LOG_PROGNAME = 'PostHog'
-        REQUEST_ATTRIBUTE_KEYS = %w[$current_url $request_method $request_path].freeze
+        # Maps PostHog event-property names (as stored in Internal::Context) to
+        # the OTel semantic-convention attribute names used on log records,
+        # matching the web SDK so one filter works across SDKs.
+        REQUEST_ATTRIBUTE_NAMES = {
+          '$current_url' => 'url.full',
+          '$request_method' => 'http.request.method',
+          '$request_path' => 'url.path'
+        }.freeze
 
         # @param otel_logger [#on_emit] An OpenTelemetry logger.
         # @param level [Integer, nil] Minimum severity to forward.
@@ -176,9 +183,9 @@ module PostHog
           attributes['sessionId'] = context.session_id if context.session_id
 
           properties = context.properties || {}
-          REQUEST_ATTRIBUTE_KEYS.each do |key|
+          REQUEST_ATTRIBUTE_NAMES.each do |key, attribute_name|
             value = properties[key] || properties[key.to_sym]
-            attributes[key] = value if value
+            attributes[attribute_name] = value if value
           end
 
           attributes
