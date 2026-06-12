@@ -164,9 +164,7 @@ module PostHog
 
         def body_for(message)
           str = message.is_a?(String) ? message.dup : message.inspect
-          unless str.encoding == Encoding::UTF_8
-              str = str.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
-          end
+          str = str.encode(Encoding::UTF_8, invalid: :replace, undef: :replace) unless str.encoding == Encoding::UTF_8
           str.valid_encoding? ? str : str.scrub
         end
 

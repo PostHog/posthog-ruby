@@ -108,6 +108,28 @@ RSpec.describe PostHog::Rails::Logs::Appender do
     end
   end
 
+  # One body with bad encoding would otherwise fail protobuf encoding in the
+  # OTLP exporter and silently drop the whole batch.
+  describe 'body encoding safety' do
+    it 'converts non-UTF-8 strings to valid UTF-8' do
+      appender.info("caf\xE9".b.force_encoding(Encoding::ISO_8859_1))
+
+      body = otel_logger.emitted.first[:body]
+      expect(body.encoding).to eq(Encoding::UTF_8)
+      expect(body.valid_encoding?).to be true
+      expect(body).to eq('café')
+    end
+
+    it 'scrubs invalid bytes from strings already tagged as UTF-8' do
+      appender.info("bad \xFF byte".b.force_encoding(Encoding::UTF_8))
+
+      body = otel_logger.emitted.first[:body]
+      expect(body.encoding).to eq(Encoding::UTF_8)
+      expect(body.valid_encoding?).to be true
+      expect(body).to include('bad').and include('byte')
+    end
+  end
+
   describe 'rate limiting' do
     let(:rate_limiter) { PostHog::Rails::Logs::RateLimiter.new(2) }
 
@@ -146,6 +168,21 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       appender.info('the secret token')
 
       expect(otel_logger.emitted.first[:body]).to eq('the [redacted] token')
+    end
+
+    it 'receives a mutable copy, so mutating callbacks cannot touch (or trip over) frozen app strings' do
+      original = 'user secret data'
+      before_send = proc do |record|
+        record[:body].gsub!('secret', '[redacted]')
+        record
+      end
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      expect { appender.info(original) }.not_to raise_error
+      expect(otel_logger.emitted.first[:body]).to eq('user [redacted] data')
+      # The app's string (frozen via this file's frozen_string_literal magic
+      # comment) is untouched.
+      expect(original).to eq('user secret data')
     end
 
     it 'exposes the severity as a symbol enum' do
