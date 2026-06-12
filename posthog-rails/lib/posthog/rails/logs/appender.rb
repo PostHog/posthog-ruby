@@ -146,20 +146,23 @@ module PostHog
           return record unless @before_send
 
           result = @before_send.call(record)
-          result.is_a?(Hash) ? result : nil
+          return result if result.is_a?(Hash)
+
+          # nil is an intentional drop and stays silent; any other type is
+          # likely a bug (e.g. a proc whose last expression isn't the record).
+          warn_before_send("returned #{result.class} instead of a Hash or nil") unless result.nil?
+          nil
         rescue StandardError => e
-          warn_before_send_error(e)
+          warn_before_send("raised (#{e.class}: #{e.message})")
           nil
         end
 
-        def warn_before_send_error(error)
+        def warn_before_send(description)
           # Benign race: concurrent first failures may warn more than once.
-          return if @before_send_error_warned
+          return if @before_send_warned
 
-          @before_send_error_warned = true
-          PostHog::Logging.logger.warn(
-            "logs_before_send raised (#{error.class}: #{error.message}); dropping records that fail the callback"
-          )
+          @before_send_warned = true
+          PostHog::Logging.logger.warn("logs_before_send #{description}; dropping the record")
         end
 
         def body_for(message)

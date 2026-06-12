@@ -230,6 +230,29 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['all clear'])
     end
 
+    it 'does not warn when the callback intentionally drops via nil' do
+      # An always-drop callback.
+      before_send = proc { |_record| }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+      expect(PostHog::Logging.logger).not_to receive(:warn)
+
+      appender.info('drop me')
+
+      expect(otel_logger.emitted).to be_empty
+    end
+
+    it 'drops and warns once when the callback returns a non-Hash, non-nil value' do
+      # A likely bug: the proc's last expression is the gsub! result, not the record.
+      before_send = proc { |record| record[:body].gsub!('a', 'b') }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+      expect(PostHog::Logging.logger)
+        .to receive(:warn).with(/logs_before_send returned String instead of a Hash or nil/).once
+
+      2.times { appender.info('a message') }
+
+      expect(otel_logger.emitted).to be_empty
+    end
+
     it 'drops the record (rather than sending it unscrubbed) when the callback raises' do
       before_send = proc { |_record| raise 'scrubber bug' }
       appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
