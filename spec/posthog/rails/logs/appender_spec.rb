@@ -6,6 +6,8 @@ $LOAD_PATH.unshift File.expand_path('../../../../posthog-rails/lib', __dir__)
 
 require 'posthog/rails/logs/appender'
 require 'posthog/rails/logs/rate_limiter'
+require 'active_support'
+require 'active_support/broadcast_logger'
 
 RSpec.describe PostHog::Rails::Logs::Appender do
   let(:context_class) { PostHog.const_get(:Internal).const_get(:Context) }
@@ -294,6 +296,35 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted.first[:body]).to eq('MSG')
       # The notice body is untouched by the callback.
       expect(otel_logger.emitted.last[:body]).to include('rate cap reached (1 records/minute)')
+    end
+  end
+
+  # Rails 7.1+ BroadcastLogger computes #level as the min and #debug? etc. as
+  # the any? across sinks, so the appender must keep its forwarding threshold
+  # out of Logger#level or it changes app-wide logging behavior.
+  describe 'broadcast level isolation' do
+    let(:file_logger) { Logger.new(IO::NULL, level: Logger::INFO) }
+
+    it 'does not widen BroadcastLogger#debug?/#level even when forwarding at :debug' do
+      debug_appender = described_class.new(otel_logger, level: Logger::DEBUG)
+      broadcast = ActiveSupport::BroadcastLogger.new(file_logger, debug_appender)
+
+      expect(broadcast.debug?).to be(false)
+      expect(broadcast.level).to eq(Logger::INFO)
+
+      # The threshold still applies to what the appender forwards.
+      broadcast.debug('sql query')
+      broadcast.info('request served')
+      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['sql query', 'request served'])
+    end
+
+    it 'keeps the configured threshold when a broadcast-wide level= is dispatched' do
+      broadcast = ActiveSupport::BroadcastLogger.new(file_logger, appender)
+
+      broadcast.level = Logger::ERROR
+
+      broadcast.info('still wanted in posthog')
+      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['still wanted in posthog'])
     end
   end
 

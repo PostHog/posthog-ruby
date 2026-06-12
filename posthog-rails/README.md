@@ -53,3 +53,18 @@ record is dropped.
 If your app already uses OpenTelemetry tracing, log records emitted during a
 traced request automatically carry the active `trace_id`/`span_id` — no
 configuration needed.
+
+`config.logs_level` filters what is forwarded to PostHog; it never changes
+what your app logs. Setting it below the Rails logger level (e.g. `:debug`
+with an `:info` app) does not make Rails or ActiveRecord generate extra
+output — only records the app actually produces are forwarded.
+
+Known limitations of the broadcast approach:
+
+- `Rails.logger.silence` does not silence forwarding — silenced records still
+  ship to PostHog (the silencer only lowers the level of loggers that support
+  `local_level`).
+- `Rails.logger.tagged` tags (including `config.log_tags` request IDs) are not
+  attached to forwarded records, and the non-block form
+  (`Rails.logger.tagged('X')`) returns a logger that bypasses forwarding
+  entirely.

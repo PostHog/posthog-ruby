@@ -54,7 +54,17 @@ module PostHog
           @otel_logger = otel_logger
           @rate_limiter = rate_limiter
           @before_send = before_send
-          self.level = level unless level.nil?
+          # The forwarding threshold deliberately does NOT live in Logger#level.
+          # Rails 7.1+ BroadcastLogger computes #level as the min and #debug?
+          # etc. as the any? across sinks, so storing it there would widen the
+          # app-wide predicates (logs_level = :debug would flip
+          # Rails.logger.debug? true and make e.g. ActiveRecord start
+          # generating SQL debug lines), and a broadcast-wide
+          # `Rails.logger.level =` would clobber the configured logs_level.
+          # Pinning the inherited level to UNKNOWN keeps this sink invisible
+          # to those calculations; filtering happens against @threshold in #add.
+          @threshold = level || ::Logger::DEBUG
+          self.level = ::Logger::UNKNOWN
         end
 
         # Mirrors `Logger#add` message/progname resolution, then emits to OTel
@@ -63,7 +73,7 @@ module PostHog
         # @return [Boolean] Always true so it composes with broadcast loggers.
         def add(severity, message = nil, progname = nil)
           severity ||= ::Logger::UNKNOWN
-          return true if severity < level
+          return true if severity < @threshold
 
           if message.nil?
             if block_given?
