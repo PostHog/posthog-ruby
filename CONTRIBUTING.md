@@ -7,7 +7,7 @@ Thanks for your interest in improving the PostHog Ruby SDK.
 1. Install `asdf` to manage your Ruby version: `brew install asdf`
 2. Install Ruby's plugin: `asdf plugin add ruby https://github.com/asdf-vm/asdf-ruby.git`
 3. Install the required Ruby version: `asdf install`
-4. Install dependencies: `bundle install`
+4. Install dependencies with the pinned Bundler version (required for RubyGems cooldown enforcement): `gem install bundler -v 4.0.13 && bundle install`
 
 ## Running the example file
 

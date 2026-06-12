@@ -961,6 +961,7 @@ module PostHog
 
       flag_conditions = flag_filters[:groups] || []
       flag_aggregation = flag_filters[:aggregation_group_type_index]
+      early_exit = flag_filters[:early_exit] == true
       is_inconclusive = false
       result = nil
 
@@ -997,8 +998,9 @@ module PostHog
           end
         end
 
-        if condition_match(flag, effective_bucketing, condition, effective_properties, evaluation_cache,
-                           cohort_properties)
+        case condition_match_outcome(flag, effective_bucketing, condition, effective_properties, evaluation_cache,
+                                     cohort_properties)
+        when :match
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
           flag_variants = flag_multivariate[:variants] || []
@@ -1009,6 +1011,8 @@ module PostHog
                     end
           result = variant || true
           break
+        when :out_of_rollout_bound
+          break if early_exit
         end
       rescue RequiresServerEvaluation
         # Static cohort or other missing server-side data - must fallback to API
@@ -1030,6 +1034,18 @@ module PostHog
     end
 
     def condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
+      condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache,
+                              cohort_properties) == :match
+    end
+
+    # Evaluates a single condition group and returns a tri-state outcome:
+    #   :match                 - property filters matched AND the rollout included the user
+    #   :no_match              - a property filter did NOT match
+    #   :out_of_rollout_bound  - property filters matched (or there were none) but the
+    #                            rollout percentage excluded the user
+    # Distinguishing :no_match from :out_of_rollout_bound lets the caller implement the
+    # early_exit behavior (mirrors the server-side Rust evaluation engine).
+    def condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
@@ -1040,15 +1056,17 @@ module PostHog
             FeatureFlagsPoller.match_property(prop, properties, cohort_properties)
           end
         end
-          return false
+          return :no_match
         end
 
-        return true if rollout_percentage.nil?
+        return :match if rollout_percentage.nil?
       end
 
-      return false if !rollout_percentage.nil? && (_hash(flag[:key], distinct_id) > (rollout_percentage.to_f / 100))
+      if !rollout_percentage.nil? && (_hash(flag[:key], distinct_id) > (rollout_percentage.to_f / 100))
+        return :out_of_rollout_bound
+      end
 
-      true
+      :match
     end
 
     # This function takes a distinct_id and a feature flag key and returns a float between 0 and 1.
