@@ -59,9 +59,6 @@ module PostHog
       #   PII. If the callback raises, the record is dropped. Defaults to nil.
       attr_accessor :logs_before_send
 
-      # @return [Hash] Extra OpenTelemetry resource attributes merged with auto-detected service metadata.
-      attr_accessor :logs_resource_attributes
-
       # @return [PostHog::Rails::Configuration]
       def initialize
         @auto_capture_exceptions = false
@@ -77,7 +74,6 @@ module PostHog
         @logs_level = nil
         @logs_max_records_per_minute = DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
         @logs_before_send = nil
-        @logs_resource_attributes = {}
       end
 
       # Default exceptions that Rails apps typically don't want to track.

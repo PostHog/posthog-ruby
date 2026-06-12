@@ -83,9 +83,6 @@ PostHog::Rails.configure do |config|
 
   # Logs reuse the same project token (api_key) and host configured below, so
   # there is nothing extra to set. Logs are sent to <host>/i/v1/logs.
-
-  # Extra OpenTelemetry resource attributes merged with service metadata
-  # config.logs_resource_attributes = { 'service.namespace' => 'my-team' }
 end
 
 # You can also configure Rails options directly:

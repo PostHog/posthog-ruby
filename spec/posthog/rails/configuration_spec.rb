@@ -47,7 +47,6 @@ RSpec.describe PostHog::Rails::Configuration do
       expect(config.logs_level).to be_nil
       expect(config.logs_max_records_per_minute).to eq(6_000)
       expect(config.logs_before_send).to be_nil
-      expect(config.logs_resource_attributes).to eq({})
     end
   end
 end

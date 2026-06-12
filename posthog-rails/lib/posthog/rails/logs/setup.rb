@@ -52,7 +52,7 @@ module PostHog
               return nil
             end
 
-            @provider = build_provider(config, token)
+            @provider = build_provider(token)
             otel_logger = @provider.logger(name: 'posthog-rails', version: PostHog::VERSION)
             level = resolve_level(config.logs_level) || rails_logger_level
             @appender = Appender.new(
@@ -167,8 +167,8 @@ module PostHog
             false
           end
 
-          def build_provider(config, token)
-            resource = OpenTelemetry::SDK::Resources::Resource.create(resource_attributes(config))
+          def build_provider(token)
+            resource = OpenTelemetry::SDK::Resources::Resource.create(resource_attributes)
             provider = OpenTelemetry::SDK::Logs::LoggerProvider.new(resource: resource)
             exporter = OpenTelemetry::Exporter::OTLP::Logs::LogsExporter.new(
               endpoint: logs_endpoint(resolve_host),
@@ -179,17 +179,15 @@ module PostHog
             provider
           end
 
-          def resource_attributes(config)
+          def resource_attributes
             # service.version is intentionally omitted. Per OpenTelemetry semantic
             # conventions it is the deployed application's version, not this gem's.
             # The posthog-rails name/version travel with each record via the
-            # instrumentation scope (see LoggerProvider#logger above). Users can
-            # still set service.version through logs_resource_attributes.
-            attrs = {
+            # instrumentation scope (see LoggerProvider#logger above).
+            {
               'service.name' => service_name,
               'deployment.environment' => ::Rails.env.to_s
             }
-            attrs.merge(stringify_keys(config.logs_resource_attributes || {}))
           end
 
           def service_name
@@ -227,10 +225,6 @@ module PostHog
 
             stripped = value.strip
             stripped.empty? ? nil : stripped
-          end
-
-          def stringify_keys(hash)
-            hash.transform_keys(&:to_s)
           end
 
           def warn_once(message)
