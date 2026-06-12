@@ -17,19 +17,38 @@ module PostHog
         # @param severity [Integer, nil] A Ruby `Logger` severity constant.
         # @return [Array(Integer, String)] OpenTelemetry severity number and text.
         def for(severity)
-          MAPPING.fetch(severity, DEFAULT)
+          for_name(name_for(severity))
         end
 
-        MAPPING = {
-          ::Logger::DEBUG => [5, 'DEBUG'],
-          ::Logger::INFO => [9, 'INFO'],
-          ::Logger::WARN => [13, 'WARN'],
-          ::Logger::ERROR => [17, 'ERROR'],
-          ::Logger::FATAL => [21, 'FATAL'],
-          ::Logger::UNKNOWN => [9, 'INFO']
+        # @param severity [Integer, nil] A Ruby `Logger` severity constant.
+        # @return [Symbol] The severity name (:debug, :info, :warn, :error, :fatal).
+        def name_for(severity)
+          NAMES.fetch(severity, :info)
+        end
+
+        # @param name [Symbol, String, nil] A severity name such as :warn.
+        # @return [Array(Integer, String)] OpenTelemetry severity number and text;
+        #   unrecognized names fall back to INFO.
+        def for_name(name)
+          OTEL.fetch(name.to_s.downcase.to_sym, OTEL[:info])
+        end
+
+        NAMES = {
+          ::Logger::DEBUG => :debug,
+          ::Logger::INFO => :info,
+          ::Logger::WARN => :warn,
+          ::Logger::ERROR => :error,
+          ::Logger::FATAL => :fatal,
+          ::Logger::UNKNOWN => :info
         }.freeze
 
-        DEFAULT = [9, 'INFO'].freeze
+        OTEL = {
+          debug: [5, 'DEBUG'],
+          info: [9, 'INFO'],
+          warn: [13, 'WARN'],
+          error: [17, 'ERROR'],
+          fatal: [21, 'FATAL']
+        }.freeze
       end
     end
   end

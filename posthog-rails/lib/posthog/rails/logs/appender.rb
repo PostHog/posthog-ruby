@@ -38,9 +38,10 @@ module PostHog
         # @param rate_limiter [PostHog::Rails::Logs::RateLimiter, nil] Optional cap on
         #   forwarded records, protecting the ingestion quota from runaway log volume.
         # @param before_send [#call, nil] Optional callback invoked with each record hash
-        #   (:timestamp, :severity_number, :severity_text, :body, :attributes) before it
-        #   is emitted. Return a (possibly modified) hash to send, or nil to drop —
-        #   useful for scrubbing PII. If the callback raises, the record is dropped.
+        #   (:timestamp, :severity, :body, :attributes — where :severity is a symbol such
+        #   as :warn) before it is emitted. Return a (possibly modified) hash to send, or
+        #   nil to drop — useful for scrubbing PII. If the callback raises, the record is
+        #   dropped.
         def initialize(otel_logger, level: nil, rate_limiter: nil, before_send: nil)
           super(nil)
           @otel_logger = otel_logger
@@ -93,18 +94,25 @@ module PostHog
         private
 
         def emit(severity, message, progname)
-          severity_number, severity_text = Severity.for(severity)
           record = {
             timestamp: Time.now,
-            severity_number: severity_number,
-            severity_text: severity_text,
+            severity: Severity.name_for(severity),
             body: body_for(message),
             attributes: attributes_for(progname)
           }
           record = apply_before_send(record)
           return if record.nil?
 
-          @otel_logger.on_emit(**record)
+          # The callback sees a single :severity enum; the OTel number/text pair
+          # is derived here so the two can never be set inconsistently.
+          severity_number, severity_text = Severity.for_name(record[:severity])
+          @otel_logger.on_emit(
+            timestamp: record[:timestamp],
+            severity_number: severity_number,
+            severity_text: severity_text,
+            body: record[:body],
+            attributes: record[:attributes]
+          )
         end
 
         # Runs after the rate-cap check so a log flood does not pay scrubbing

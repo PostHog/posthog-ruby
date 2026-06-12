@@ -69,10 +69,12 @@ PostHog::Rails.configure do |config|
   # config.logs_max_records_per_minute = 6_000
 
   # Modify or drop log records before they are sent, e.g. to scrub PII.
-  # Receives a hash (:timestamp, :severity_number, :severity_text, :body,
-  # :attributes); return the (modified) hash to send or nil to drop. Records
-  # are dropped if the callback raises. (default: nil)
+  # Receives a hash (:timestamp, :severity, :body, :attributes — :severity is
+  # a symbol such as :warn); return the (modified) hash to send or nil to
+  # drop. Records are dropped if the callback raises. (default: nil)
   # config.logs_before_send = proc { |record|
+  #   next nil if record[:severity] == :debug
+  #
   #   record[:body] = record[:body].gsub(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/, '[redacted email]')
   #   record
   # }

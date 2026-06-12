@@ -38,7 +38,7 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(record[:severity_text]).to eq('INFO')
     end
 
-    # Covers every entry in Severity::MAPPING so a regression in any level
+    # Covers every Ruby Logger severity so a regression in any level
     # (including the UNKNOWN -> INFO fallback) is caught.
     {
       debug: [5, 'DEBUG'],
@@ -146,6 +146,41 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       appender.info('the secret token')
 
       expect(otel_logger.emitted.first[:body]).to eq('the [redacted] token')
+    end
+
+    it 'exposes the severity as a symbol enum' do
+      seen = nil
+      before_send = proc do |record|
+        seen = record[:severity]
+        record
+      end
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      appender.warn('careful')
+
+      expect(seen).to eq(:warn)
+    end
+
+    it 'derives the OTel severity pair from a severity changed by the callback' do
+      before_send = proc { |record| record.merge(severity: :error) }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      appender.info('actually an error')
+
+      record = otel_logger.emitted.first
+      expect(record[:severity_number]).to eq(17)
+      expect(record[:severity_text]).to eq('ERROR')
+    end
+
+    it 'falls back to INFO when the callback sets an unrecognized severity' do
+      before_send = proc { |record| record.merge(severity: :loud) }
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+
+      appender.warn('odd level')
+
+      record = otel_logger.emitted.first
+      expect(record[:severity_number]).to eq(9)
+      expect(record[:severity_text]).to eq('INFO')
     end
 
     it 'drops the record when the callback returns nil' do
