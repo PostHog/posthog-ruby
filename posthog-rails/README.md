@@ -1,9 +1,10 @@
-# PostHog Rails
+# PostHog Ruby on Rails
 
-Official PostHog integration for Ruby on Rails applications.
+Please see the main [PostHog docs](https://posthog.com/docs).
 
-For installation, configuration, usage, and troubleshooting, see the official documentation:
+SDK usage examples and code snippets live in the official documentation so they stay up to date.
 
-https://posthog.com/docs/libraries/ruby-on-rails
+## Documentation
 
-Keeping usage docs in one place avoids stale examples in this repository.
+- [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
+- [Ruby library docs](https://posthog.com/docs/libraries/ruby)
