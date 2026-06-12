@@ -44,3 +44,7 @@ To scrub PII (or drop records entirely) before they leave the app, set
 `config.logs_before_send` to a proc that receives each record hash and returns
 a modified hash to send or `nil` to drop it. If the callback raises, the
 record is dropped.
+
+If your app already uses OpenTelemetry tracing, log records emitted during a
+traced request automatically carry the active `trace_id`/`span_id` — no
+configuration needed.
