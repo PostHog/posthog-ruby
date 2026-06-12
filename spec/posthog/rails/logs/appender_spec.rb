@@ -102,8 +102,10 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted).to be_empty
     end
 
-    it 'never raises even if the otel logger blows up' do
+    it 'never raises even if the otel logger blows up, warning once so the failure is debuggable' do
       allow(otel_logger).to receive(:on_emit).and_raise(StandardError, 'export failed')
+      expect(PostHog::Logging.logger)
+        .to receive(:warn).with(/failed to emit a record \(StandardError: export failed\)/).once
 
       expect { appender.info('hello') }.not_to raise_error
       expect(appender.info('hello')).to be(true)
@@ -296,6 +298,23 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted.first[:body]).to eq('MSG')
       # The notice body is untouched by the callback.
       expect(otel_logger.emitted.last[:body]).to include('rate cap reached (1 records/minute)')
+    end
+  end
+
+  describe 're-entrancy' do
+    # Without the guard this recurses until SystemStackError, which escapes
+    # the rescue StandardError in #add and breaks the request.
+    it 'drops nested records when a before_send callback logs through a broadcast including the appender' do
+      broadcast = nil
+      before_send = proc do |record|
+        broadcast.info('nested log from callback')
+        record
+      end
+      appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
+      broadcast = ActiveSupport::BroadcastLogger.new(Logger.new(IO::NULL), appender)
+
+      expect { broadcast.info('outer') }.not_to raise_error
+      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['outer'])
     end
   end
 

@@ -67,42 +67,60 @@ module PostHog
           self.level = ::Logger::UNKNOWN
         end
 
+        # Re-entrancy guard key. Fiber-local (Thread.current[]), which is what
+        # recursion needs: if anything inside #add logs through a broadcast
+        # that includes this appender (e.g. a logs_before_send callback calling
+        # Rails.logger), the nested call would recurse until SystemStackError —
+        # which, as an Exception, escapes the rescue below and breaks the app.
+        REENTRANCY_KEY = :posthog_rails_logs_emitting
+
         # Mirrors `Logger#add` message/progname resolution, then emits to OTel
         # instead of writing to a log device.
         #
         # @return [Boolean] Always true so it composes with broadcast loggers.
         def add(severity, message = nil, progname = nil)
-          severity ||= ::Logger::UNKNOWN
-          return true if severity < @threshold
+          return true if Thread.current[REENTRANCY_KEY]
 
-          if message.nil?
-            if block_given?
-              message = yield
-            else
-              message = progname
-              progname = nil
+          begin
+            Thread.current[REENTRANCY_KEY] = true
+
+            severity ||= ::Logger::UNKNOWN
+            return true if severity < @threshold
+
+            if message.nil?
+              if block_given?
+                message = yield
+              else
+                message = progname
+                progname = nil
+              end
             end
+
+            return true if message.nil?
+            return true if self_log?(message, progname)
+
+            record = apply_before_send(build_record(severity, message, progname))
+            return true if record.nil?
+
+            case @rate_limiter&.record
+            when :reject
+              return true
+            when :reject_first
+              emit_rate_cap_notice
+              return true
+            end
+
+            emit(record)
+            true
+          rescue StandardError => e
+            # Never let log forwarding break the calling code path, but leave
+            # one breadcrumb: a persistent emit failure would otherwise drop
+            # 100% of records with no signal anywhere.
+            warn_emit_error(e)
+            true
+          ensure
+            Thread.current[REENTRANCY_KEY] = nil
           end
-
-          return true if message.nil?
-          return true if self_log?(message, progname)
-
-          record = apply_before_send(build_record(severity, message, progname))
-          return true if record.nil?
-
-          case @rate_limiter&.record
-          when :reject
-            return true
-          when :reject_first
-            emit_rate_cap_notice
-            return true
-          end
-
-          emit(record)
-          true
-        rescue StandardError
-          # Never let log forwarding break the calling code path.
-          true
         end
 
         private
@@ -173,6 +191,17 @@ module PostHog
 
           @before_send_warned = true
           PostHog::Logging.logger.warn("logs_before_send #{description}; dropping the record")
+        end
+
+        def warn_emit_error(error)
+          # Benign race: concurrent first failures may warn more than once.
+          return if @emit_error_warned
+
+          @emit_error_warned = true
+          PostHog::Logging.logger.warn(
+            "PostHog Logs failed to emit a record (#{error.class}: #{error.message}); " \
+            'further failures will be dropped silently'
+          )
         end
 
         def body_for(message)
