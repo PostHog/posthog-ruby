@@ -66,16 +66,6 @@ module PostHog
             nil
           end
 
-          # Flush any buffered log records.
-          #
-          # @param timeout [Numeric, nil] Optional max seconds to spend flushing.
-          # @return [void]
-          def force_flush(timeout: nil)
-            @provider&.force_flush(timeout: timeout)
-          rescue StandardError => e
-            logger.warn("Error flushing PostHog Logs: #{e.message}")
-          end
-
           # Shut the pipeline down, flushing buffered records.
           #
           # @param timeout [Numeric] Max seconds to spend; see {SHUTDOWN_TIMEOUT_SECONDS}.
