@@ -169,12 +169,12 @@ module PostHog
 
           def service_name
             app = ::Rails.application
-            return 'rails' unless app
+            return 'unknown_service' unless app
 
             name = app.class.respond_to?(:module_parent_name) ? app.class.module_parent_name : nil
-            name && !name.empty? ? name.to_s : 'rails'
+            name && !name.empty? ? name.to_s : 'unknown_service'
           rescue StandardError
-            'rails'
+            'unknown_service'
           end
 
           def logs_endpoint(host)
