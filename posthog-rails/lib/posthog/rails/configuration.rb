@@ -41,7 +41,7 @@ module PostHog
 
       # @return [Boolean] Whether to broadcast Rails.logger output into the PostHog Logs sink. Defaults to true
       #   (only takes effect when {#logs_enabled} is true).
-      attr_accessor :forward_rails_logger
+      attr_accessor :logs_forward_rails_logger
 
       # @return [Integer, Symbol, nil] Minimum severity to forward to PostHog Logs. When nil, inherits the
       #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
@@ -73,7 +73,7 @@ module PostHog
         @current_user_method = :current_user
         @user_id_method = nil
         @logs_enabled = false
-        @forward_rails_logger = true
+        @logs_forward_rails_logger = true
         @logs_level = nil
         @logs_max_records_per_minute = DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
         @logs_before_send = nil

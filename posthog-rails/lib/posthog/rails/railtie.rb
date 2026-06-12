@@ -174,7 +174,7 @@ module PostHog
         appender = PostHog::Rails::Logs::Setup.install!
         return if appender.nil?
 
-        broadcast_rails_logger(appender) if PostHog::Rails.config&.forward_rails_logger
+        broadcast_rails_logger(appender) if PostHog::Rails.config&.logs_forward_rails_logger
       rescue StandardError => e
         PostHog::Logging.logger.warn("Failed to set up PostHog Logs: #{e.message}")
       end

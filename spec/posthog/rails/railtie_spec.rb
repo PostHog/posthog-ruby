@@ -141,9 +141,9 @@ RSpec.describe PostHog::Rails::Railtie do
         expect(PostHog::Rails::Railtie).to have_received(:broadcast_rails_logger).with(appender)
       end
 
-      it 'does not broadcast when forward_rails_logger is disabled' do
+      it 'does not broadcast when logs_forward_rails_logger is disabled' do
         PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
-        PostHog::Rails.config.forward_rails_logger = false
+        PostHog::Rails.config.logs_forward_rails_logger = false
         allow(PostHog::Rails::Logs::Setup).to receive(:install!)
           .and_return(instance_double(PostHog::Rails::Logs::Appender))
         allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)

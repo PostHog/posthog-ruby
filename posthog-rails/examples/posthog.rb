@@ -60,7 +60,7 @@ PostHog::Rails.configure do |config|
   # config.logs_enabled = true
 
   # Broadcast Rails.logger into PostHog Logs (default: true when logs enabled)
-  # config.forward_rails_logger = true
+  # config.logs_forward_rails_logger = true
 
   # Minimum severity to forward; nil inherits Rails.logger's level (default: nil)
   # config.logs_level = :info
