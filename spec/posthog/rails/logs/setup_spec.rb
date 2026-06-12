@@ -173,4 +173,30 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       expect(logger).to have_received(:warn).with(/"lots" is not a number/)
     end
   end
+
+  describe '.resolve_level' do
+    def resolve(level)
+      described_class.send(:resolve_level, level)
+    end
+
+    it 'resolves valid symbols, strings, and integers without warning' do
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+
+      expect(resolve(:warn)).to eq(Logger::WARN)
+      expect(resolve('error')).to eq(Logger::ERROR)
+      expect(resolve(Logger::INFO)).to eq(Logger::INFO)
+      expect(resolve(nil)).to be_nil
+
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it 'warns naming the bad value and falls back to nil for unknown levels' do
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+
+      expect(resolve(:warning)).to be_nil
+      expect(logger).to have_received(:warn).with(/Invalid logs_level :warning.*:debug, :info, :warn/)
+    end
+  end
 end

@@ -201,6 +201,10 @@ module PostHog
 
             ::Logger.const_get(level.to_s.upcase)
           rescue NameError
+            warn_once(
+              "Invalid logs_level #{level.inspect}; expected one of :debug, :info, :warn, " \
+              ':error, :fatal, :unknown (or an Integer). Falling back to the Rails logger level.'
+            )
             nil
           end
 
