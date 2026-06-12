@@ -119,12 +119,15 @@ RSpec.describe PostHog::Rails::Railtie do
     end
 
     describe '.install_posthog_logs' do
-      it 'no-ops when PostHog is not initialized' do
+      it 'skips with a warning when PostHog is not initialized' do
         allow(PostHog::Rails::Logs::Setup).to receive(:install!)
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
 
         PostHog::Rails::Railtie.install_posthog_logs
 
         expect(PostHog::Rails::Logs::Setup).not_to have_received(:install!)
+        expect(logger).to have_received(:warn).with(/PostHog Logs is enabled but PostHog\.init has not been called/)
       end
 
       it 'broadcasts Rails.logger when an appender is built' do

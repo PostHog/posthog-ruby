@@ -161,7 +161,15 @@ module PostHog
       # @api private
       # @return [void]
       def self.install_posthog_logs
-        return unless PostHog.initialized?
+        unless PostHog.initialized?
+          # logs_enabled is an explicit opt-in, so leave a breadcrumb instead
+          # of silently skipping when PostHog.init never ran.
+          PostHog::Logging.logger.warn(
+            'PostHog Logs is enabled but PostHog.init has not been called; ' \
+            'skipping log forwarding. Call PostHog.init in your initializer.'
+          )
+          return
+        end
 
         appender = PostHog::Rails::Logs::Setup.install!
         return if appender.nil?
