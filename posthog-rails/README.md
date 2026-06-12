@@ -37,8 +37,8 @@ no-ops, so it is safe to enable conditionally.
 Forwarding is capped at 6,000 records per minute by default to protect your
 ingestion quota from runaway log volume; when the cap trips, one warning record
 is emitted and further records are dropped for the remainder of the window.
-Tune or disable it with `config.logs_max_records_per_minute` (set to `nil` to
-disable).
+Tune or disable it with `config.logs_max_records_per_minute` (set to `nil` or
+`0` to disable; numeric strings such as ENV values are coerced).
 
 To scrub PII (or drop records entirely) before they leave the app, set
 `config.logs_before_send` to a proc that receives each record hash and returns

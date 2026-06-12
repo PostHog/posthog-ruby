@@ -65,7 +65,8 @@ PostHog::Rails.configure do |config|
   # config.logs_level = :info
 
   # Maximum records forwarded per minute, protecting your ingestion quota from
-  # runaway log volume (default: 6000; set to nil to disable the cap)
+  # runaway log volume. Numeric strings (e.g. from ENV) are coerced.
+  # (default: 6000; set to nil or 0 to disable the cap)
   # config.logs_max_records_per_minute = 6_000
 
   # Modify or drop log records before they are sent, e.g. to scrub PII.

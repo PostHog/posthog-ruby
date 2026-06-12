@@ -7,6 +7,9 @@
 module PostHog
   module Rails
     class Configuration
+      # Default cap on log records forwarded to PostHog Logs per minute.
+      DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE = 6_000
+
       # @return [Boolean] Whether to automatically capture exceptions from Rails. Defaults to false.
       attr_accessor :auto_capture_exceptions
 
@@ -44,8 +47,10 @@ module PostHog
       #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
       attr_accessor :logs_level
 
-      # @return [Integer, nil] Maximum log records forwarded to PostHog Logs per minute, protecting the
-      #   ingestion quota from runaway log volume. Defaults to 6000. Set to nil to disable the cap.
+      # @return [Integer, String, nil] Maximum log records forwarded to PostHog Logs per minute, protecting
+      #   the ingestion quota from runaway log volume. Defaults to 6000. Numeric strings (e.g. from ENV) are
+      #   coerced. Set to nil, 0, or a negative value to disable the cap; an unparseable value falls back to
+      #   the default with a warning.
       attr_accessor :logs_max_records_per_minute
 
       # @return [Proc, nil] Callback invoked with each log record hash (:timestamp, :severity, :body,
@@ -70,7 +75,7 @@ module PostHog
         @logs_enabled = false
         @forward_rails_logger = true
         @logs_level = nil
-        @logs_max_records_per_minute = 6_000
+        @logs_max_records_per_minute = DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
         @logs_before_send = nil
         @logs_resource_attributes = {}
       end

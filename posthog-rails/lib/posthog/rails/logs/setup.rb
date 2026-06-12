@@ -2,6 +2,7 @@
 
 require 'logger'
 require 'posthog/logging'
+require 'posthog/rails/configuration'
 require 'posthog/rails/logs/appender'
 require 'posthog/rails/logs/rate_limiter'
 
@@ -121,11 +122,26 @@ module PostHog
               'https://us.i.posthog.com'
           end
 
+          # nil, 0, and negative values intentionally disable the cap. Numeric
+          # strings (e.g. from ENV) are coerced — deliberately via Integer()
+          # rather than to_i, since "abc".to_i == 0 would silently disable the
+          # cap. Unparseable values warn and fall back to the default cap:
+          # a misconfiguration should not switch the protection off.
           def build_rate_limiter(config)
-            limit = config.logs_max_records_per_minute
-            return nil unless limit.is_a?(Numeric) && limit.positive?
+            raw = config.logs_max_records_per_minute
+            return nil if raw.nil?
 
-            RateLimiter.new(limit.to_i)
+            limit = Integer(raw, exception: false)
+            if limit.nil?
+              logger.warn(
+                "logs_max_records_per_minute=#{raw.inspect} is not a number; using the default cap " \
+                "of #{Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE} records/minute"
+              )
+              limit = Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
+            end
+            return nil unless limit.positive?
+
+            RateLimiter.new(limit)
           end
 
           def require_otel_gems

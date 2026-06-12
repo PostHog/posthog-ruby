@@ -124,4 +124,43 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       end
     end
   end
+
+  describe '.build_rate_limiter' do
+    let(:config) { PostHog::Rails.config }
+
+    def build
+      described_class.send(:build_rate_limiter, config)
+    end
+
+    it 'builds a limiter with the default cap' do
+      expect(build.limit).to eq(PostHog::Rails::Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE)
+    end
+
+    it 'coerces numeric strings (e.g. from ENV)' do
+      config.logs_max_records_per_minute = '3000'
+
+      expect(build.limit).to eq(3000)
+    end
+
+    it 'returns nil for nil, zero, and negative values without warning' do
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+
+      [nil, 0, -1, '0'].each do |value|
+        config.logs_max_records_per_minute = value
+        expect(build).to be_nil
+      end
+
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it 'warns and falls back to the default cap for unparseable values' do
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+      config.logs_max_records_per_minute = 'lots'
+
+      expect(build.limit).to eq(PostHog::Rails::Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE)
+      expect(logger).to have_received(:warn).with(/"lots" is not a number/)
+    end
+  end
 end
