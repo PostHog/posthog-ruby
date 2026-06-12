@@ -153,7 +153,8 @@ module PostHog
             warn_once(
               "PostHog Logs enabled but the OpenTelemetry gems are missing (#{e.message}). " \
               "Add 'opentelemetry-sdk', 'opentelemetry-logs-sdk', and " \
-              "'opentelemetry-exporter-otlp-logs' to your Gemfile to enable log forwarding."
+              "'opentelemetry-exporter-otlp-logs' (each with require: false) to your Gemfile " \
+              'to enable log forwarding.'
             )
             false
           end

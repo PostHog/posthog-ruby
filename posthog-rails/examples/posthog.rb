@@ -50,10 +50,11 @@ PostHog::Rails.configure do |config|
   # Forward Rails.logger output to PostHog Logs over OTLP, automatically
   # correlated with the request's distinct_id and session_id.
   #
-  # Requires the OpenTelemetry gems (Ruby 3.3+) in your Gemfile:
-  #   gem 'opentelemetry-sdk'
-  #   gem 'opentelemetry-logs-sdk'
-  #   gem 'opentelemetry-exporter-otlp-logs'
+  # Requires the OpenTelemetry gems (Ruby 3.3+) in your Gemfile. Use
+  # require: false — posthog-rails loads them only when logs are enabled:
+  #   gem 'opentelemetry-sdk', require: false
+  #   gem 'opentelemetry-logs-sdk', require: false
+  #   gem 'opentelemetry-exporter-otlp-logs', require: false
   #
   # Enable log forwarding (default: false)
   # config.logs_enabled = true

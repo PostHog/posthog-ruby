@@ -18,10 +18,15 @@ This is opt-in and relies on the standard OpenTelemetry gems (Ruby 3.3+), which
 are not bundled. Add them to your `Gemfile`:
 
 ```ruby
-gem 'opentelemetry-sdk'
-gem 'opentelemetry-logs-sdk'
-gem 'opentelemetry-exporter-otlp-logs'
+gem 'opentelemetry-sdk', require: false
+gem 'opentelemetry-logs-sdk', require: false
+gem 'opentelemetry-exporter-otlp-logs', require: false
 ```
+
+`require: false` keeps the gems off the boot path — `posthog-rails` requires
+them only when logs are enabled. It also avoids `opentelemetry-logs-sdk`'s
+load-time `Configurator` patch, which would otherwise piggyback a second logs
+pipeline onto an existing `OpenTelemetry::SDK.configure` (tracing) call.
 
 Then enable it in `config/initializers/posthog.rb`:
 

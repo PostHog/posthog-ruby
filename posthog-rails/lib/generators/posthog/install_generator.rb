@@ -25,9 +25,9 @@ module Posthog
         say ''
         say 'Optional: forward Rails.logger to PostHog Logs', :yellow
         say '  - Add to your Gemfile (requires Ruby 3.3+):'
-        say "      gem 'opentelemetry-sdk'"
-        say "      gem 'opentelemetry-logs-sdk'"
-        say "      gem 'opentelemetry-exporter-otlp-logs'"
+        say "      gem 'opentelemetry-sdk', require: false"
+        say "      gem 'opentelemetry-logs-sdk', require: false"
+        say "      gem 'opentelemetry-exporter-otlp-logs', require: false"
         say '  - Set config.logs_enabled = true in the initializer'
         say '  - Docs: https://posthog.com/docs/logs'
         say ''
