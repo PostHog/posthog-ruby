@@ -36,6 +36,13 @@ Run the same checks CI uses before opening a PR:
 ```bash
 bundle exec rspec
 bundle exec rubocop
+bundle exec rake public_api:check
+```
+
+If you intentionally change the public Ruby API, update the snapshot and review the diff:
+
+```bash
+bundle exec rake public_api:generate
 ```
 
 ## Rails package

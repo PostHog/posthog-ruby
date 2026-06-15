@@ -55,6 +55,9 @@ jobs:
       - name: Run RuboCop
         run: bundle exec rubocop
 
+      - name: Check public API snapshot
+        run: bundle exec rake public_api:check
+
   gem-build:
     name: Gem build
     runs-on: ubuntu-latest
