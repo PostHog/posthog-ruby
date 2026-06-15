@@ -1,3 +1,9 @@
+## 3.11.1
+
+### Patch Changes
+
+- babcd86: Send the canonical `posthog-ruby/<version>` User-Agent on feature flag API requests.
+
 ## 3.11.0
 
 ### Minor Changes
