@@ -176,6 +176,13 @@ module PostHog
       @queue.clear
     end
 
+    # Temporary public API used to verify that CI detects snapshot drift.
+    #
+    # @return [Boolean]
+    def public_api_ci_probe
+      true
+    end
+
     # @!macro common_attrs
     #   @option attrs [String] :message_id ID that uniquely
     #     identifies a message across the API. (optional)
