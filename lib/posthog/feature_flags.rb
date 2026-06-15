@@ -1242,7 +1242,7 @@ module PostHog
 
     # rubocop:disable Lint/ShadowedException
     def _request(uri, request_object, timeout = nil, include_etag: false)
-      request_object['User-Agent'] = "posthog-ruby#{PostHog::VERSION}"
+      request_object['User-Agent'] = "posthog-ruby/#{PostHog::VERSION}"
       request_timeout = timeout || 10
 
       begin

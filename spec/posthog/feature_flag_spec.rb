@@ -4818,7 +4818,7 @@ module PostHog
           'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
           'Content-Type' => 'application/json',
           'Host' => 'us.i.posthog.com',
-          'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
+          'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
         }
       ).to_return(status: 200, body: '{"featureFlags": {}}', headers: {})
 

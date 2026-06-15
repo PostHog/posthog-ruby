@@ -24,7 +24,7 @@ module PostHog
             'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Authorization' => 'Bearer testsecret',
             'Host' => 'us.i.posthog.com',
-            'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
+            'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
           }
         )
         .to_return(status: 200, body: { flags: [] }.to_json)
@@ -398,7 +398,7 @@ module PostHog
             'Content-Type' => 'application/json',
             'Authorization' => 'Bearer personal_key',
             'Host' => 'us.i.posthog.com',
-            'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
+            'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
           }
         )
         .to_return(status: 200, body: remote_config_response.to_json)
@@ -816,7 +816,7 @@ module PostHog
             'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
             'Authorization' => 'Bearer testsecret',
             'Host' => 'us.i.posthog.com',
-            'User-Agent' => "posthog-ruby#{PostHog::VERSION}"
+            'User-Agent' => "posthog-ruby/#{PostHog::VERSION}"
           }
         )
         .to_return(status: 200, body: { flags: [] }.to_json)
