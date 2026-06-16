@@ -35,6 +35,7 @@ module PostHog
           client = Client.new(api_key: api_key)
 
           expect(client.instance_variable_get(:@disabled)).to eq(true)
+          expect(client.enabled?).to be(false)
           expect(client.instance_variable_get(:@worker)).to be_a(PostHog::NoopWorker)
           expect(FieldParser).not_to receive(:parse_for_capture)
           expect(client.capture(Queued::CAPTURE)).to eq(false)
@@ -72,6 +73,12 @@ module PostHog
             end
           end
         end
+      end
+
+      it 'is enabled when a valid api_key is supplied' do
+        client = Client.new(api_key: API_KEY, test_mode: true)
+
+        expect(client.enabled?).to be(true)
       end
 
       context 'when api_key is nil' do

@@ -162,6 +162,18 @@ RSpec.describe PostHog::Rails::Railtie do
 
         expect(PostHog::Rails::Railtie).not_to have_received(:broadcast_rails_logger)
       end
+
+      it 'skips quietly when the client is disabled (missing/blank api_key)' do
+        PostHog.client = PostHog::Client.new(api_key: '', silence_disabled_client_error: true)
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
+        allow(PostHog::Rails::Logs::Setup).to receive(:install!)
+
+        PostHog::Rails::Railtie.install_posthog_logs
+
+        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install!)
+        expect(logger).not_to have_received(:warn)
+      end
     end
 
     describe '.broadcast_rails_logger' do

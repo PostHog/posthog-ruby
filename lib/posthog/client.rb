@@ -745,6 +745,14 @@ module PostHog
       @feature_flags_poller.load_feature_flags(true)
     end
 
+    # Whether the client will actually send events. It is disabled when the
+    # api_key is missing or blank, in which case every capture call no-ops.
+    #
+    # @return [Boolean]
+    def enabled?
+      !@disabled
+    end
+
     # Flush pending events and stop background resources.
     #
     # @return [void]

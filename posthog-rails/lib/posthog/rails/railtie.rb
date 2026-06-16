@@ -171,6 +171,11 @@ module PostHog
           return
         end
 
+        # Mirror the core client: when it is disabled (missing/blank api_key)
+        # every capture no-ops, so log forwarding should stay off too. The
+        # client already logs its own missing-api_key error, so skip quietly.
+        return unless PostHog.client.enabled?
+
         appender = PostHog::Rails::Logs::Setup.install!
         return if appender.nil?
 
