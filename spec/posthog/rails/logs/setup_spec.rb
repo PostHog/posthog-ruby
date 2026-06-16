@@ -55,6 +55,21 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       end
     end
 
+    context 'when the core client is in test_mode' do
+      before do
+        allow(described_class).to receive(:require_otel_gems).and_return(true)
+      end
+
+      it 'skips the pipeline quietly so test suites do not emit real records' do
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
+        described_class.remember_client_options(api_key: 'phc_token', test_mode: true)
+
+        expect(described_class.install!).to be_nil
+        expect(logger).not_to have_received(:warn)
+      end
+    end
+
     context 'when the OpenTelemetry gems are available' do
       let(:exporter_args) { {} }
       let(:otel_logger) { double('otel_logger') }

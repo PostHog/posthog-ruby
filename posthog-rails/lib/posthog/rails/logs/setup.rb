@@ -40,6 +40,13 @@ module PostHog
             return @appender if @installed
 
             @installed = true
+
+            # Respect the core client's test_mode: when it is on, the client
+            # swaps in a NoopWorker so events never ship, and the logs pipeline
+            # should likewise stay off so test suites don't emit real records.
+            # Intentional state, so skip quietly (no warning).
+            return nil if @client_test_mode
+
             return nil unless require_otel_gems
 
             config = PostHog::Rails.config
@@ -88,6 +95,7 @@ module PostHog
 
             @client_api_key = options[:api_key] || options['api_key']
             @client_host = options[:host] || options['host']
+            @client_test_mode = options[:test_mode] || options['test_mode']
           end
 
           # Resets memoized state. Intended for tests.
@@ -100,6 +108,7 @@ module PostHog
             @warned = false
             @client_api_key = nil
             @client_host = nil
+            @client_test_mode = nil
           end
 
           private
