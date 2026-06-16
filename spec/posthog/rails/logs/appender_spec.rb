@@ -78,6 +78,30 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       expect(otel_logger.emitted.first[:body]).to eq('["a", "b"]')
     end
 
+    it 'keeps string messages verbatim (not inspect-quoted)' do
+      appender.info('plain message')
+
+      expect(otel_logger.emitted.first[:body]).to eq('plain message')
+    end
+
+    it 'renders a raised exception with class, message, and backtrace' do
+      begin
+        raise 'boom'
+      rescue RuntimeError => e
+        appender.error(e)
+      end
+
+      body = otel_logger.emitted.first[:body]
+      expect(body).to start_with('boom (RuntimeError)')
+      expect(body).to include(__FILE__)
+    end
+
+    it 'renders a never-raised exception without crashing on a nil backtrace' do
+      appender.error(RuntimeError.new('not raised'))
+
+      expect(otel_logger.emitted.first[:body]).to eq("not raised (RuntimeError)\n")
+    end
+
     it 'stamps the progname as the OTel-conventional logger.name attribute' do
       appender.info('MyJob') { 'job ran' }
 

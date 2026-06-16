@@ -205,9 +205,27 @@ module PostHog
         end
 
         def body_for(message)
-          str = message.is_a?(String) ? message.dup : message.inspect
+          str = stringify(message)
           str = str.encode(Encoding::UTF_8, invalid: :replace, undef: :replace) unless str.encoding == Encoding::UTF_8
           str.valid_encoding? ? str : str.scrub
+        end
+
+        # Mirrors stdlib Logger::Formatter#msg2str so the body matches what the
+        # file logger writes — most importantly, an Exception renders with its
+        # class, message, and backtrace instead of a backtrace-less #inspect.
+        # Array() guards a never-raised exception whose backtrace is nil. The
+        # returned String is always freshly built (dup/interpolation/inspect)
+        # so a logs_before_send callback can mutate it without touching frozen
+        # app strings.
+        def stringify(message)
+          case message
+          when String
+            message.dup
+          when Exception
+            "#{message.message} (#{message.class})\n#{Array(message.backtrace).join("\n")}"
+          else
+            message.inspect
+          end
         end
 
         def attributes_for(progname)
