@@ -36,7 +36,7 @@ module PostHog
           # (or nil if setup was skipped).
           #
           # @return [PostHog::Rails::Logs::Appender, nil]
-          def install!
+          def install
             return @appender if @installed
 
             @installed = true
@@ -77,7 +77,7 @@ module PostHog
           #
           # @param timeout [Numeric] Max seconds to spend; see {SHUTDOWN_TIMEOUT_SECONDS}.
           # @return [void]
-          def shutdown!(timeout: SHUTDOWN_TIMEOUT_SECONDS)
+          def shutdown(timeout: SHUTDOWN_TIMEOUT_SECONDS)
             @provider&.shutdown(timeout: timeout)
           rescue StandardError => e
             logger.warn("Error shutting down PostHog Logs: #{e.message}")

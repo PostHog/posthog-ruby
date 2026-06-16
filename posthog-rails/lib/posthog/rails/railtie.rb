@@ -133,7 +133,7 @@ module PostHog
 
         @posthog_at_exit_registered = true
         at_exit do
-          PostHog::Rails::Logs::Setup.shutdown!
+          PostHog::Rails::Logs::Setup.shutdown
           PostHog.client&.shutdown if PostHog.initialized?
         end
       end
@@ -176,7 +176,7 @@ module PostHog
         # client already logs its own missing-api_key error, so skip quietly.
         return unless PostHog.client.enabled?
 
-        appender = PostHog::Rails::Logs::Setup.install!
+        appender = PostHog::Rails::Logs::Setup.install
         return if appender.nil?
 
         broadcast_rails_logger(appender) if PostHog::Rails.config&.logs_forward_rails_logger

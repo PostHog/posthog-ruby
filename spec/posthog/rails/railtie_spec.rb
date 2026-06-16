@@ -120,20 +120,20 @@ RSpec.describe PostHog::Rails::Railtie do
 
     describe '.install_posthog_logs' do
       it 'skips with a warning when PostHog is not initialized' do
-        allow(PostHog::Rails::Logs::Setup).to receive(:install!)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install)
         logger = instance_spy(Logger)
         PostHog::Logging.logger = logger
 
         PostHog::Rails::Railtie.install_posthog_logs
 
-        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install!)
+        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install)
         expect(logger).to have_received(:warn).with(/PostHog Logs is enabled but PostHog\.init has not been called/)
       end
 
       it 'broadcasts Rails.logger when an appender is built' do
         PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
         appender = instance_double(PostHog::Rails::Logs::Appender)
-        allow(PostHog::Rails::Logs::Setup).to receive(:install!).and_return(appender)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install).and_return(appender)
         allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)
 
         PostHog::Rails::Railtie.install_posthog_logs
@@ -144,7 +144,7 @@ RSpec.describe PostHog::Rails::Railtie do
       it 'does not broadcast when logs_forward_rails_logger is disabled' do
         PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
         PostHog::Rails.config.logs_forward_rails_logger = false
-        allow(PostHog::Rails::Logs::Setup).to receive(:install!)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install)
           .and_return(instance_double(PostHog::Rails::Logs::Appender))
         allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)
 
@@ -155,7 +155,7 @@ RSpec.describe PostHog::Rails::Railtie do
 
       it 'does not broadcast when setup returns nil' do
         PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
-        allow(PostHog::Rails::Logs::Setup).to receive(:install!).and_return(nil)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install).and_return(nil)
         allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)
 
         PostHog::Rails::Railtie.install_posthog_logs
@@ -167,11 +167,11 @@ RSpec.describe PostHog::Rails::Railtie do
         PostHog.client = PostHog::Client.new(api_key: '', silence_disabled_client_error: true)
         logger = instance_spy(Logger)
         PostHog::Logging.logger = logger
-        allow(PostHog::Rails::Logs::Setup).to receive(:install!)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install)
 
         PostHog::Rails::Railtie.install_posthog_logs
 
-        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install!)
+        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install)
         expect(logger).not_to have_received(:warn)
       end
     end

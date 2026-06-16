@@ -18,7 +18,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
     PostHog::Rails.config = previous_config
   end
 
-  describe '.install!' do
+  describe '.install' do
     context 'when the OpenTelemetry gems are missing' do
       before do
         allow(described_class).to receive(:require).and_wrap_original do |original, name, *rest|
@@ -32,8 +32,8 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         logger = instance_spy(Logger)
         PostHog::Logging.logger = logger
 
-        expect(described_class.install!).to be_nil
-        described_class.install! # idempotent; should not warn again
+        expect(described_class.install).to be_nil
+        described_class.install # idempotent; should not warn again
 
         expect(logger).to have_received(:warn).once
       end
@@ -50,7 +50,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         logger = instance_spy(Logger)
         PostHog::Logging.logger = logger
 
-        expect(described_class.install!).to be_nil
+        expect(described_class.install).to be_nil
         expect(logger).to have_received(:warn).once
       end
     end
@@ -65,7 +65,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         PostHog::Logging.logger = logger
         described_class.remember_client_options(api_key: 'phc_token', test_mode: true)
 
-        expect(described_class.install!).to be_nil
+        expect(described_class.install).to be_nil
         expect(logger).not_to have_received(:warn)
       end
     end
@@ -104,7 +104,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       it 'derives the OTLP endpoint and bearer token from the remembered init options' do
         described_class.remember_client_options(api_key: 'phc_token', host: 'https://us.i.posthog.com')
 
-        appender = described_class.install!
+        appender = described_class.install
 
         expect(appender).to be_a(PostHog::Rails::Logs::Appender)
         expect(exporter_args[:endpoint]).to eq('https://us.i.posthog.com/i/v1/logs')
@@ -114,7 +114,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       it 'supports string-keyed init options and strips a trailing slash from the host' do
         described_class.remember_client_options('api_key' => 'phc_token', 'host' => 'https://eu.i.posthog.com/')
 
-        described_class.install!
+        described_class.install
 
         expect(exporter_args[:endpoint]).to eq('https://eu.i.posthog.com/i/v1/logs')
         expect(exporter_args[:headers]).to eq('Authorization' => 'Bearer phc_token')
@@ -125,7 +125,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         allow(ENV).to receive(:fetch).with('POSTHOG_API_KEY', nil).and_return('phc_env')
         allow(ENV).to receive(:fetch).with('POSTHOG_HOST', nil).and_return('https://eu.i.posthog.com')
 
-        described_class.install!
+        described_class.install
 
         expect(exporter_args[:headers]).to eq('Authorization' => 'Bearer phc_env')
         expect(exporter_args[:endpoint]).to eq('https://eu.i.posthog.com/i/v1/logs')
@@ -134,19 +134,19 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       it 'is idempotent and returns the same appender' do
         described_class.remember_client_options(api_key: 'phc_token', host: 'https://us.i.posthog.com')
 
-        first = described_class.install!
-        expect(described_class.install!).to be(first)
+        first = described_class.install
+        expect(described_class.install).to be(first)
       end
     end
   end
 
-  describe '.shutdown!' do
+  describe '.shutdown' do
     it 'bounds the final flush with a timeout so a hung exporter cannot eat the SIGTERM grace period' do
       provider = double('provider')
       described_class.instance_variable_set(:@provider, provider)
       expect(provider).to receive(:shutdown).with(timeout: described_class::SHUTDOWN_TIMEOUT_SECONDS)
 
-      described_class.shutdown!
+      described_class.shutdown
     end
   end
 
