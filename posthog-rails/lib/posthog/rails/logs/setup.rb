@@ -101,7 +101,7 @@ module PostHog
           # Resets memoized state. Intended for tests.
           #
           # @return [void]
-          def reset!
+          def reset
             @installed = false
             @provider = nil
             @appender = nil

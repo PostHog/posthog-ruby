@@ -11,10 +11,10 @@ RSpec.describe PostHog::Rails::Logs::Setup do
   around do |example|
     previous_config = PostHog::Rails.config
     PostHog::Rails.config = PostHog::Rails::Configuration.new
-    described_class.reset!
+    described_class.reset
     example.run
   ensure
-    described_class.reset!
+    described_class.reset
     PostHog::Rails.config = previous_config
   end
 
