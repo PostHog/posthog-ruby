@@ -15,17 +15,6 @@ group :development, :test do
   gem 'activesupport', '~> 7.1'
   gem 'commander', '~> 5.0'
   gem 'oj', '~> 3.16.10'
-  # Soft dependencies of posthog-rails' PostHog Logs feature, used by the logs
-  # specs to exercise the real BatchLogRecordProcessor and OTLP exporter. Gated
-  # on Ruby 3.3+ because opentelemetry-logs-sdk >= 0.5.0 drops 3.2 (which matches
-  # the feature's documented requirement); on 3.2 the logs specs skip. The
-  # >= 0.6.0 floor is required because the OTLP exporter encodes
-  # LogRecordData#event_name, which only exists from 0.6.0 on (older pairings
-  # raise NoMethodError on export).
-  if RUBY_VERSION >= '3.3'
-    gem 'opentelemetry-exporter-otlp-logs', require: false
-    gem 'opentelemetry-logs-sdk', '>= 0.6.0', require: false
-  end
   gem 'prettier'
   gem 'railties', '~> 7.1'
   gem 'rake', '~> 13.2.1'
