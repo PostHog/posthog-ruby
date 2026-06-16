@@ -213,5 +213,18 @@ RSpec.describe PostHog::Rails::Logs::Setup do
       expect(resolve(:warning)).to be_nil
       expect(logger).to have_received(:warn).with(/Invalid logs_level :warning.*:debug, :info, :warn/)
     end
+
+    # const_get would otherwise resolve these to non-severity values (Logger's
+    # own VERSION/SEV_LABEL, or inherited top-level constants like ENV/ARGV),
+    # which would later break the severity comparison at log time.
+    %i[version sev_label env argv stdout].each do |colliding|
+      it "rejects #{colliding.inspect}, which collides with a non-severity constant" do
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
+
+        expect(resolve(colliding)).to be_nil
+        expect(logger).to have_received(:warn).with(/Invalid logs_level/)
+      end
+    end
   end
 end

@@ -208,7 +208,16 @@ module PostHog
             return nil if level.nil?
             return level if level.is_a?(Integer)
 
-            ::Logger.const_get(level.to_s.upcase)
+            # const_get can return non-severity values without raising: Logger's
+            # own VERSION/SEV_LABEL, and (via the default inherited lookup) any
+            # top-level all-caps constant like ENV/ARGV/STDOUT. The Integer guard
+            # rejects them so they don't later blow up the severity comparison.
+            # (inherit must stay true — the severity constants live in the
+            # included Logger::Severity module.)
+            result = ::Logger.const_get(level.to_s.upcase)
+            raise NameError, 'not a severity integer' unless result.is_a?(Integer)
+
+            result
           rescue NameError
             warn_once(
               "Invalid logs_level #{level.inspect}; expected one of :debug, :info, :warn, " \
