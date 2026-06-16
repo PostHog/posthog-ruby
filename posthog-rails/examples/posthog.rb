@@ -51,9 +51,11 @@ PostHog::Rails.configure do |config|
   # correlated with the request's distinct_id and session_id.
   #
   # Requires the OpenTelemetry gems (Ruby 3.3+) in your Gemfile. Use
-  # require: false — posthog-rails loads them only when logs are enabled:
+  # require: false — posthog-rails loads them only when logs are enabled.
+  # logs-sdk must be >= 0.6.0 (older versions lack LogRecordData#event_name,
+  # which the OTLP exporter needs, raising NoMethodError on export):
   #   gem 'opentelemetry-sdk', require: false
-  #   gem 'opentelemetry-logs-sdk', require: false
+  #   gem 'opentelemetry-logs-sdk', '>= 0.6.0', require: false
   #   gem 'opentelemetry-exporter-otlp-logs', require: false
   #
   # Enable log forwarding (default: false)

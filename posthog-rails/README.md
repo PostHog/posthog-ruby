@@ -20,9 +20,13 @@ are not bundled. Add them to your `Gemfile`:
 
 ```ruby
 gem 'opentelemetry-sdk', require: false
-gem 'opentelemetry-logs-sdk', require: false
+gem 'opentelemetry-logs-sdk', '>= 0.6.0', require: false
 gem 'opentelemetry-exporter-otlp-logs', require: false
 ```
+
+`opentelemetry-logs-sdk` must be `>= 0.6.0`: the OTLP logs exporter encodes
+`LogRecordData#event_name`, which only exists from 0.6.0 onward, so older
+pairings raise a `NoMethodError` when exporting. (0.6.0 also requires Ruby 3.3+.)
 
 `require: false` keeps the gems off the boot path — `posthog-rails` requires
 them only when logs are enabled. It also avoids `opentelemetry-logs-sdk`'s
