@@ -23,6 +23,14 @@ module Posthog
         say '     - POSTHOG_API_KEY (required)'
         say '     - POSTHOG_PERSONAL_API_KEY (optional, for feature flags)'
         say ''
+        say 'Optional: forward Rails.logger to PostHog Logs', :yellow
+        say '  - Add to your Gemfile (requires Ruby 3.3+):'
+        say "      gem 'opentelemetry-sdk', require: false"
+        say "      gem 'opentelemetry-logs-sdk', '>= 0.6.0', require: false"
+        say "      gem 'opentelemetry-exporter-otlp-logs', require: false"
+        say '  - Set config.logs_enabled = true in the initializer'
+        say '  - Docs: https://posthog.com/docs/logs'
+        say ''
         say 'For more information, see: https://posthog.com/docs/libraries/ruby'
         say ''
       end

@@ -7,6 +7,9 @@
 module PostHog
   module Rails
     class Configuration
+      # Default cap on log records forwarded to PostHog Logs per minute.
+      DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE = 6_000
+
       # @return [Boolean] Whether to automatically capture exceptions from Rails. Defaults to false.
       attr_accessor :auto_capture_exceptions
 
@@ -33,6 +36,29 @@ module PostHog
       #   posthog_distinct_id, distinct_id, id, pk, uuid in order.
       attr_accessor :user_id_method
 
+      # @return [Boolean] Master switch for forwarding logs to PostHog Logs over OTLP. Defaults to false.
+      attr_accessor :logs_enabled
+
+      # @return [Boolean] Whether to broadcast Rails.logger output into the PostHog Logs sink. Defaults to true
+      #   (only takes effect when {#logs_enabled} is true).
+      attr_accessor :logs_forward_rails_logger
+
+      # @return [Integer, Symbol, nil] Minimum severity to forward to PostHog Logs. When nil, inherits the
+      #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
+      attr_accessor :logs_level
+
+      # @return [Integer, String, nil] Maximum log records forwarded to PostHog Logs per minute, protecting
+      #   the ingestion quota from runaway log volume. Defaults to 6000. Numeric strings (e.g. from ENV) are
+      #   coerced. Set to nil, 0, or a negative value to disable the cap; an unparseable value falls back to
+      #   the default with a warning.
+      attr_accessor :logs_max_records_per_minute
+
+      # @return [Proc, nil] Callback invoked with each log record hash (:timestamp, :severity, :body,
+      #   :attributes — where :severity is a symbol such as :warn) before it is sent to PostHog Logs.
+      #   Return a (possibly modified) hash to send, or nil to drop the record — useful for scrubbing
+      #   PII. If the callback raises, the record is dropped. Defaults to nil.
+      attr_accessor :logs_before_send
+
       # @return [PostHog::Rails::Configuration]
       def initialize
         @auto_capture_exceptions = false
@@ -43,6 +69,11 @@ module PostHog
         @capture_user_context = true
         @current_user_method = :current_user
         @user_id_method = nil
+        @logs_enabled = false
+        @logs_forward_rails_logger = true
+        @logs_level = nil
+        @logs_max_records_per_minute = DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
+        @logs_before_send = nil
       end
 
       # Default exceptions that Rails apps typically don't want to track.

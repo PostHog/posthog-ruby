@@ -43,6 +43,48 @@ PostHog::Rails.configure do |config|
   #   # 'MyCustom404Error',
   #   # 'MyCustomValidationError'
   # ]
+
+  # --------------------------------------------------------------------------
+  # POSTHOG LOGS (OpenTelemetry) - opt-in
+  # --------------------------------------------------------------------------
+  # Forward Rails.logger output to PostHog Logs over OTLP, automatically
+  # correlated with the request's distinct_id and session_id.
+  #
+  # Requires the OpenTelemetry gems (Ruby 3.3+) in your Gemfile. Use
+  # require: false — posthog-rails loads them only when logs are enabled.
+  # logs-sdk must be >= 0.6.0 (older versions lack LogRecordData#event_name,
+  # which the OTLP exporter needs, raising NoMethodError on export):
+  #   gem 'opentelemetry-sdk', require: false
+  #   gem 'opentelemetry-logs-sdk', '>= 0.6.0', require: false
+  #   gem 'opentelemetry-exporter-otlp-logs', require: false
+  #
+  # Enable log forwarding (default: false)
+  # config.logs_enabled = true
+
+  # Broadcast Rails.logger into PostHog Logs (default: true when logs enabled)
+  # config.logs_forward_rails_logger = true
+
+  # Minimum severity to forward; nil inherits Rails.logger's level (default: nil)
+  # config.logs_level = :info
+
+  # Maximum records forwarded per minute, protecting your ingestion quota from
+  # runaway log volume. Numeric strings (e.g. from ENV) are coerced.
+  # (default: 6000; set to nil or 0 to disable the cap)
+  # config.logs_max_records_per_minute = 6_000
+
+  # Modify or drop log records before they are sent, e.g. to scrub PII.
+  # Receives a hash (:timestamp, :severity, :body, :attributes — :severity is
+  # a symbol such as :warn); return the (modified) hash to send or nil to
+  # drop. Records are dropped if the callback raises. (default: nil)
+  # config.logs_before_send = proc { |record|
+  #   next nil if record[:severity] == :debug
+  #
+  #   record[:body] = record[:body].gsub(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/, '[redacted email]')
+  #   record
+  # }
+
+  # Logs reuse the same project token (api_key) and host configured below, so
+  # there is nothing extra to set. Logs are sent to <host>/i/v1/logs.
 end
 
 # You can also configure Rails options directly:

@@ -15,6 +15,10 @@ $LOAD_PATH.unshift File.expand_path('../../../posthog-rails/lib', __dir__)
 require 'posthog/rails/configuration'
 require 'posthog/rails/railtie'
 
+# The PostHog Logs wiring tests below exercise the full Rails integration
+# (config singleton + Logs::Setup), so load it in full.
+require 'posthog/rails'
+
 RSpec.describe PostHog::Rails::Railtie do
   describe 'posthog.set_configs initializer' do
     before do
@@ -82,6 +86,124 @@ RSpec.describe PostHog::Rails::Railtie do
       expect do
         railtie.instance_exec(app, &initializer.block)
       end.not_to raise_error
+    end
+  end
+
+  describe 'PostHog Logs wiring' do
+    around do |example|
+      previous_config = PostHog::Rails.config
+      PostHog::Rails.config = PostHog::Rails::Configuration.new
+      example.run
+    ensure
+      PostHog::Rails.config = previous_config
+    end
+
+    before do
+      initializer = PostHog::Rails::Railtie.initializers.find { |i| i.name == 'posthog.set_configs' }
+      PostHog::Rails::Railtie.instance.instance_exec(double('app'), &initializer.block)
+      PostHog::Logging.logger = Logger.new(File::NULL)
+      PostHog.client = nil
+    end
+
+    after { PostHog.client = nil }
+
+    describe 'PostHog.init' do
+      it 'remembers the init options for the logs pipeline' do
+        allow(PostHog::Rails::Logs::Setup).to receive(:remember_client_options)
+
+        PostHog.init(api_key: 'phc_test', host: 'https://eu.i.posthog.com', test_mode: true)
+
+        expect(PostHog::Rails::Logs::Setup).to have_received(:remember_client_options)
+          .with(hash_including(api_key: 'phc_test', host: 'https://eu.i.posthog.com'))
+      end
+    end
+
+    describe '.install_posthog_logs' do
+      it 'skips with a warning when PostHog is not initialized' do
+        allow(PostHog::Rails::Logs::Setup).to receive(:install)
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
+
+        PostHog::Rails::Railtie.install_posthog_logs
+
+        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install)
+        expect(logger).to have_received(:warn).with(/PostHog Logs is enabled but PostHog\.init has not been called/)
+      end
+
+      it 'broadcasts Rails.logger when an appender is built' do
+        PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
+        appender = instance_double(PostHog::Rails::Logs::Appender)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install).and_return(appender)
+        allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)
+
+        PostHog::Rails::Railtie.install_posthog_logs
+
+        expect(PostHog::Rails::Railtie).to have_received(:broadcast_rails_logger).with(appender)
+      end
+
+      it 'does not broadcast when logs_forward_rails_logger is disabled' do
+        PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
+        PostHog::Rails.config.logs_forward_rails_logger = false
+        allow(PostHog::Rails::Logs::Setup).to receive(:install)
+          .and_return(instance_double(PostHog::Rails::Logs::Appender))
+        allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)
+
+        PostHog::Rails::Railtie.install_posthog_logs
+
+        expect(PostHog::Rails::Railtie).not_to have_received(:broadcast_rails_logger)
+      end
+
+      it 'does not broadcast when setup returns nil' do
+        PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
+        allow(PostHog::Rails::Logs::Setup).to receive(:install).and_return(nil)
+        allow(PostHog::Rails::Railtie).to receive(:broadcast_rails_logger)
+
+        PostHog::Rails::Railtie.install_posthog_logs
+
+        expect(PostHog::Rails::Railtie).not_to have_received(:broadcast_rails_logger)
+      end
+
+      it 'skips quietly when the client is disabled (missing/blank api_key)' do
+        PostHog.client = PostHog::Client.new(api_key: '', silence_disabled_client_error: true)
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
+        allow(PostHog::Rails::Logs::Setup).to receive(:install)
+
+        PostHog::Rails::Railtie.install_posthog_logs
+
+        expect(PostHog::Rails::Logs::Setup).not_to have_received(:install)
+        expect(logger).not_to have_received(:warn)
+      end
+    end
+
+    describe '.broadcast_rails_logger' do
+      let(:appender) { instance_double(PostHog::Rails::Logs::Appender) }
+
+      it 'uses broadcast_to on Rails 7.1+ broadcast loggers' do
+        logger = double('logger')
+        allow(logger).to receive(:respond_to?).with(:broadcast_to).and_return(true)
+        allow(logger).to receive(:broadcast_to)
+        allow(Rails).to receive(:logger).and_return(logger)
+
+        PostHog::Rails::Railtie.broadcast_rails_logger(appender)
+
+        expect(logger).to have_received(:broadcast_to).with(appender)
+      end
+
+      it 'falls back to ActiveSupport::Logger.broadcast on older Rails' do
+        logger = double('logger')
+        allow(logger).to receive(:respond_to?).with(:broadcast_to).and_return(false)
+        allow(logger).to receive(:extend)
+        allow(Rails).to receive(:logger).and_return(logger)
+
+        broadcast_module = Module.new
+        allow(ActiveSupport::Logger).to receive(:respond_to?).with(:broadcast).and_return(true)
+        allow(ActiveSupport::Logger).to receive(:broadcast).with(appender).and_return(broadcast_module)
+
+        PostHog::Rails::Railtie.broadcast_rails_logger(appender)
+
+        expect(logger).to have_received(:extend).with(broadcast_module)
+      end
     end
   end
 end
