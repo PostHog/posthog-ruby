@@ -22,6 +22,16 @@ module PostHog
     end
 
     # @return [void]
+    def request_flush
+      # Does nothing
+    end
+
+    # @return [void]
+    def notify
+      # Does nothing
+    end
+
+    # @return [void]
     def shutdown
       # Does nothing
     end

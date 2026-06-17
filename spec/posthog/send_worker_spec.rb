@@ -13,9 +13,17 @@ module PostHog
     describe '#init' do
       it 'accepts string keys' do
         queue = Queue.new
-        worker = described_class.new(queue, 'secret', 'batch_size' => 100)
+        worker = described_class.new(queue, 'secret', 'batch_size' => 100, 'flush_interval' => 2)
         batch = worker.instance_variable_get(:@batch)
         expect(batch.instance_variable_get(:@max_message_count)).to eq(100)
+        expect(worker.instance_variable_get(:@flush_interval)).to eq(2.0)
+      end
+
+      it 'defaults flush_interval to 5 seconds' do
+        queue = Queue.new
+        worker = described_class.new(queue, 'secret')
+
+        expect(worker.instance_variable_get(:@flush_interval)).to eq(5.0)
       end
     end
 
@@ -37,7 +45,7 @@ module PostHog
 
           queue = Queue.new
           queue << {}
-          worker = described_class.new(queue, 'secret')
+          worker = described_class.new(queue, 'secret', flush_interval: 0)
           worker.run
 
           expect(queue).to be_empty
@@ -59,7 +67,7 @@ module PostHog
 
         queue = Queue.new
         queue << {}
-        worker = described_class.new(queue, 'secret', on_error: on_error)
+        worker = described_class.new(queue, 'secret', on_error: on_error, flush_interval: 0)
 
         # This is to ensure that Client#flush doesn't finish before calling
         # the error handler.
@@ -79,7 +87,7 @@ module PostHog
 
         queue = Queue.new
         queue << Requested::CAPTURE
-        worker = described_class.new(queue, 'testsecret', on_error: on_error)
+        worker = described_class.new(queue, 'testsecret', on_error: on_error, flush_interval: 0)
         worker.run
 
         expect(queue).to be_empty
@@ -101,9 +109,67 @@ module PostHog
         queue << good_message
         queue << bad_message
 
-        worker = described_class.new(queue, 'testsecret', on_error: on_error)
+        worker = described_class.new(queue, 'testsecret', on_error: on_error, flush_interval: 0)
         worker.run
         expect(queue).to be_empty
+      end
+
+      it 'waits for flush_interval before sending a partial batch' do
+        sends = []
+        allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
+          sends << batch.length
+          PostHog::Response.new(200, 'Success')
+        end
+
+        queue = Queue.new
+        queue << Requested::CAPTURE
+        worker = described_class.new(queue, 'testsecret', batch_size: 10, flush_interval: 0.05)
+
+        started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        worker.run
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+
+        expect(sends).to eq([1])
+        expect(elapsed).to be >= 0.05
+      end
+
+      it 'sends immediately when the batch size is reached' do
+        sends = []
+        allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
+          sends << batch.length
+          PostHog::Response.new(200, 'Success')
+        end
+
+        queue = Queue.new
+        queue << Requested::CAPTURE
+        queue << Requested::IDENTIFY
+        worker = described_class.new(queue, 'testsecret', batch_size: 2, flush_interval: 60)
+
+        started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        worker.run
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+
+        expect(sends).to eq([2])
+        expect(elapsed).to be < 1
+      end
+
+      it 'flushes immediately when requested' do
+        sends = []
+        allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
+          sends << batch.length
+          PostHog::Response.new(200, 'Success')
+        end
+
+        queue = Queue.new
+        queue << Requested::CAPTURE
+        worker = described_class.new(queue, 'testsecret', batch_size: 10, flush_interval: 60)
+
+        worker_thread = Thread.new { worker.run }
+        eventually { expect(worker.is_requesting?).to eq(true) }
+        worker.request_flush
+
+        expect(worker_thread.join(1)).to eq(worker_thread)
+        expect(sends).to eq([1])
       end
     end
 
@@ -123,7 +189,7 @@ module PostHog
 
         queue = Queue.new
         queue << Requested::CAPTURE
-        worker = described_class.new(queue, 'testsecret')
+        worker = described_class.new(queue, 'testsecret', flush_interval: 0)
 
         worker_thread = Thread.new { worker.run }
         eventually { expect(worker.is_requesting?).to eq(true) }
