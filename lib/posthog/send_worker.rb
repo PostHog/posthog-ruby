@@ -49,10 +49,9 @@ module PostHog
     # @return [void]
     def run
       until shutdown?
-        if @queue.empty?
-          clear_flush_request
-          return
-        end
+        wait_for_work
+        break if shutdown?
+        next if @queue.empty?
 
         build_batch
 
@@ -60,12 +59,10 @@ module PostHog
           send_batch unless @batch.empty?
         ensure
           @lock.synchronize { @batch.clear }
+          clear_flush_request_if_idle
         end
       end
     ensure
-      # Worker threads exit when the queue is drained and are restarted for the
-      # next burst of events. Close the persistent connection on each exit and
-      # let Transport reconnect lazily when a future worker sends another batch.
       @transport.shutdown
     end
 
@@ -94,7 +91,6 @@ module PostHog
         @flush_requested = true
         @condition.broadcast
       end
-      @transport.shutdown
     end
 
     # public: Check whether we have outstanding requests.
@@ -137,6 +133,15 @@ module PostHog
       handle_error(-1, e.to_s)
     end
 
+    def wait_for_work
+      @state_lock.synchronize do
+        while @queue.empty? && !@shutdown
+          clear_flush_request_without_lock
+          @condition.wait(@state_lock)
+        end
+      end
+    end
+
     def wait_for_more_messages(timeout)
       @state_lock.synchronize do
         return if @flush_requested || @shutdown || !@queue.empty?
@@ -154,7 +159,15 @@ module PostHog
     end
 
     def clear_flush_request
-      @state_lock.synchronize { @flush_requested = false }
+      @state_lock.synchronize { clear_flush_request_without_lock }
+    end
+
+    def clear_flush_request_if_idle
+      @state_lock.synchronize { clear_flush_request_without_lock if @queue.empty? }
+    end
+
+    def clear_flush_request_without_lock
+      @flush_requested = false
     end
 
     def handle_error(status, error)

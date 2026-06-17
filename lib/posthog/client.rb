@@ -167,8 +167,6 @@ module PostHog
         return
       end
 
-      @worker.request_flush
-
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
         @worker.request_flush
