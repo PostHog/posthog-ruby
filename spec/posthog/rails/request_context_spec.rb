@@ -227,7 +227,7 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to eq('exception-session')
   end
 
-  it 'uses a configured current_user_resolver for exceptions' do
+  it 'supports current_user_resolver variants for exceptions' do
     PostHog::Rails.config.auto_capture_exceptions = true
 
     current_class = Class.new do
@@ -237,35 +237,6 @@ RSpec.describe PostHog::Rails::RequestContext do
     end
     stub_const('Current', current_class)
     Current.user = Struct.new(:id).new('current-user')
-    PostHog::Rails.config.current_user_resolver = proc { Current.user }
-
-    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
-      client.capture_exception(exception, distinct_id, properties)
-    end
-
-    app = lambda do |_env|
-      raise StandardError, 'boom'
-    end
-    middleware = described_class.new(PostHog::Rails::CaptureExceptions.new(app))
-
-    expect do
-      middleware.call(
-        env_for(
-          '/boom',
-          'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
-          'HTTP_X_POSTHOG_SESSION_ID' => 'exception-session'
-        )
-      )
-    end.to raise_error(StandardError, 'boom')
-
-    message = client.dequeue_last_message
-    expect(message[:event]).to eq('$exception')
-    expect(message[:distinct_id]).to eq('current-user')
-    expect(message[:properties]['$session_id']).to eq('exception-session')
-  end
-
-  it 'passes the controller to a current_user_resolver that accepts an argument' do
-    PostHog::Rails.config.auto_capture_exceptions = true
 
     user = Struct.new(:id).new('resolved-user')
     controller_class = Class.new do
@@ -283,24 +254,54 @@ RSpec.describe PostHog::Rails::RequestContext do
         'show'
       end
     end
-    PostHog::Rails.config.current_user_resolver = proc(&:posthog_user)
 
     allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
       client.capture_exception(exception, distinct_id, properties)
     end
 
-    app = lambda do |env|
-      env['action_controller.instance'] = controller_class.new(user)
-      raise StandardError, 'boom'
+    [
+      {
+        description: 'without arguments',
+        resolver: proc { Current.user },
+        controller: nil,
+        expected_distinct_id: 'current-user'
+      },
+      {
+        description: 'with a controller argument',
+        resolver: proc(&:posthog_user),
+        controller: controller_class.new(user),
+        expected_distinct_id: 'resolved-user'
+      },
+      {
+        description: 'with a controller argument but no controller',
+        resolver: proc(&:posthog_user),
+        controller: nil,
+        expected_distinct_id: 'header-user'
+      }
+    ].each do |scenario|
+      PostHog::Rails.config.current_user_resolver = scenario.fetch(:resolver)
+
+      app = lambda do |env|
+        env['action_controller.instance'] = scenario[:controller] if scenario[:controller]
+        raise StandardError, "boom #{scenario.fetch(:description)}"
+      end
+      middleware = described_class.new(PostHog::Rails::CaptureExceptions.new(app))
+
+      expect do
+        middleware.call(
+          env_for(
+            '/boom',
+            'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
+            'HTTP_X_POSTHOG_SESSION_ID' => 'exception-session'
+          )
+        )
+      end.to raise_error(StandardError, "boom #{scenario.fetch(:description)}")
+
+      message = client.dequeue_last_message
+      expect(message[:event]).to eq('$exception')
+      expect(message[:distinct_id]).to eq(scenario.fetch(:expected_distinct_id))
+      expect(message[:properties]['$session_id']).to eq('exception-session')
     end
-    middleware = described_class.new(PostHog::Rails::CaptureExceptions.new(app))
-
-    expect do
-      middleware.call(env_for('/boom'))
-    end.to raise_error(StandardError, 'boom')
-
-    message = client.dequeue_last_message
-    expect(message[:distinct_id]).to eq('resolved-user')
   end
 
   it 'captures exceptions with tracing context and re-raises' do

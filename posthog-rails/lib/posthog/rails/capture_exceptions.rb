@@ -89,10 +89,11 @@ module PostHog
       end
 
       def call_current_user_resolver(resolver, controller)
-        return controller.instance_exec(&resolver) if resolver.arity.zero? && controller
-        return resolver.call if resolver.arity.zero?
-
-        resolver.call(controller)
+        if resolver.arity.zero?
+          controller ? controller.instance_exec(&resolver) : resolver.call
+        elsif controller
+          resolver.call(controller)
+        end
       end
 
       def extract_user_id(user)
