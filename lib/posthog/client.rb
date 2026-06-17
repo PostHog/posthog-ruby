@@ -84,10 +84,13 @@ module PostHog
       opts[:host] = normalize_host_option(opts[:host])
 
       @queue = Queue.new
+      @queue_mutex = Mutex.new
       @api_key = opts[:api_key]
       @disabled = @api_key.nil? || @api_key.empty?
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
+      @shutdown_mutex = Mutex.new
+      @shutdown = false
       @sync_mode = opts[:sync_mode] == true && !opts[:test_mode] && !@disabled
       @on_error = opts[:on_error] || proc { |status, error| }
       @worker = if opts[:test_mode] || @disabled
@@ -139,8 +142,9 @@ module PostHog
           )
       end
 
+      @distinct_id_has_sent_flag_calls_mutex = Mutex.new
       @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
-        hash[key] = []
+        hash[key] = SizeLimitedArray.new(Defaults::MAX_HASH_SIZE)
       end
 
       @before_send = opts[:before_send]
@@ -173,7 +177,7 @@ module PostHog
     #
     # @return [void]
     def clear
-      @queue.clear
+      @queue_mutex.synchronize { @queue.clear }
     end
 
     # @!macro common_attrs
@@ -757,6 +761,16 @@ module PostHog
     #
     # @return [void]
     def shutdown
+      already_shutdown = @shutdown_mutex.synchronize do
+        if @shutdown
+          true
+        else
+          @shutdown = true
+          false
+        end
+      end
+      return if already_shutdown
+
       self.class._decrement_instance_count(@api_key) unless @disabled
       @feature_flags_poller&.shutdown_poller
       flush
@@ -764,6 +778,7 @@ module PostHog
         @sync_lock.synchronize { @transport&.shutdown }
       else
         @worker&.shutdown
+        @worker_thread&.join(1)
       end
     end
 
@@ -821,7 +836,16 @@ module PostHog
           ''
         end
       reported_key = "#{key}_#{response_repr}#{groups_repr}"
-      return if @distinct_id_has_sent_flag_calls[distinct_id].include?(reported_key)
+      should_capture = @distinct_id_has_sent_flag_calls_mutex.synchronize do
+        sent_keys = @distinct_id_has_sent_flag_calls[distinct_id]
+        if sent_keys.include?(reported_key)
+          false
+        else
+          sent_keys << reported_key
+          true
+        end
+      end
+      return unless should_capture
 
       msg = {
         distinct_id: distinct_id,
@@ -832,7 +856,6 @@ module PostHog
       msg[:disable_geoip] = disable_geoip unless disable_geoip.nil?
 
       capture(msg)
-      @distinct_id_has_sent_flag_calls[distinct_id] << reported_key
     end
 
     def _feature_flag_evaluations_host
@@ -921,7 +944,7 @@ module PostHog
     #
     # returns Boolean of whether the item was added to the queue.
     def enqueue(action)
-      return false if @disabled
+      return false if @disabled || shutdown?
 
       action = process_before_send(action)
       return false if action.nil? || action.empty?
@@ -934,10 +957,17 @@ module PostHog
         return true
       end
 
-      if @queue.length < @max_queue_size
-        @queue << action
-        ensure_worker_running
+      queued = @queue_mutex.synchronize do
+        if @queue.length < @max_queue_size
+          @queue << action
+          true
+        else
+          false
+        end
+      end
 
+      if queued
+        ensure_worker_running
         true
       else
         logger.warn(
@@ -993,6 +1023,10 @@ module PostHog
 
     def worker_running?
       @worker_thread&.alive?
+    end
+
+    def shutdown?
+      @shutdown_mutex.synchronize { @shutdown }
     end
 
     def add_local_person_and_group_properties(distinct_id, groups, person_properties, group_properties)

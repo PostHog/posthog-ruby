@@ -1464,6 +1464,18 @@ module PostHog
       end
     end
 
+    describe '#shutdown' do
+      it 'is idempotent and stops accepting new events' do
+        worker = instance_spy(PostHog::NoopWorker, is_requesting?: false)
+        client.instance_variable_set(:@worker, worker)
+
+        expect { 2.times { client.shutdown } }.to_not raise_error
+
+        expect(worker).to have_received(:shutdown).once
+        expect(client.capture(Queued::CAPTURE)).to eq(false)
+      end
+    end
+
     describe 'feature flags' do
       it 'returns defaults without requests when the client is disabled' do
         disabled_client = Client.new(api_key: " \n\t ", test_mode: true)
@@ -1715,6 +1727,32 @@ module PostHog
           expect(client.send(s, data)).to eq(false) # Queue is full
           client.clear
         end
+      end
+
+      it 'does not exceed max queue size with concurrent producers' do
+        client.instance_variable_set(:@max_queue_size, 1)
+        queue = client.instance_variable_get(:@queue)
+
+        class << queue
+          alias_method :original_length_for_concurrency_spec, :length
+
+          # Widen the old check-then-push TOCTOU window. The production fix holds
+          # @queue_mutex across both this length check and the subsequent push, so
+          # concurrent producers cannot observe the same stale queue length.
+          def length
+            value = original_length_for_concurrency_spec
+            Thread.pass
+            sleep 0.001
+            value
+          end
+        end
+
+        threads = 20.times.map do |index|
+          Thread.new { client.capture(event: 'concurrent', distinct_id: index.to_s) }
+        end
+        threads.each(&:join)
+
+        expect(queue.length).to eq(1)
       end
 
       it 'converts message id to string' do

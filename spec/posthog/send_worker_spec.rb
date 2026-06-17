@@ -72,6 +72,22 @@ module PostHog
         expect(error).to eq('Some error')
       end
 
+      it 'clears the in-flight batch if the error handler raises' do
+        queue = Queue.new
+        queue << {}
+        worker = described_class.new(queue, 'secret', on_error: proc { raise 'handler failed' })
+        transport = instance_double(
+          PostHog::Transport,
+          send: PostHog::Response.new(400, 'Some error'),
+          shutdown: nil
+        )
+        worker.instance_variable_set(:@transport, transport)
+
+        expect { worker.run }.to_not raise_error
+        expect(queue).to be_empty
+        expect(worker.is_requesting?).to eq(false)
+      end
+
       it 'does not call on_error if the request is good' do
         on_error = proc { |status, error| puts "#{status}, #{error}" }
 

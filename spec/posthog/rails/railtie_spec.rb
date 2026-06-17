@@ -46,6 +46,17 @@ RSpec.describe PostHog::Rails::Railtie do
       expect(PostHog.evaluate_flags('user').keys).to eq([])
       expect(logger).not_to have_received(:error)
     end
+
+    it 'shuts down the previous client when init is called again' do
+      previous_client = instance_spy(PostHog::Client)
+      PostHog.client = previous_client
+
+      new_client = PostHog.init(api_key: 'testsecret', test_mode: true)
+
+      expect(new_client).to be_a(PostHog::Client)
+      expect(PostHog.client).to eq(new_client)
+      expect(previous_client).to have_received(:shutdown).once
+    end
   end
 
   describe 'posthog.insert_middlewares initializer' do

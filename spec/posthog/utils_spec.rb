@@ -33,6 +33,17 @@ module PostHog
         expect(dict.length <= size).to eq(true)
       end
     end
+
+    it 'size limited array drops oldest entries without exposing the constant publicly' do
+      expect { PostHog::Utils::SizeLimitedArray }.to raise_error(NameError)
+
+      array_class = PostHog::Utils.const_get(:SizeLimitedArray, false)
+      array = array_class.new(3)
+
+      (1..5).each { |i| array << i }
+
+      expect(array).to eq([3, 4, 5])
+    end
   end
 
   describe '.get_by_symbol_or_string_key' do
