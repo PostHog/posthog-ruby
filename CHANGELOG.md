@@ -1,3 +1,9 @@
+## 3.12.1
+
+### Patch Changes
+
+- ae9bca8: Harden async worker, shutdown, queue, and feature flag cache behavior for threaded Ruby and Rails apps.
+
 ## 3.12.0
 
 ### Minor Changes
