@@ -147,23 +147,88 @@ module PostHog
         end
       end
 
+      MISSING_MIDDLEWARE_MESSAGE = 'No such middleware to insert'
+
       # @api private
       # @return [void]
       def insert_middleware_after(app, target, middleware)
-        # During initialization, app.config.middleware is a MiddlewareStackProxy
-        # which only supports recording operations (insert_after, use, etc.)
-        # and does NOT support query methods like include?.
-        app.config.middleware.insert_after(target, middleware)
+        insert_middleware(app.config.middleware, :after, target, middleware)
       end
 
       # @api private
       # @return [void]
       def insert_middleware_before(app, target, middleware)
-        # During initialization, app.config.middleware is a MiddlewareStackProxy
-        # which only supports recording operations (insert_before, use, etc.)
-        # and does NOT support query methods like include?.
-        app.config.middleware.insert_before(target, middleware)
+        insert_middleware(app.config.middleware, :before, target, middleware)
       end
+
+      # During initialization, app.config.middleware is usually a
+      # Rails::Configuration::MiddlewareStackProxy. The proxy only records
+      # operations, so missing-target errors happen later when Rails builds the
+      # real ActionDispatch::MiddlewareStack. Add our own deferred operation so
+      # we can fall back at build time instead of crashing or silently skipping.
+      def insert_middleware(middleware_stack, location, target, middleware)
+        if middleware_stack_proxy?(middleware_stack)
+          append_middleware_operation(middleware_stack) do |resolved_stack|
+            insert_middleware_with_fallback(resolved_stack, location, target, middleware)
+          end
+        else
+          insert_middleware_with_fallback(middleware_stack, location, target, middleware)
+        end
+      end
+
+      def middleware_stack_proxy?(middleware_stack)
+        defined?(::Rails::Configuration::MiddlewareStackProxy) &&
+          middleware_stack.instance_of?(::Rails::Configuration::MiddlewareStackProxy) &&
+          middleware_stack.instance_variable_defined?(:@operations)
+      end
+
+      def append_middleware_operation(middleware_stack, &operation)
+        middleware_stack.instance_variable_get(:@operations) << operation
+      end
+
+      def insert_middleware_with_fallback(middleware_stack, location, target, middleware)
+        perform_middleware_insert(middleware_stack, location, target, middleware)
+      rescue RuntimeError => e
+        raise unless missing_middleware_error?(e)
+
+        fallback_insert_middleware(middleware_stack, location, target, middleware)
+      end
+
+      def perform_middleware_insert(middleware_stack, location, target, middleware)
+        if location == :after
+          middleware_stack.insert_after(target, middleware)
+        else
+          middleware_stack.insert_before(target, middleware)
+        end
+      end
+
+      def fallback_insert_middleware(middleware_stack, location, target, middleware)
+        fallback_position = if location == :before && middleware_stack.respond_to?(:unshift)
+                              middleware_stack.unshift(middleware)
+                              'beginning'
+                            else
+                              middleware_stack.use(middleware)
+                              'end'
+                            end
+
+        PostHog::Logging.logger.warn(
+          "Could not find #{target.inspect} in the Rails middleware stack; " \
+          "inserted #{middleware.inspect} at the #{fallback_position} " \
+          'of the stack instead.'
+        )
+      end
+
+      def missing_middleware_error?(error)
+        error.message.start_with?(MISSING_MIDDLEWARE_MESSAGE)
+      end
+
+      private :insert_middleware,
+              :middleware_stack_proxy?,
+              :append_middleware_operation,
+              :insert_middleware_with_fallback,
+              :perform_middleware_insert,
+              :fallback_insert_middleware,
+              :missing_middleware_error?
 
       # Build the PostHog Logs pipeline and broadcast Rails.logger into it.
       #

@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
+require 'spec_helper'
+
 # Minimal requires for testing the Railtie in isolation
 require 'logger'
 require 'posthog'
+require 'rails'
 require 'rails/railtie'
+require 'action_dispatch/middleware/stack'
 
 # The posthog-rails lib has its own gemspec and isn't in the default load path,
 # so we add it manually for testing.
@@ -72,7 +76,7 @@ RSpec.describe PostHog::Rails::Railtie do
       expect(railtie).to respond_to(:insert_middleware_before)
     end
 
-    it 'successfully calls insert_middleware_after when the initializer runs' do
+    it 'successfully records middleware operations when the initializer runs' do
       # Stub the middleware constants referenced in the initializer block
       stub_const('ActionDispatch::DebugExceptions', Class.new)
       stub_const('ActionDispatch::ShowExceptions', Class.new)
@@ -84,10 +88,7 @@ RSpec.describe PostHog::Rails::Railtie do
       initializer = PostHog::Rails::Railtie.initializers.find { |i| i.name == 'posthog.insert_middlewares' }
       expect(initializer).not_to be_nil
 
-      # During initialization, app.config.middleware is a MiddlewareStackProxy
-      # which only supports recording operations — NOT query methods like include?.
-      # The mock must reflect this accurately.
-      middleware_proxy = double('MiddlewareStackProxy', insert_after: true, insert_before: true)
+      middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
       app = double('app', config: double('config', middleware: middleware_proxy))
 
       # Reproduce the exact execution context: the block is run via instance_exec
@@ -97,6 +98,74 @@ RSpec.describe PostHog::Rails::Railtie do
       expect do
         railtie.instance_exec(app, &initializer.block)
       end.not_to raise_error
+    end
+
+    it 'inserts middleware before and after the target when it is present' do
+      stub_const('TargetMiddleware', Class.new)
+      stub_const('BeforeMiddleware', Class.new)
+      stub_const('AfterMiddleware', Class.new)
+
+      middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
+      app = double('app', config: double('config', middleware: middleware_proxy))
+      railtie = PostHog::Rails::Railtie.instance
+
+      railtie.insert_middleware_before(app, TargetMiddleware, BeforeMiddleware)
+      railtie.insert_middleware_after(app, TargetMiddleware, AfterMiddleware)
+
+      stack = ActionDispatch::MiddlewareStack.new
+      stack.use(TargetMiddleware)
+      middleware_proxy.merge_into(stack)
+
+      expected_middlewares = [
+        BeforeMiddleware,
+        TargetMiddleware,
+        AfterMiddleware
+      ]
+      expect(stack.middlewares.map(&:klass)).to eq(expected_middlewares)
+    end
+
+    it 'falls back to appending middleware when the deferred after target is missing' do
+      stub_const('MissingTargetMiddleware', Class.new)
+      stub_const('FallbackMiddleware', Class.new)
+
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+      middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
+      app = double('app', config: double('config', middleware: middleware_proxy))
+
+      PostHog::Rails::Railtie.instance.insert_middleware_after(
+        app,
+        MissingTargetMiddleware,
+        FallbackMiddleware
+      )
+
+      stack = ActionDispatch::MiddlewareStack.new
+      expect { middleware_proxy.merge_into(stack) }.not_to raise_error
+      expect(stack.middlewares.map(&:klass)).to eq([FallbackMiddleware])
+      expect(logger).to have_received(:warn).with(/Could not find MissingTargetMiddleware/)
+    end
+
+    it 'falls back to prepending middleware when the deferred before target is missing' do
+      stub_const('MissingTargetMiddleware', Class.new)
+      stub_const('ExistingMiddleware', Class.new)
+      stub_const('FallbackMiddleware', Class.new)
+
+      logger = instance_spy(Logger)
+      PostHog::Logging.logger = logger
+      middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
+      app = double('app', config: double('config', middleware: middleware_proxy))
+
+      PostHog::Rails::Railtie.instance.insert_middleware_before(
+        app,
+        MissingTargetMiddleware,
+        FallbackMiddleware
+      )
+
+      stack = ActionDispatch::MiddlewareStack.new
+      stack.use(ExistingMiddleware)
+      expect { middleware_proxy.merge_into(stack) }.not_to raise_error
+      expect(stack.middlewares.map(&:klass)).to eq([FallbackMiddleware, ExistingMiddleware])
+      expect(logger).to have_received(:warn).with(/Could not find MissingTargetMiddleware/)
     end
   end
 
