@@ -73,13 +73,15 @@ module PostHog
       end
 
       it 'clears the in-flight batch if the error handler raises' do
-        allow_any_instance_of(PostHog::Transport).to(
-          receive(:send).and_return(PostHog::Response.new(400, 'Some error'))
-        )
-
         queue = Queue.new
         queue << {}
         worker = described_class.new(queue, 'secret', on_error: proc { raise 'handler failed' })
+        transport = instance_double(
+          PostHog::Transport,
+          send: PostHog::Response.new(400, 'Some error'),
+          shutdown: nil
+        )
+        worker.instance_variable_set(:@transport, transport)
 
         expect { worker.run }.to_not raise_error
         expect(queue).to be_empty

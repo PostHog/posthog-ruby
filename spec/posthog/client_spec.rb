@@ -1736,6 +1736,9 @@ module PostHog
         class << queue
           alias_method :original_length_for_concurrency_spec, :length
 
+          # Widen the old check-then-push TOCTOU window. The production fix holds
+          # @queue_mutex across both this length check and the subsequent push, so
+          # concurrent producers cannot observe the same stale queue length.
           def length
             value = original_length_for_concurrency_spec
             Thread.pass

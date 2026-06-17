@@ -60,6 +60,9 @@ module PostHog
         end
       end
     ensure
+      # Worker threads exit when the queue is drained and are restarted for the
+      # next burst of events. Close the persistent connection on each exit and
+      # let Transport reconnect lazily when a future worker sends another batch.
       @transport.shutdown
     end
 
