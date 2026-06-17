@@ -57,7 +57,7 @@ module PostHog
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`.
     # @option opts [Integer] :max_queue_size Maximum number of calls to remain queued. Defaults to 10_000.
     # @option opts [Integer] :batch_size Maximum number of events to send in one async batch.
-    # @option opts [Numeric] :flush_interval Maximum seconds to wait for an async batch to fill before sending.
+    # @option opts [Numeric] :flush_interval_seconds Maximum seconds to wait for an async batch to fill before sending.
     #   Defaults to 5.
     # @option opts [Boolean] :test_mode +true+ if messages should remain queued for testing. Defaults to +false+.
     # @option opts [Boolean] :sync_mode +true+ to send events synchronously on the calling thread. Useful in

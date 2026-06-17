@@ -23,7 +23,7 @@ module PostHog
     # @param api_key [String] Project API key.
     # @param options [Hash] Worker options.
     # @option options [Integer] :batch_size How many items to send in a batch.
-    # @option options [Numeric] :flush_interval Maximum seconds to wait for a batch to fill before sending.
+    # @option options [Numeric] :flush_interval_seconds Maximum seconds to wait for a batch to fill before sending.
     # @option options [Proc] :on_error Callback invoked as `on_error.call(status, error)`.
     # @option options [String] :host PostHog API host URL.
     # @option options [Boolean] :skip_ssl_verification Disable SSL certificate verification.
@@ -33,8 +33,8 @@ module PostHog
       @api_key = api_key
       @on_error = options[:on_error] || proc { |status, error| }
       batch_size = options[:batch_size] || Defaults::MessageBatch::MAX_SIZE
-      flush_interval = options[:flush_interval] || Defaults::MessageBatch::FLUSH_INTERVAL
-      @flush_interval = flush_interval.to_f
+      flush_interval_seconds = options[:flush_interval_seconds] || Defaults::MessageBatch::FLUSH_INTERVAL_SECONDS
+      @flush_interval_seconds = flush_interval_seconds.to_f
       @batch = MessageBatch.new(batch_size)
       @lock = Mutex.new
       @state_lock = Mutex.new
@@ -108,7 +108,7 @@ module PostHog
     private
 
     def build_batch
-      deadline = monotonic_time + @flush_interval
+      deadline = monotonic_time + @flush_interval_seconds
 
       loop do
         @lock.synchronize do
