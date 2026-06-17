@@ -166,5 +166,24 @@ module PostHog
         super
       end
     end
+
+    # Array that drops the oldest item when it reaches a maximum length.
+    #
+    # @api private
+    class SizeLimitedArray < Array
+      # @param max_length [Integer]
+      def initialize(max_length)
+        super()
+        @max_length = max_length
+      end
+
+      # @param value [Object]
+      # @return [Array]
+      def <<(value)
+        shift if length >= @max_length
+        super
+      end
+    end
+    private_constant :SizeLimitedArray
   end
 end

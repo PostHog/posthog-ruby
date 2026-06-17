@@ -52,6 +52,7 @@ module PostHog
       http.verify_mode = OpenSSL::SSL::VERIFY_NONE if options[:skip_ssl_verification]
 
       @http = http
+      @http_mutex = Mutex.new
     end
 
     # Sends a batch of messages to the API
@@ -91,7 +92,9 @@ module PostHog
     #
     # @return [void]
     def shutdown
-      @http.finish if @http.started?
+      @http_mutex.synchronize do
+        @http.finish if @http.started?
+      end
     end
 
     private
@@ -149,9 +152,11 @@ module PostHog
 
         [200, '{}']
       else
-        @http.start unless @http.started? # Maintain a persistent connection
-        response = @http.request(request, payload)
-        [response.code.to_i, response.body]
+        @http_mutex.synchronize do
+          @http.start unless @http.started? # Maintain a persistent connection
+          response = @http.request(request, payload)
+          [response.code.to_i, response.body]
+        end
       end
     end
 

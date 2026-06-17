@@ -1250,7 +1250,9 @@ module PostHog
           uri.hostname,
           uri.port,
           use_ssl: uri.scheme == 'https',
-          read_timeout: request_timeout
+          open_timeout: request_timeout,
+          read_timeout: request_timeout,
+          write_timeout: request_timeout
         ) do |http|
           res = http.request(request_object)
           status_code = res.code.to_i

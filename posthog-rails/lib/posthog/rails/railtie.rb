@@ -39,7 +39,14 @@ module PostHog
               PostHog::Rails::Logs::Setup.remember_client_options(options) if defined?(PostHog::Rails::Logs::Setup)
 
               # Create the PostHog client
+              previous_client = @client
               @client = PostHog::Client.new(options)
+              begin
+                previous_client&.shutdown
+              rescue StandardError => e
+                PostHog::Logging.logger.warn("Failed to shut down previous PostHog client: #{e.message}")
+              end
+              @client
             end
 
             # Define delegated methods using metaprogramming

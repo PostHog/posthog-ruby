@@ -1939,4 +1939,25 @@ module PostHog
       end
     end
   end
+
+  describe FeatureFlagsPoller do
+    it 'applies open, read, and write timeouts to feature flag requests' do
+      poller = described_class.allocate
+      uri = URI('https://example.com/flags')
+      request = Net::HTTP::Get.new(uri)
+      response = double('response', code: '200', body: '{}')
+      http = double('http', request: response)
+
+      expect(Net::HTTP).to receive(:start).with(
+        'example.com',
+        443,
+        use_ssl: true,
+        open_timeout: 7,
+        read_timeout: 7,
+        write_timeout: 7
+      ).and_yield(http)
+
+      expect(poller.send(:_request, uri, request, 7)).to eq(status: 200)
+    end
+  end
 end

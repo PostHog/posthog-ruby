@@ -110,6 +110,16 @@ module PostHog
       end
     end
 
+    describe '#shutdown' do
+      it 'is idempotent' do
+        http = subject.instance_variable_get(:@http)
+        allow(http).to receive(:started?).and_return(true, false)
+        expect(http).to receive(:finish).once
+
+        2.times { subject.shutdown }
+      end
+    end
+
     describe '#send' do
       let(:response) do
         Net::HTTPResponse.new(http_version, status_code, response_body)
