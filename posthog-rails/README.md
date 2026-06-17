@@ -9,20 +9,6 @@ SDK usage examples and code snippets live in the official documentation so they 
 - [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
 - [Ruby library docs](https://posthog.com/docs/libraries/ruby)
 
-## User context for exception capture
-
-By default, exception capture calls `current_user` on the controller. Apps that
-use `ActiveSupport::CurrentAttributes` can provide a resolver instead:
-
-```ruby
-PostHog::Rails.configure do |config|
-  config.current_user_resolver = proc { Current.user }
-end
-```
-
-The resolver takes precedence over `current_user_method` and may accept the
-controller as an argument.
-
 ## PostHog Logs (optional)
 
 `posthog-rails` can forward `Rails.logger` output to [PostHog Logs](https://posthog.com/docs/logs)
