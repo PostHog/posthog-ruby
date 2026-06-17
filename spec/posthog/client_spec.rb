@@ -1462,6 +1462,20 @@ module PostHog
           Process.wait
         end
       end
+
+      it 'clears NoopWorker queues without hanging' do
+        test_client = Client.new(api_key: API_KEY, test_mode: true)
+        test_client.capture(Queued::CAPTURE)
+
+        thread = Thread.new { test_client.flush }
+        begin
+          expect(thread.join(1)).to eq(thread)
+          thread.value
+        ensure
+          thread.kill if thread.alive?
+        end
+        expect(test_client.queued_messages).to eq(0)
+      end
     end
 
     describe '#shutdown' do
@@ -1473,6 +1487,20 @@ module PostHog
 
         expect(worker).to have_received(:shutdown).once
         expect(client.capture(Queued::CAPTURE)).to eq(false)
+      end
+
+      it 'does not hang with a queued test mode event' do
+        test_client = Client.new(api_key: API_KEY, test_mode: true)
+        test_client.capture(Queued::CAPTURE)
+
+        thread = Thread.new { test_client.shutdown }
+        begin
+          expect(thread.join(1)).to eq(thread)
+          thread.value
+        ensure
+          thread.kill if thread.alive?
+        end
+        expect(test_client.queued_messages).to eq(0)
       end
     end
 

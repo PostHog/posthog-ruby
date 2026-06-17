@@ -165,6 +165,11 @@ module PostHog
         return
       end
 
+      if @worker.is_a?(NoopWorker)
+        clear
+        return
+      end
+
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
         sleep(0.1)
