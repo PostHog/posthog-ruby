@@ -124,13 +124,53 @@ RSpec.describe PostHog::Rails::Railtie do
       expect(stack.middlewares.map(&:klass)).to eq(expected_middlewares)
     end
 
-    it 'falls back to appending middleware when the deferred after target is missing' do
+    [
+      {
+        location: :after,
+        existing_middlewares: [],
+        expected_middlewares: %w[FallbackMiddleware]
+      },
+      {
+        location: :before,
+        existing_middlewares: %w[ExistingMiddleware],
+        expected_middlewares: %w[FallbackMiddleware ExistingMiddleware]
+      }
+    ].each do |scenario|
+      it "falls back when the deferred #{scenario[:location]} target is missing" do
+        stub_const('MissingTargetMiddleware', Class.new)
+        stub_const('ExistingMiddleware', Class.new)
+        stub_const('FallbackMiddleware', Class.new)
+
+        logger = instance_spy(Logger)
+        PostHog::Logging.logger = logger
+        middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
+        app = double('app', config: double('config', middleware: middleware_proxy))
+
+        PostHog::Rails::Railtie.instance.public_send(
+          "insert_middleware_#{scenario[:location]}",
+          app,
+          MissingTargetMiddleware,
+          FallbackMiddleware
+        )
+
+        stack = ActionDispatch::MiddlewareStack.new
+        scenario[:existing_middlewares].each { |middleware| stack.use(Object.const_get(middleware)) }
+        expected_middlewares = scenario[:expected_middlewares].map { |middleware| Object.const_get(middleware) }
+
+        expect { middleware_proxy.merge_into(stack) }.not_to raise_error
+        expect(stack.middlewares.map(&:klass)).to eq(expected_middlewares)
+        expect(logger).to have_received(:warn).with(/Could not find MissingTargetMiddleware/)
+      end
+    end
+
+    it 'records legacy middleware proxy operations with Rails 5/6 tuple format' do
       stub_const('MissingTargetMiddleware', Class.new)
       stub_const('FallbackMiddleware', Class.new)
 
       logger = instance_spy(Logger)
       PostHog::Logging.logger = logger
       middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
+      middleware_proxy.instance_variable_set(:@operations, [[:use, [], nil]])
       app = double('app', config: double('config', middleware: middleware_proxy))
 
       PostHog::Rails::Railtie.instance.insert_middleware_after(
@@ -139,32 +179,15 @@ RSpec.describe PostHog::Rails::Railtie do
         FallbackMiddleware
       )
 
+      legacy_operation, legacy_args, legacy_block = middleware_proxy.instance_variable_get(:@operations).last
+      expect(legacy_operation).to eq(:posthog_insert_middleware_with_fallback)
+      expect(legacy_args).to eq([:after, MissingTargetMiddleware, FallbackMiddleware])
+      expect(legacy_block).to be_nil
+
       stack = ActionDispatch::MiddlewareStack.new
-      expect { middleware_proxy.merge_into(stack) }.not_to raise_error
+      stack.public_send(legacy_operation, *legacy_args, &legacy_block)
+
       expect(stack.middlewares.map(&:klass)).to eq([FallbackMiddleware])
-      expect(logger).to have_received(:warn).with(/Could not find MissingTargetMiddleware/)
-    end
-
-    it 'falls back to prepending middleware when the deferred before target is missing' do
-      stub_const('MissingTargetMiddleware', Class.new)
-      stub_const('ExistingMiddleware', Class.new)
-      stub_const('FallbackMiddleware', Class.new)
-
-      logger = instance_spy(Logger)
-      PostHog::Logging.logger = logger
-      middleware_proxy = Rails::Configuration::MiddlewareStackProxy.new
-      app = double('app', config: double('config', middleware: middleware_proxy))
-
-      PostHog::Rails::Railtie.instance.insert_middleware_before(
-        app,
-        MissingTargetMiddleware,
-        FallbackMiddleware
-      )
-
-      stack = ActionDispatch::MiddlewareStack.new
-      stack.use(ExistingMiddleware)
-      expect { middleware_proxy.merge_into(stack) }.not_to raise_error
-      expect(stack.middlewares.map(&:klass)).to eq([FallbackMiddleware, ExistingMiddleware])
       expect(logger).to have_received(:warn).with(/Could not find MissingTargetMiddleware/)
     end
   end

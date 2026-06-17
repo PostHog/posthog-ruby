@@ -148,6 +148,19 @@ module PostHog
       end
 
       MISSING_MIDDLEWARE_MESSAGE = 'No such middleware to insert'
+      MIDDLEWARE_FALLBACK_OPERATION = :posthog_insert_middleware_with_fallback
+
+      module MiddlewareStackFallback
+        def posthog_insert_middleware_with_fallback(location, target, middleware)
+          PostHog::Rails::Railtie.instance.send(
+            :insert_middleware_with_fallback,
+            self,
+            location,
+            target,
+            middleware
+          )
+        end
+      end
 
       # @api private
       # @return [void]
@@ -168,9 +181,7 @@ module PostHog
       # we can fall back at build time instead of crashing or silently skipping.
       def insert_middleware(middleware_stack, location, target, middleware)
         if middleware_stack_proxy?(middleware_stack)
-          append_middleware_operation(middleware_stack) do |resolved_stack|
-            insert_middleware_with_fallback(resolved_stack, location, target, middleware)
-          end
+          append_middleware_operation(middleware_stack, location, target, middleware)
         else
           insert_middleware_with_fallback(middleware_stack, location, target, middleware)
         end
@@ -182,8 +193,30 @@ module PostHog
           middleware_stack.instance_variable_defined?(:@operations)
       end
 
-      def append_middleware_operation(middleware_stack, &operation)
-        middleware_stack.instance_variable_get(:@operations) << operation
+      def append_middleware_operation(middleware_stack, location, target, middleware)
+        operations = middleware_stack.instance_variable_get(:@operations)
+
+        if callable_middleware_operations?(operations)
+          operations << lambda do |resolved_stack|
+            insert_middleware_with_fallback(resolved_stack, location, target, middleware)
+          end
+        else
+          ensure_middleware_stack_fallback_operation!
+          operations << [MIDDLEWARE_FALLBACK_OPERATION, [location, target, middleware], nil]
+        end
+      end
+
+      def callable_middleware_operations?(operations)
+        return ::Rails::VERSION::MAJOR >= 7 if operations.empty?
+
+        operations.all? { |operation| operation.respond_to?(:call) }
+      end
+
+      def ensure_middleware_stack_fallback_operation!
+        require 'action_dispatch/middleware/stack' unless defined?(::ActionDispatch::MiddlewareStack)
+        return if ::ActionDispatch::MiddlewareStack < MiddlewareStackFallback
+
+        ::ActionDispatch::MiddlewareStack.include(MiddlewareStackFallback)
       end
 
       def insert_middleware_with_fallback(middleware_stack, location, target, middleware)
@@ -225,6 +258,8 @@ module PostHog
       private :insert_middleware,
               :middleware_stack_proxy?,
               :append_middleware_operation,
+              :callable_middleware_operations?,
+              :ensure_middleware_stack_fallback_operation!,
               :insert_middleware_with_fallback,
               :perform_middleware_insert,
               :fallback_insert_middleware,
