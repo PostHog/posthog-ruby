@@ -40,7 +40,7 @@ module PostHog
       @state_lock = Mutex.new
       @condition = ConditionVariable.new
       @flush_requested = false
-      @shutdown_requested = false
+      @shutdown = false
       @transport = Transport.new api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification]
     end
 
@@ -48,17 +48,24 @@ module PostHog
     #
     # @return [void]
     def run
-      until Thread.current[:should_exit] || shutdown_requested?
+      until shutdown?
         if @queue.empty?
           clear_flush_request
           return
         end
 
         build_batch
-        send_batch unless @batch.empty?
-        @lock.synchronize { @batch.clear }
+
+        begin
+          send_batch unless @batch.empty?
+        ensure
+          @lock.synchronize { @batch.clear }
+        end
       end
     ensure
+      # Worker threads exit when the queue is drained and are restarted for the
+      # next burst of events. Close the persistent connection on each exit and
+      # let Transport reconnect lazily when a future worker sends another batch.
       @transport.shutdown
     end
 
@@ -83,7 +90,7 @@ module PostHog
     # @return [void]
     def shutdown
       @state_lock.synchronize do
-        @shutdown_requested = true
+        @shutdown = true
         @flush_requested = true
         @condition.broadcast
       end
@@ -119,7 +126,7 @@ module PostHog
 
     def send_batch
       res = @transport.send @api_key, @batch
-      @on_error.call(res.status, res.error) unless res.status == 200
+      handle_error(res.status, res.error) unless res.status == 200
     end
 
     def consume_message_from_queue!
@@ -127,12 +134,12 @@ module PostHog
     rescue ThreadError
       # Queue was emptied by another thread between #empty? and #pop.
     rescue MessageBatch::JSONGenerationError => e
-      @on_error.call(-1, e.to_s)
+      handle_error(-1, e.to_s)
     end
 
     def wait_for_more_messages(timeout)
       @state_lock.synchronize do
-        return if @flush_requested || @shutdown_requested || !@queue.empty?
+        return if @flush_requested || @shutdown || !@queue.empty?
 
         @condition.wait(@state_lock, timeout)
       end
@@ -142,12 +149,18 @@ module PostHog
       @state_lock.synchronize { @flush_requested }
     end
 
-    def shutdown_requested?
-      @state_lock.synchronize { @shutdown_requested }
+    def shutdown?
+      @state_lock.synchronize { @shutdown }
     end
 
     def clear_flush_request
       @state_lock.synchronize { @flush_requested = false }
+    end
+
+    def handle_error(status, error)
+      @on_error.call(status, error)
+    rescue StandardError => e
+      logger.error("Error in on_error callback: #{e.message}")
     end
 
     def monotonic_time

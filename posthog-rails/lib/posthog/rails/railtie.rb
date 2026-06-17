@@ -34,8 +34,21 @@ module PostHog
                 options = config.to_client_options
               end
 
-              # Create the PostHog client
+              # Let the PostHog Logs pipeline reuse the same api_key/host without
+              # the core client exposing public readers.
+              PostHog::Rails::Logs::Setup.remember_client_options(options) if defined?(PostHog::Rails::Logs::Setup)
+
+              # Create the PostHog client. If a client already exists, shut it down
+              # after replacement so repeated init calls do not leave background
+              # resources from the previous instance running.
+              previous_client = @client
               @client = PostHog::Client.new(options)
+              begin
+                previous_client&.shutdown
+              rescue StandardError => e
+                PostHog::Logging.logger.warn("Failed to shut down previous PostHog client: #{e.message}")
+              end
+              @client
             end
 
             # Define delegated methods using metaprogramming
@@ -118,12 +131,20 @@ module PostHog
         register_error_subscriber if rails_version_above_7?
       end
 
+      # Opt-in: forward logs to PostHog Logs over OTLP
+      config.after_initialize do
+        install_posthog_logs if PostHog::Rails.config&.logs_enabled
+      end
+
       # Ensure PostHog shuts down gracefully (register only once)
       config.after_initialize do
         next if @posthog_at_exit_registered
 
         @posthog_at_exit_registered = true
-        at_exit { PostHog.client&.shutdown if PostHog.initialized? }
+        at_exit do
+          PostHog::Rails::Logs::Setup.shutdown
+          PostHog.client&.shutdown if PostHog.initialized?
+        end
       end
 
       # @api private
@@ -142,6 +163,54 @@ module PostHog
         # which only supports recording operations (insert_before, use, etc.)
         # and does NOT support query methods like include?.
         app.config.middleware.insert_before(target, middleware)
+      end
+
+      # Build the PostHog Logs pipeline and broadcast Rails.logger into it.
+      #
+      # @api private
+      # @return [void]
+      def self.install_posthog_logs
+        unless PostHog.initialized?
+          # logs_enabled is an explicit opt-in, so leave a breadcrumb instead
+          # of silently skipping when PostHog.init never ran.
+          PostHog::Logging.logger.warn(
+            'PostHog Logs is enabled but PostHog.init has not been called; ' \
+            'skipping log forwarding. Call PostHog.init in your initializer.'
+          )
+          return
+        end
+
+        # Mirror the core client: when it is disabled (missing/blank api_key)
+        # every capture no-ops, so log forwarding should stay off too. The
+        # client already logs its own missing-api_key error, so skip quietly.
+        return unless PostHog.client.enabled?
+
+        appender = PostHog::Rails::Logs::Setup.install
+        return if appender.nil?
+
+        broadcast_rails_logger(appender) if PostHog::Rails.config&.logs_forward_rails_logger
+      rescue StandardError => e
+        PostHog::Logging.logger.warn("Failed to set up PostHog Logs: #{e.message}")
+      end
+
+      # Attach the appender to Rails.logger, supporting both the Rails 7.1+
+      # BroadcastLogger and the older ActiveSupport::Logger.broadcast mechanism.
+      #
+      # @api private
+      # @return [void]
+      def self.broadcast_rails_logger(appender)
+        logger = ::Rails.logger
+        return unless logger
+
+        if logger.respond_to?(:broadcast_to)
+          logger.broadcast_to(appender)
+        elsif defined?(ActiveSupport::Logger) && ActiveSupport::Logger.respond_to?(:broadcast)
+          logger.extend(ActiveSupport::Logger.broadcast(appender))
+        else
+          PostHog::Logging.logger.warn(
+            'PostHog Logs could not broadcast Rails.logger; no compatible broadcast mechanism found.'
+          )
+        end
       end
 
       # @api private
