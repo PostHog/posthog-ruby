@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-# Minimal requires for testing the Railtie in isolation
+# Load the full Rails stack so the boot-order test can simulate real load order.
 require 'logger'
 require 'rails'
 
