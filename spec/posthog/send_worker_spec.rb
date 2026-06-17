@@ -169,6 +169,31 @@ module PostHog
         expect(elapsed).to be < 1
       end
 
+      it 'wakes and sends messages enqueued while waiting' do
+        sent_batches = []
+        allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
+          sent_batches << JSON.parse(batch.to_json).map { |message| message['event'] }
+          PostHog::Response.new(200, 'Success')
+        end
+
+        queue = Queue.new
+        queue << Requested::CAPTURE
+        worker = described_class.new(queue, 'testsecret', batch_size: 2, flush_interval: 60)
+
+        started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        worker_thread = Thread.new { worker.run }
+        eventually { expect(worker.is_requesting?).to eq(true) }
+
+        queue << Requested::CAPTURE.merge(event: 'Second event')
+        worker.notify
+
+        expect(worker_thread.join(1)).to eq(worker_thread)
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+
+        expect(sent_batches).to eq([[Requested::CAPTURE[:event], 'Second event']])
+        expect(elapsed).to be < 1
+      end
+
       it 'flushes immediately when requested' do
         sends = []
         allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
