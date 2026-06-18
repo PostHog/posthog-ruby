@@ -1,3 +1,5 @@
 packages:
   - 'posthog-ruby'
   - 'posthog-rails'
+
+minimumReleaseAge: 10080
