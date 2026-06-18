@@ -185,8 +185,9 @@ RSpec.describe PostHog::Rails::Railtie do
       expect(legacy_block).to be_nil
 
       stack = ActionDispatch::MiddlewareStack.new
-      stack.public_send(legacy_operation, *legacy_args, &legacy_block)
+      stack.send(legacy_operation, *legacy_args, &legacy_block)
 
+      expect(stack).not_to respond_to(:posthog_insert_middleware_with_fallback)
       expect(stack.middlewares.map(&:klass)).to eq([FallbackMiddleware])
       expect(logger).to have_received(:warn).with(/Could not find MissingTargetMiddleware/)
     end

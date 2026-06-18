@@ -160,7 +160,13 @@ module PostHog
             middleware
           )
         end
+
+        private :posthog_insert_middleware_with_fallback
       end
+
+      private_constant :MISSING_MIDDLEWARE_MESSAGE,
+                       :MIDDLEWARE_FALLBACK_OPERATION,
+                       :MiddlewareStackFallback
 
       # @api private
       # @return [void]
@@ -196,7 +202,7 @@ module PostHog
       def append_middleware_operation(middleware_stack, location, target, middleware)
         operations = middleware_stack.instance_variable_get(:@operations)
 
-        if callable_middleware_operations?(operations)
+        if callable_middleware_operations?(middleware_stack, operations)
           operations << lambda do |resolved_stack|
             insert_middleware_with_fallback(resolved_stack, location, target, middleware)
           end
@@ -206,10 +212,16 @@ module PostHog
         end
       end
 
-      def callable_middleware_operations?(operations)
-        return ::Rails::VERSION::MAJOR >= 7 if operations.empty?
+      def callable_middleware_operations?(middleware_stack, operations)
+        operation = operations.first || probe_middleware_operation(middleware_stack)
 
-        operations.all? { |operation| operation.respond_to?(:call) }
+        operation.respond_to?(:call)
+      end
+
+      def probe_middleware_operation(middleware_stack)
+        probe = middleware_stack.class.new
+        probe.use(Object)
+        probe.instance_variable_get(:@operations).first
       end
 
       def ensure_middleware_stack_fallback_operation!
@@ -259,6 +271,7 @@ module PostHog
               :middleware_stack_proxy?,
               :append_middleware_operation,
               :callable_middleware_operations?,
+              :probe_middleware_operation,
               :ensure_middleware_stack_fallback_operation!,
               :insert_middleware_with_fallback,
               :perform_middleware_insert,
