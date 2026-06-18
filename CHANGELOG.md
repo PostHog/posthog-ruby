@@ -1,3 +1,9 @@
+## 3.12.2
+
+### Patch Changes
+
+- c051002: Stop sending ignored top-level batch metadata fields and always send event UUIDs, normalizing deprecated message IDs when valid.
+
 ## 3.12.1
 
 ### Patch Changes
