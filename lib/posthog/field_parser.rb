@@ -151,8 +151,8 @@ module PostHog
           properties: properties
         }
 
-        uuid = fields[:uuid] || fields[:message_id]
-        parsed['uuid'] = uuid if uuid && valid_uuid_for_event_props?(uuid)
+        uuid = normalized_uuid(fields)
+        parsed['uuid'] = uuid if uuid
 
         if send_feature_flags && fields[:feature_variants]
           feature_variants = fields[:feature_variants]
@@ -184,6 +184,16 @@ module PostHog
 
       def check_is_hash!(obj, name)
         raise ArgumentError, "#{name} must be a Hash" unless obj.is_a? Hash
+      end
+
+      def normalized_uuid(fields)
+        uuid = fields[:uuid]
+        return uuid if uuid && valid_uuid_for_event_props?(uuid)
+
+        message_id = fields[:message_id]
+        return message_id if message_id && valid_uuid_for_event_props?(message_id)
+
+        nil
       end
 
       # @param [Object] uuid - the UUID to validate, user provided, so we don't know the type

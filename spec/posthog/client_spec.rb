@@ -744,6 +744,39 @@ module PostHog
         expect(logger).not_to have_received(:warn)
       end
 
+      it 'falls back to a valid message_id when uuid is invalid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: 'i am obviously not a uuid',
+            message_id: '123e4567-e89b-12d3-a456-426614174000'
+          }
+        )
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
+        expect(logger).to have_received(:warn).with(
+          'UUID is not valid: i am obviously not a uuid. Ignoring it.'
+        )
+      end
+
+      it 'does not use invalid message_id as uuid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            message_id: 'i am also not a uuid'
+          }
+        )
+
+        message = client.dequeue_last_message
+        expect(message).not_to have_key('uuid')
+        expect(logger).to have_received(:warn).with(
+          'UUID is not valid: i am also not a uuid. Ignoring it.'
+        )
+      end
+
       it 'does not require a uuid be provided - ingestion will generate when absent' do
         allow(logger).to receive(:warn)
 
