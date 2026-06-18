@@ -277,6 +277,12 @@ RSpec.describe PostHog::Rails::RequestContext do
         resolver: proc(&:posthog_user),
         controller: nil,
         expected_distinct_id: 'header-user'
+      },
+      {
+        description: 'when the resolver raises',
+        resolver: proc { raise 'resolver failed' },
+        controller: nil,
+        expected_distinct_id: 'header-user'
       }
     ].each do |scenario|
       PostHog::Rails.config.current_user_resolver = scenario.fetch(:resolver)

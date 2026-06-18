@@ -80,12 +80,19 @@ module PostHog
 
       def extract_current_user(controller)
         resolver = PostHog::Rails.config&.current_user_resolver
-        return call_current_user_resolver(resolver, controller) if resolver
+        return resolve_current_user(resolver, controller) if resolver
 
         method_name = PostHog::Rails.config&.current_user_method || :current_user
         return unless controller.respond_to?(method_name, true)
 
         controller.send(method_name)
+      end
+
+      def resolve_current_user(resolver, controller)
+        call_current_user_resolver(resolver, controller)
+      rescue StandardError => e
+        PostHog::Logging.logger.warn("current_user_resolver failed: #{e.message}")
+        nil
       end
 
       def call_current_user_resolver(resolver, controller)
