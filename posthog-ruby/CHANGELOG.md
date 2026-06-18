@@ -1,3 +1,7 @@
+# posthog-ruby
+
+> Historical entries before the changelog split are copied from the shared repository changelog and may include changes that primarily affected `posthog-rails`. New entries are package-specific.
+
 ## 3.13.0
 
 ### Minor Changes
