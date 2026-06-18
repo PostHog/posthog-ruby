@@ -69,18 +69,38 @@ module PostHog
       def extract_distinct_id(env)
         # Prefer authenticated Rails user context. Request/tracing context is
         # applied later by the core capture path if this returns nil.
-        if PostHog::Rails.config&.capture_user_context && env['action_controller.instance']
-          controller = env['action_controller.instance']
-          method_name = PostHog::Rails.config&.current_user_method || :current_user
+        return nil unless PostHog::Rails.config&.capture_user_context
 
-          if controller.respond_to?(method_name, true)
-            user = controller.send(method_name)
-            user_id = extract_user_id(user) if user
-            return user_id if present?(user_id)
-          end
-        end
+        user = extract_current_user(env['action_controller.instance'])
+        user_id = extract_user_id(user) if user
+        return user_id if present?(user_id)
 
         nil
+      end
+
+      def extract_current_user(controller)
+        resolver = PostHog::Rails.config&.current_user_resolver
+        return resolve_current_user(resolver, controller) if resolver
+
+        method_name = PostHog::Rails.config&.current_user_method || :current_user
+        return unless controller.respond_to?(method_name, true)
+
+        controller.send(method_name)
+      end
+
+      def resolve_current_user(resolver, controller)
+        call_current_user_resolver(resolver, controller)
+      rescue StandardError => e
+        PostHog::Logging.logger.warn("current_user_resolver failed: #{e.message}")
+        nil
+      end
+
+      def call_current_user_resolver(resolver, controller)
+        if resolver.arity.zero?
+          controller ? controller.instance_exec(&resolver) : resolver.call
+        elsif controller
+          resolver.call(controller)
+        end
       end
 
       def extract_user_id(user)

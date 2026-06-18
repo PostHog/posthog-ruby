@@ -227,6 +227,89 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to eq('exception-session')
   end
 
+  it 'supports current_user_resolver variants for exceptions' do
+    PostHog::Rails.config.auto_capture_exceptions = true
+
+    current_class = Class.new do
+      class << self
+        attr_accessor :user
+      end
+    end
+    stub_const('Current', current_class)
+    Current.user = Struct.new(:id).new('current-user')
+
+    user = Struct.new(:id).new('resolved-user')
+    controller_class = Class.new do
+      attr_reader :posthog_user
+
+      def initialize(user)
+        @posthog_user = user
+      end
+
+      def controller_name
+        'posts'
+      end
+
+      def action_name
+        'show'
+      end
+    end
+
+    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
+      client.capture_exception(exception, distinct_id, properties)
+    end
+
+    [
+      {
+        description: 'without arguments',
+        resolver: proc { Current.user },
+        controller: nil,
+        expected_distinct_id: 'current-user'
+      },
+      {
+        description: 'with a controller argument',
+        resolver: proc(&:posthog_user),
+        controller: controller_class.new(user),
+        expected_distinct_id: 'resolved-user'
+      },
+      {
+        description: 'with a controller argument but no controller',
+        resolver: proc(&:posthog_user),
+        controller: nil,
+        expected_distinct_id: 'header-user'
+      },
+      {
+        description: 'when the resolver raises',
+        resolver: proc { raise 'resolver failed' },
+        controller: nil,
+        expected_distinct_id: 'header-user'
+      }
+    ].each do |scenario|
+      PostHog::Rails.config.current_user_resolver = scenario.fetch(:resolver)
+
+      app = lambda do |env|
+        env['action_controller.instance'] = scenario[:controller] if scenario[:controller]
+        raise StandardError, "boom #{scenario.fetch(:description)}"
+      end
+      middleware = described_class.new(PostHog::Rails::CaptureExceptions.new(app))
+
+      expect do
+        middleware.call(
+          env_for(
+            '/boom',
+            'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
+            'HTTP_X_POSTHOG_SESSION_ID' => 'exception-session'
+          )
+        )
+      end.to raise_error(StandardError, "boom #{scenario.fetch(:description)}")
+
+      message = client.dequeue_last_message
+      expect(message[:event]).to eq('$exception')
+      expect(message[:distinct_id]).to eq(scenario.fetch(:expected_distinct_id))
+      expect(message[:properties]['$session_id']).to eq('exception-session')
+    end
+  end
+
   it 'captures exceptions with tracing context and re-raises' do
     PostHog::Rails.config.auto_capture_exceptions = true
 

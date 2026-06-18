@@ -37,6 +37,12 @@ PostHog::Rails.configure do |config|
   # making it easier to identify affected users and debug user-specific issues.
   # config.current_user_method = :current_user
 
+  # Or provide a resolver for apps that store user context outside controllers,
+  # such as ActiveSupport::CurrentAttributes. The resolver takes precedence over
+  # current_user_method and may accept the controller as an argument.
+  # config.current_user_resolver = proc { Current.user }
+  # config.current_user_resolver = proc { |controller| controller.current_user }
+
   # Additional exception classes to exclude from reporting
   # These are added to the default excluded exceptions
   # config.excluded_exceptions = [

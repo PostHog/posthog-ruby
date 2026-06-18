@@ -32,6 +32,10 @@ module PostHog
       # @return [Symbol] Method name to call on controller to get the current user. Defaults to :current_user.
       attr_accessor :current_user_method
 
+      # @return [Proc, nil] Callable used to resolve the current user. When set, this takes precedence over
+      #   current_user_method. The callable may accept the controller instance or no arguments.
+      attr_accessor :current_user_resolver
+
       # @return [Symbol, nil] Method name to call on the user object to get distinct_id. When nil, tries:
       #   posthog_distinct_id, distinct_id, id, pk, uuid in order.
       attr_accessor :user_id_method
@@ -68,6 +72,7 @@ module PostHog
         @use_tracing_headers = true
         @capture_user_context = true
         @current_user_method = :current_user
+        @current_user_resolver = nil
         @user_id_method = nil
         @logs_enabled = false
         @logs_forward_rails_logger = true
