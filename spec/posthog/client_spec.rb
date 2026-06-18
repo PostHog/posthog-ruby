@@ -1717,13 +1717,12 @@ module PostHog
         { distinct_id: 1, alias: 3, message_id: 5, event: 'cockatoo' }
       end
 
-      it 'returns false if queue is full' do
-        client.instance_variable_set(:@max_queue_size, 1)
+      %i[capture identify alias].each do |method_name|
+        it "returns false for #{method_name} if queue is full" do
+          client.instance_variable_set(:@max_queue_size, 1)
 
-        %i[capture identify alias].each do |s|
-          expect(client.send(s, data)).to eq(true)
-          expect(client.send(s, data)).to eq(false) # Queue is full
-          client.clear
+          expect(client.send(method_name, data)).to eq(true)
+          expect(client.send(method_name, data)).to eq(false) # Queue is full
         end
       end
 
@@ -1753,9 +1752,9 @@ module PostHog
         expect(queue.length).to eq(1)
       end
 
-      it 'keeps deprecated top-level metadata while sending canonical properties' do
-        %i[capture identify alias].each do |s|
-          client.send(s, data)
+      %i[capture identify alias].each do |method_name|
+        it "keeps deprecated top-level metadata while sending canonical properties for #{method_name}" do
+          client.send(method_name, data)
           message = client.dequeue_last_message
 
           expect(message[:messageId]).to eq('5')
