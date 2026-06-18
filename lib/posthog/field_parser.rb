@@ -25,7 +25,6 @@ module PostHog
         event = fields[:event]
         properties = fields[:properties] || {}
         groups = fields[:groups]
-        uuid = fields[:uuid]
         check_presence!(event, 'event')
         check_is_hash!(properties, 'properties')
 
@@ -35,8 +34,6 @@ module PostHog
         end
 
         isoify_dates! properties
-
-        common['uuid'] = uuid if valid_uuid_for_event_props? uuid
 
         common.merge(
           {
@@ -130,12 +127,11 @@ module PostHog
       #
       # - "timestamp"
       # - "distinct_id"
-      # - "message_id" (deprecated no-op; use "uuid" on capture events for event identity/deduplication)
+      # - "message_id" (deprecated; normalized to "uuid" when it is a valid UUID)
       # - "send_feature_flags"
       def parse_common_fields(fields)
         timestamp = fields[:timestamp] || Time.new
         distinct_id = fields[:distinct_id]
-        message_id = fields[:message_id].to_s if fields[:message_id]
         send_feature_flags = fields[:send_feature_flags]
 
         check_timestamp! timestamp
@@ -149,17 +145,14 @@ module PostHog
         }
         properties['$is_server'] = true if is_server
 
-        # Deprecated top-level metadata retained for backwards compatibility.
-        # PostHog ingestion reads SDK metadata from `$lib` / `$lib_version` properties
-        # and event identity from `uuid`, not from `library`, `library_version`, or `messageId`.
         parsed = {
           timestamp: datetime_in_iso8601(timestamp),
-          library: 'posthog-ruby',
-          library_version: PostHog::VERSION.to_s,
-          messageId: message_id,
           distinct_id: distinct_id,
           properties: properties
         }
+
+        uuid = fields[:uuid] || fields[:message_id]
+        parsed['uuid'] = uuid if uuid && valid_uuid_for_event_props?(uuid)
 
         if send_feature_flags && fields[:feature_variants]
           feature_variants = fields[:feature_variants]

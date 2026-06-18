@@ -2,4 +2,4 @@
 'posthog-ruby': patch
 ---
 
-Document deprecated top-level batch metadata fields and canonical replacements.
+Stop sending ignored top-level batch metadata fields and normalize deprecated message IDs to event UUIDs.

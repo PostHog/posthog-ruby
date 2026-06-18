@@ -1713,8 +1713,10 @@ module PostHog
     end
 
     context 'common' do
+      let(:message_id) { '123e4567-e89b-12d3-a456-426614174000' }
+
       let(:data) do
-        { distinct_id: 1, alias: 3, message_id: 5, event: 'cockatoo' }
+        { distinct_id: 1, alias: 3, message_id: message_id, event: 'cockatoo' }
       end
 
       %i[capture identify alias].each do |method_name|
@@ -1753,13 +1755,14 @@ module PostHog
       end
 
       %i[capture identify alias].each do |method_name|
-        it "keeps deprecated top-level metadata while sending canonical properties for #{method_name}" do
+        it "normalizes deprecated metadata into canonical fields for #{method_name}" do
           client.send(method_name, data)
           message = client.dequeue_last_message
 
-          expect(message[:messageId]).to eq('5')
-          expect(message[:library]).to eq('posthog-ruby')
-          expect(message[:library_version]).to eq(PostHog::VERSION.to_s)
+          expect(message).not_to have_key(:messageId)
+          expect(message).not_to have_key(:library)
+          expect(message).not_to have_key(:library_version)
+          expect(message['uuid']).to eq(message_id)
           expect(message[:properties]['$lib']).to eq('posthog-ruby')
           expect(message[:properties]['$lib_version']).to eq(PostHog::VERSION.to_s)
         end
