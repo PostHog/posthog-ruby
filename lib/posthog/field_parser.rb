@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'securerandom'
+
 require 'posthog/logging'
 
 module PostHog
@@ -129,6 +131,8 @@ module PostHog
       # - "distinct_id"
       # - "message_id" (deprecated; normalized to "uuid" when it is a valid UUID)
       # - "send_feature_flags"
+      #
+      # A new "uuid" is generated when neither "uuid" nor "message_id" is valid.
       def parse_common_fields(fields)
         timestamp = fields[:timestamp] || Time.new
         distinct_id = fields[:distinct_id]
@@ -151,8 +155,7 @@ module PostHog
           properties: properties
         }
 
-        uuid = normalized_uuid(fields)
-        parsed['uuid'] = uuid if uuid
+        parsed['uuid'] = normalized_uuid(fields)
 
         if send_feature_flags && fields[:feature_variants]
           feature_variants = fields[:feature_variants]
@@ -193,7 +196,7 @@ module PostHog
         message_id = fields[:message_id]
         return message_id if message_id && valid_uuid_for_event_props?(message_id)
 
-        nil
+        SecureRandom.uuid
       end
 
       # @param [Object] uuid - the UUID to validate, user provided, so we don't know the type

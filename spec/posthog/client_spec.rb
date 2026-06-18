@@ -761,7 +761,7 @@ module PostHog
         )
       end
 
-      it 'does not use invalid message_id as uuid' do
+      it 'generates a uuid when message_id is invalid' do
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -771,13 +771,13 @@ module PostHog
         )
 
         message = client.dequeue_last_message
-        expect(message).not_to have_key('uuid')
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).to have_received(:warn).with(
           'UUID is not valid: i am also not a uuid. Ignoring it.'
         )
       end
 
-      it 'does not require a uuid be provided - ingestion will generate when absent' do
+      it 'generates a uuid when uuid is absent' do
         allow(logger).to receive(:warn)
 
         client.capture(
@@ -786,13 +786,13 @@ module PostHog
             event: 'test_event'
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        # ingestion will add a UUID if one is not provided
-        expect(properties['uuid']).to be_nil
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).not_to have_received(:warn)
       end
 
-      it 'does not use invalid uuid' do
+      it 'generates a uuid when provided uuid is invalid' do
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -800,8 +800,9 @@ module PostHog
             uuid: 'i am obviously not a uuid'
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        expect(properties['uuid']).to be_nil
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).to have_received(:warn).with(
           'UUID is not valid: i am obviously not a uuid. Ignoring it.'
         )
@@ -1057,7 +1058,7 @@ module PostHog
         # Verify the server was called because only_evaluate_locally was false
         assert_requested :post, flags_endpoint, times: 1
       end
-      it 'does not use really invalid uuid' do
+      it 'generates a uuid when provided uuid is not a string' do
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -1065,8 +1066,9 @@ module PostHog
             uuid: { 'not a uuid' => 'not a uuid' }
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        expect(properties['uuid']).to be_nil
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).to have_received(:warn).with(
           'UUID is not a string. Ignoring it.'
         )

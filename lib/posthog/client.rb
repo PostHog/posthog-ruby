@@ -181,9 +181,10 @@ module PostHog
     end
 
     # @!macro common_attrs
-    #   @option attrs [String] :message_id Deprecated. Use `:uuid` instead. If `:uuid` is absent and
-    #     `:message_id` is a valid UUID, it is sent as `uuid` for backwards compatibility.
-    #     SDK metadata is sent as `$lib` and `$lib_version` properties.
+    #   @option attrs [String] :message_id Deprecated. Use `:uuid` instead. If `:uuid` is absent or
+    #     invalid and `:message_id` is a valid UUID, it is sent as `uuid` for backwards compatibility.
+    #     If neither value is valid, the SDK generates a `uuid`. SDK metadata is sent as `$lib` and
+    #     `$lib_version` properties.
     #   @option attrs [Time] :timestamp When the event occurred (optional)
     #   @option attrs [String] :distinct_id The ID for this user in your database
 
