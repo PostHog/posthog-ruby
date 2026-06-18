@@ -40,6 +40,13 @@ RSpec.describe PostHog::Rails::Configuration do
     end
   end
 
+  describe 'user context defaults' do
+    it 'defaults to controller current_user without a resolver' do
+      expect(config.current_user_method).to eq(:current_user)
+      expect(config.current_user_resolver).to be_nil
+    end
+  end
+
   describe 'PostHog Logs defaults' do
     it 'defaults logs to disabled with forwarding ready' do
       expect(config.logs_enabled).to be false
