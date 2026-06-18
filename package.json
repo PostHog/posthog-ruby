@@ -1,7 +1,6 @@
 {
-  "name": "posthog-ruby",
+  "name": "posthog-ruby-workspace",
   "private": true,
-  "version": "3.13.0",
   "description": "Release metadata and changesets for the PostHog Ruby SDK",
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",

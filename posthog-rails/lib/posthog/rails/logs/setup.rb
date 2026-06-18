@@ -60,7 +60,7 @@ module PostHog
             end
 
             @provider = build_provider(token)
-            otel_logger = @provider.logger(name: 'posthog-rails', version: PostHog::VERSION)
+            otel_logger = @provider.logger(name: 'posthog-rails', version: PostHog::Rails::VERSION)
             level = resolve_level(config.logs_level) || rails_logger_level
             @appender = Appender.new(
               otel_logger,

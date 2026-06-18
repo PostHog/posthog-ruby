@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 require File.expand_path('../lib/posthog/version', __dir__)
+require File.expand_path('lib/posthog/rails/version', __dir__)
 
 Gem::Specification.new do |spec|
   spec.name = 'posthog-rails'
-  spec.version = PostHog::VERSION
+  spec.version = PostHog::Rails::VERSION
   spec.files = Dir.glob('lib/**/*')
   spec.require_paths = ['lib']
   spec.summary = 'PostHog integration for Rails'

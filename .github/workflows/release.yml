@@ -54,7 +54,7 @@ jobs:
       posthog_project_api_key: ${{ secrets.POSTHOG_PROJECT_API_KEY }}
 
   version-bump:
-    name: Bump version and commit to main
+    name: Bump versions and commit to main
     needs: [check-changesets, notify-approval-needed]
     runs-on: ubuntu-latest
     if: always() && needs.check-changesets.outputs.has-changesets == 'true'
@@ -62,8 +62,8 @@ jobs:
     permissions:
       contents: write
     outputs:
-      commit-hash: ${{ steps.commit-version-bump.outputs.commit-hash }}
-      new-version: ${{ steps.apply-changesets.outputs.new-version }}
+      committed: ${{ steps.version-bump-outputs.outputs.committed }}
+      commit-hash: ${{ steps.version-bump-outputs.outputs.commit-hash }}
     steps:
       - name: Notify Slack - Approved
         if: needs.notify-approval-needed.outputs.slack_ts != ''
@@ -108,18 +108,11 @@ jobs:
       - name: Install changesets dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Apply changesets and update version
-        id: apply-changesets
-        run: |
-          pnpm changeset version
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "new-version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-          echo "New version: $NEW_VERSION"
+      - name: Apply changesets
+        run: pnpm changeset version
 
-      - name: Sync version to Ruby files
-        env:
-          NEW_VERSION: ${{ steps.apply-changesets.outputs.new-version }}
-        run: ./scripts/bump-version.sh "$NEW_VERSION"
+      - name: Sync versions to Ruby files
+        run: ./scripts/bump-version.sh
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
@@ -130,15 +123,40 @@ jobs:
       - name: Update Gemfile.lock
         run: bundle lock
 
+      - name: Check for version bump changes
+        id: check-changes
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit"
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Commit version bump
         id: commit-version-bump
+        if: steps.check-changes.outputs.has-changes == 'true'
         uses: planetscale/ghcommit-action@25309d8005ac7c3bcd61d3fe19b69e0fe47dbdde # v0.2.20
         with:
-          commit_message: "chore: release ${{ steps.apply-changesets.outputs.new-version }} [version bump] [skip ci]"
+          commit_message: "chore: update package versions [version bump] [skip ci]"
           repo: ${{ github.repository }}
           branch: main
         env:
           GITHUB_TOKEN: ${{ steps.releaser.outputs.token }}
+
+      - name: Set version bump outputs
+        id: version-bump-outputs
+        env:
+          HAS_CHANGES: ${{ steps.check-changes.outputs.has-changes }}
+          COMMIT_HASH: ${{ steps.commit-version-bump.outputs.commit-hash }}
+        run: |
+          if [ "$HAS_CHANGES" = "true" ]; then
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+            echo "commit-hash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
+          else
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            echo "commit-hash=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Notify Slack - Failed
         if: ${{ failure() && needs.notify-approval-needed.outputs.slack_ts != '' }}
@@ -147,7 +165,7 @@ jobs:
           slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
           slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
           thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
-          message: "❌ Failed to bump version for `posthog-ruby@${{ steps.apply-changesets.outputs.new-version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
+          message: "❌ Failed to bump package versions! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
           emoji_reaction: "x"
 
   notify-rejected:
@@ -193,21 +211,45 @@ jobs:
     name: Release and publish
     needs: [version-bump, notify-approval-needed]
     runs-on: ubuntu-latest
-    if: always() && needs.version-bump.outputs.commit-hash != ''
+    if: always() && needs.version-bump.outputs.committed == 'true'
     permissions:
       contents: write
       id-token: write
+    strategy:
+      # Publish posthog-ruby before posthog-rails because the Rails gem depends on the core gem.
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        package:
+          - name: posthog-ruby
+            path: .
+            package_json: posthog-ruby/package.json
+            gemspec: posthog-ruby.gemspec
+            changelog: posthog-ruby/CHANGELOG.md
+          - name: posthog-rails
+            path: posthog-rails
+            package_json: posthog-rails/package.json
+            gemspec: posthog-rails.gemspec
+            changelog: posthog-rails/CHANGELOG.md
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: main
+          ref: ${{ needs.version-bump.outputs.commit-hash }}
           fetch-depth: 0
 
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
@@ -219,42 +261,74 @@ jobs:
       - name: Configure trusted publishing credentials
         uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
 
-      - name: Build posthog-ruby
-        run: gem build posthog-ruby.gemspec
-
-      - name: Publish posthog-ruby
-        run: gem push posthog-ruby-*.gem
-
-      - name: Wait for posthog-ruby to be available
-        run: gem exec rubygems-await posthog-ruby-*.gem
-
-      - name: Build posthog-rails
-        run: gem build posthog-rails.gemspec
-        working-directory: posthog-rails
-
-      - name: Publish posthog-rails
-        run: gem push posthog-rails/posthog-rails-*.gem
-
-      - name: Wait for posthog-rails to be available
-        run: gem exec rubygems-await posthog-rails/posthog-rails-*.gem
-
-      - name: Tag repository
-        env:
-          NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
-          COMMIT_HASH: ${{ needs.version-bump.outputs.commit-hash }}
+      - name: Detect version change for ${{ matrix.package.name }}
+        id: detect-version
         run: |
-          git tag -a "$NEW_VERSION" "$COMMIT_HASH" -m "$NEW_VERSION"
-          git push origin "$NEW_VERSION"
+          set -euo pipefail
 
-      - name: Create GitHub Release
+          PACKAGE_JSON="${{ matrix.package.package_json }}"
+          CURRENT_VERSION=$(node -p "require('./${PACKAGE_JSON}').version")
+          RELEASE_TAG="${{ matrix.package.name }}-v${CURRENT_VERSION}"
+
+          if git diff --quiet HEAD^ HEAD -- "$PACKAGE_JSON"; then
+            echo "${{ matrix.package.name }} version did not change in the version-bump commit"
+            echo "has-new-version=false" >> "$GITHUB_OUTPUT"
+          elif git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists - no new version to release"
+            echo "has-new-version=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New ${{ matrix.package.name }} version detected: $CURRENT_VERSION"
+            echo "has-new-version=true" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build ${{ matrix.package.name }}
+        if: steps.detect-version.outputs.has-new-version == 'true'
+        working-directory: ${{ matrix.package.path }}
+        run: gem build ${{ matrix.package.gemspec }}
+
+      - name: Publish ${{ matrix.package.name }}
+        if: steps.detect-version.outputs.has-new-version == 'true'
+        working-directory: ${{ matrix.package.path }}
+        run: gem push ${{ matrix.package.name }}-*.gem
+
+      - name: Wait for ${{ matrix.package.name }} to be available
+        if: steps.detect-version.outputs.has-new-version == 'true'
+        working-directory: ${{ matrix.package.path }}
+        run: gem exec rubygems-await ${{ matrix.package.name }}-*.gem
+
+      - name: Tag ${{ matrix.package.name }}
+        if: steps.detect-version.outputs.has-new-version == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.detect-version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.detect-version.outputs.version }}
+          PACKAGE_NAME: ${{ matrix.package.name }}
+        run: |
+          git tag -a "$RELEASE_TAG" -m "$PACKAGE_NAME $RELEASE_VERSION"
+          git push origin "$RELEASE_TAG"
+
+      - name: Create GitHub Release for ${{ matrix.package.name }}
+        if: steps.detect-version.outputs.has-new-version == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          NEW_VERSION: ${{ needs.version-bump.outputs.new-version }}
+          RELEASE_TAG: ${{ steps.detect-version.outputs.tag }}
+          CHANGELOG_FILE: ${{ matrix.package.changelog }}
         run: |
-          CHANGELOG_ENTRY=$(awk -v defText="see CHANGELOG.md" '/^## /{if (flag) exit; flag=1; next} flag; END{if (!flag) print defText}' CHANGELOG.md | sed '/[^[:space:]]/,$!d' | tac | sed '/[^[:space:]]/,$!d' | tac)
-          gh release create "$NEW_VERSION" \
-            --title "$NEW_VERSION" \
-            --notes "$CHANGELOG_ENTRY"
+          if [ -f "$CHANGELOG_FILE" ]; then
+            awk -v defText="See $CHANGELOG_FILE" '
+              /^## / { if (found_version) exit; found_version=1; next }
+              found_version { print }
+              END { if (!found_version) print defText }
+            ' "$CHANGELOG_FILE" | sed '/[^[:space:]]/,$!d' | tac | sed '/[^[:space:]]/,$!d' | tac > release-notes.md
+          else
+            echo "See $CHANGELOG_FILE" > release-notes.md
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --target "${{ needs.version-bump.outputs.commit-hash }}" \
+            --title "$RELEASE_TAG" \
+            --notes-file release-notes.md
 
       - name: Send failure event to PostHog
         if: ${{ failure() }}
@@ -267,7 +341,8 @@ jobs:
               "commitSha": "${{ github.sha }}",
               "jobStatus": "${{ job.status }}",
               "ref": "${{ github.ref }}",
-              "version": "${{ needs.version-bump.outputs.new-version }}"
+              "packageName": "${{ matrix.package.name }}",
+              "packageVersion": "${{ steps.detect-version.outputs.version }}"
             }
 
       - name: Notify Slack - Failed
@@ -277,7 +352,7 @@ jobs:
           slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
           slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
           thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
-          message: "❌ Failed to release `posthog-ruby@${{ needs.version-bump.outputs.new-version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
+          message: "❌ Failed to release `${{ matrix.package.name }}@${{ steps.detect-version.outputs.version }}`! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
           emoji_reaction: "x"
 
   notify-released:
@@ -292,5 +367,5 @@ jobs:
           slack_bot_token: ${{ secrets.SLACK_CLIENT_LIBRARIES_BOT_TOKEN }}
           slack_channel_id: ${{ vars.SLACK_APPROVALS_CLIENT_LIBRARIES_CHANNEL_ID }}
           thread_ts: ${{ needs.notify-approval-needed.outputs.slack_ts }}
-          message: "🚀 posthog-ruby and posthog-rails ${{ needs.version-bump.outputs.new-version }} released successfully!"
+          message: "🚀 Released updated posthog-ruby packages successfully!"
           emoji_reaction: "rocket"
