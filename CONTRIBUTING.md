@@ -39,7 +39,8 @@ bundle exec rubocop
 bundle exec rake public_api:check
 ```
 
-If you intentionally change the public Ruby API, update the snapshot and review the diff:
+The public API snapshot covers both `posthog-ruby` and `posthog-rails`. If you intentionally change either
+public Ruby API, update the snapshot and review the diff:
 
 ```bash
 bundle exec rake public_api:generate
