@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'securerandom'
+
 require 'posthog/logging'
 
 module PostHog
@@ -25,7 +27,6 @@ module PostHog
         event = fields[:event]
         properties = fields[:properties] || {}
         groups = fields[:groups]
-        uuid = fields[:uuid]
         check_presence!(event, 'event')
         check_is_hash!(properties, 'properties')
 
@@ -35,8 +36,6 @@ module PostHog
         end
 
         isoify_dates! properties
-
-        common['uuid'] = uuid if valid_uuid_for_event_props? uuid
 
         common.merge(
           {
@@ -130,12 +129,13 @@ module PostHog
       #
       # - "timestamp"
       # - "distinct_id"
-      # - "message_id"
+      # - "message_id" (deprecated; normalized to "uuid" when it is a valid UUID)
       # - "send_feature_flags"
+      #
+      # A new "uuid" is generated when neither "uuid" nor "message_id" is valid.
       def parse_common_fields(fields)
         timestamp = fields[:timestamp] || Time.new
         distinct_id = fields[:distinct_id]
-        message_id = fields[:message_id].to_s if fields[:message_id]
         send_feature_flags = fields[:send_feature_flags]
 
         check_timestamp! timestamp
@@ -151,12 +151,11 @@ module PostHog
 
         parsed = {
           timestamp: datetime_in_iso8601(timestamp),
-          library: 'posthog-ruby',
-          library_version: PostHog::VERSION.to_s,
-          messageId: message_id,
           distinct_id: distinct_id,
           properties: properties
         }
+
+        parsed['uuid'] = normalized_uuid(fields)
 
         if send_feature_flags && fields[:feature_variants]
           feature_variants = fields[:feature_variants]
@@ -188,6 +187,16 @@ module PostHog
 
       def check_is_hash!(obj, name)
         raise ArgumentError, "#{name} must be a Hash" unless obj.is_a? Hash
+      end
+
+      def normalized_uuid(fields)
+        uuid = fields[:uuid]
+        return uuid if uuid && valid_uuid_for_event_props?(uuid)
+
+        message_id = fields[:message_id]
+        return message_id if message_id && valid_uuid_for_event_props?(message_id)
+
+        SecureRandom.uuid
       end
 
       # @param [Object] uuid - the UUID to validate, user provided, so we don't know the type
