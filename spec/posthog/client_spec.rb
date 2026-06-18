@@ -1511,6 +1511,24 @@ module PostHog
       end
     end
 
+    %i[flush shutdown].each do |method|
+      describe "##{method} with NoopWorker" do
+        it 'clears queued test mode events without hanging' do
+          test_client = Client.new(api_key: API_KEY, test_mode: true)
+          test_client.capture(Queued::CAPTURE)
+
+          thread = Thread.new { test_client.public_send(method) }
+          begin
+            expect(thread.join(1)).to eq(thread)
+            thread.value
+          ensure
+            thread.kill if thread.alive?
+          end
+          expect(test_client.queued_messages).to eq(0)
+        end
+      end
+    end
+
     describe 'feature flags' do
       it 'returns defaults without requests when the client is disabled' do
         disabled_client = Client.new(api_key: " \n\t ", test_mode: true)
