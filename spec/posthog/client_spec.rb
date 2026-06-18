@@ -744,7 +744,40 @@ module PostHog
         expect(logger).not_to have_received(:warn)
       end
 
-      it 'does not require a uuid be provided - ingestion will generate when absent' do
+      it 'falls back to a valid message_id when uuid is invalid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            uuid: 'i am obviously not a uuid',
+            message_id: '123e4567-e89b-12d3-a456-426614174000'
+          }
+        )
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to eq('123e4567-e89b-12d3-a456-426614174000')
+        expect(logger).to have_received(:warn).with(
+          'UUID is not valid: i am obviously not a uuid. Ignoring it.'
+        )
+      end
+
+      it 'generates a uuid when message_id is invalid' do
+        client.capture(
+          {
+            distinct_id: 'distinct_id',
+            event: 'test_event',
+            message_id: 'i am also not a uuid'
+          }
+        )
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+        expect(logger).to have_received(:warn).with(
+          'UUID is not valid: i am also not a uuid. Ignoring it.'
+        )
+      end
+
+      it 'generates a uuid when uuid is absent' do
         allow(logger).to receive(:warn)
 
         client.capture(
@@ -753,13 +786,13 @@ module PostHog
             event: 'test_event'
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        # ingestion will add a UUID if one is not provided
-        expect(properties['uuid']).to be_nil
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).not_to have_received(:warn)
       end
 
-      it 'does not use invalid uuid' do
+      it 'generates a uuid when provided uuid is invalid' do
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -767,8 +800,9 @@ module PostHog
             uuid: 'i am obviously not a uuid'
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        expect(properties['uuid']).to be_nil
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).to have_received(:warn).with(
           'UUID is not valid: i am obviously not a uuid. Ignoring it.'
         )
@@ -1024,7 +1058,7 @@ module PostHog
         # Verify the server was called because only_evaluate_locally was false
         assert_requested :post, flags_endpoint, times: 1
       end
-      it 'does not use really invalid uuid' do
+      it 'generates a uuid when provided uuid is not a string' do
         client.capture(
           {
             distinct_id: 'distinct_id',
@@ -1032,8 +1066,9 @@ module PostHog
             uuid: { 'not a uuid' => 'not a uuid' }
           }
         )
-        properties = client.dequeue_last_message[:properties]
-        expect(properties['uuid']).to be_nil
+
+        message = client.dequeue_last_message
+        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
         expect(logger).to have_received(:warn).with(
           'UUID is not a string. Ignoring it.'
         )
@@ -1476,6 +1511,24 @@ module PostHog
       end
     end
 
+    %i[flush shutdown].each do |method|
+      describe "##{method} with NoopWorker" do
+        it 'clears queued test mode events without hanging' do
+          test_client = Client.new(api_key: API_KEY, test_mode: true)
+          test_client.capture(Queued::CAPTURE)
+
+          thread = Thread.new { test_client.public_send(method) }
+          begin
+            expect(thread.join(1)).to eq(thread)
+            thread.value
+          ensure
+            thread.kill if thread.alive?
+          end
+          expect(test_client.queued_messages).to eq(0)
+        end
+      end
+    end
+
     describe 'feature flags' do
       it 'returns defaults without requests when the client is disabled' do
         disabled_client = Client.new(api_key: " \n\t ", test_mode: true)
@@ -1713,19 +1766,18 @@ module PostHog
     end
 
     context 'common' do
-      check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
+      let(:message_id) { '123e4567-e89b-12d3-a456-426614174000' }
 
       let(:data) do
-        { distinct_id: 1, alias: 3, message_id: 5, event: 'cockatoo' }
+        { distinct_id: 1, alias: 3, message_id: message_id, event: 'cockatoo' }
       end
 
-      it 'returns false if queue is full' do
-        client.instance_variable_set(:@max_queue_size, 1)
+      %i[capture identify alias].each do |method_name|
+        it "returns false for #{method_name} if queue is full" do
+          client.instance_variable_set(:@max_queue_size, 1)
 
-        %i[capture identify alias].each do |s|
-          expect(client.send(s, data)).to eq(true)
-          expect(client.send(s, data)).to eq(false) # Queue is full
-          client.clear
+          expect(client.send(method_name, data)).to eq(true)
+          expect(client.send(method_name, data)).to eq(false) # Queue is full
         end
       end
 
@@ -1755,10 +1807,17 @@ module PostHog
         expect(queue.length).to eq(1)
       end
 
-      it 'converts message id to string' do
-        %i[capture identify alias].each do |s|
-          client.send(s, data)
-          expect(check_property.call(client.dequeue_last_message, :messageId, '5')).to eq(true)
+      %i[capture identify alias].each do |method_name|
+        it "normalizes deprecated metadata into canonical fields for #{method_name}" do
+          client.send(method_name, data)
+          message = client.dequeue_last_message
+
+          expect(message).not_to have_key(:messageId)
+          expect(message).not_to have_key(:library)
+          expect(message).not_to have_key(:library_version)
+          expect(message['uuid']).to eq(message_id)
+          expect(message[:properties]['$lib']).to eq('posthog-ruby')
+          expect(message[:properties]['$lib_version']).to eq(PostHog::VERSION.to_s)
         end
       end
     end
