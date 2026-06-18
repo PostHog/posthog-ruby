@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'securerandom'
-
 module PostHog
   class InconclusiveMatchError < StandardError
   end
@@ -58,16 +56,6 @@ module PostHog
     #
     def isoify_dates!(hash)
       hash.replace isoify_dates hash
-    end
-
-    # public: Returns a uid string
-    #
-    def uid
-      arr = SecureRandom.random_bytes(16).unpack('NnnnnN')
-      arr[2] = (arr[2] & 0x0fff) | 0x4000
-      arr[3] = (arr[3] & 0x3fff) | 0x8000
-
-      '%08x-%04x-%04x-%04x-%04x%08x' % arr # rubocop:disable Style/FormatStringToken, Style/FormatString
     end
 
     def datetime_in_iso8601(datetime)

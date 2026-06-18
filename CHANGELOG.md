@@ -1,3 +1,16 @@
+## 3.12.3
+
+### Patch Changes
+
+- 256e276: Fix Rails initializer load order so `PostHog.init` is available when `posthog-rails` is required.
+- 12c09b2: Make flush and shutdown safe for test mode clients with queued events.
+
+## 3.12.2
+
+### Patch Changes
+
+- c051002: Stop sending ignored top-level batch metadata fields and always send event UUIDs, normalizing deprecated message IDs when valid.
+
 ## 3.12.1
 
 ### Patch Changes
