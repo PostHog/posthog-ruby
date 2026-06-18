@@ -1,3 +1,9 @@
+## 3.13.0
+
+### Minor Changes
+
+- 42cc569: Add Rails current user resolver configuration for exception capture.
+
 ## 3.12.3
 
 ### Patch Changes
