@@ -40,7 +40,7 @@ No release label is required. When the PR is merged to `main`, the release workf
    - Publish only the packages whose versions changed
    - Create package-specific git tags and GitHub releases, for example `posthog-ruby-v3.13.1` or `posthog-rails-v3.14.0`
 
-When both packages changed, the workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`.
+When both packages changed, the workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`. The Rails gemspec pins its `posthog-ruby` dependency to the exact core SDK version present in the release commit, so Rails-only releases intentionally keep using the latest core SDK version recorded on `main`.
 
 ## Manual trigger
 
