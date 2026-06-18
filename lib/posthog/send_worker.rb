@@ -41,13 +41,17 @@ module PostHog
       @condition = ConditionVariable.new
       @flush_requested = false
       @shutdown = false
-      @transport = Transport.new api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification]
+      @pid = Process.pid
+      @transport_options = { api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification] }
+      @transport = Transport.new(@transport_options)
     end
 
     # Continuously runs the loop to check for new events.
     #
     # @return [void]
     def run
+      ensure_current_process!
+
       until shutdown?
         wait_for_work
         break if shutdown?
@@ -63,7 +67,7 @@ module PostHog
         end
       end
     ensure
-      @transport.shutdown
+      shutdown_transport
     end
 
     # Request the worker to send any pending events without waiting for the
@@ -71,6 +75,8 @@ module PostHog
     #
     # @return [void]
     def request_flush
+      ensure_current_process!
+
       @state_lock.synchronize do
         @flush_requested = true
         @condition.broadcast
@@ -81,11 +87,15 @@ module PostHog
     #
     # @return [void]
     def notify
+      ensure_current_process!
+
       @state_lock.synchronize { @condition.signal }
     end
 
     # @return [void]
     def shutdown
+      ensure_current_process!
+
       @state_lock.synchronize do
         @shutdown = true
         @flush_requested = true
@@ -98,10 +108,26 @@ module PostHog
     # @return [Boolean] Whether the worker has outstanding requests.
     # TODO: Rename to `requesting?` in future version
     def is_requesting? # rubocop:disable Naming/PredicateName
+      ensure_current_process!
+
       @lock.synchronize { !@batch.empty? }
     end
 
     private
+
+    def ensure_current_process!
+      return if @pid == Process.pid
+
+      @lock.synchronize { @batch.clear }
+      @state_lock.synchronize do
+        @pid = Process.pid
+        @shutdown = false
+        @flush_requested = false
+        @condition.broadcast
+      end
+      shutdown_transport
+      @transport = Transport.new(@transport_options)
+    end
 
     def build_batch
       deadline = monotonic_time + @flush_interval_seconds
@@ -174,6 +200,12 @@ module PostHog
       @on_error.call(status, error)
     rescue StandardError => e
       logger.error("Error in on_error callback: #{e.message}")
+    end
+
+    def shutdown_transport
+      @transport.shutdown
+    rescue StandardError => e
+      logger.error("Error shutting down transport: #{e.message}")
     end
 
     def monotonic_time

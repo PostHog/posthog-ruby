@@ -1496,6 +1496,40 @@ module PostHog
 
           Process.wait
         end
+
+        it 'completes after fork when the async worker has a partial batch' do
+          PostHog::Transport.stub = true
+          async_client = Client.new(api_key: API_KEY, batch_size: 10, flush_interval_seconds: 60)
+          worker = async_client.instance_variable_get(:@worker)
+          queue = async_client.instance_variable_get(:@queue)
+
+          async_client.capture(Queued::CAPTURE)
+          eventually do
+            expect(queue).to be_empty
+            expect(worker.is_requesting?).to eq(true)
+          end
+
+          reader, writer = IO.pipe
+          pid = Process.fork do
+            reader.close
+            flush_thread = Thread.new { async_client.flush }
+            result = flush_thread.join(0.5) == flush_thread ? 'returned' : 'hung'
+            flush_thread.kill if flush_thread.alive?
+            writer.write(result)
+            writer.close
+            exit! 0
+          end
+
+          writer.close
+          result = reader.read
+          Process.wait(pid)
+          reader.close
+
+          expect(result).to eq('returned')
+        ensure
+          async_client&.shutdown
+          PostHog::Transport.stub = false
+        end
       end
     end
 
