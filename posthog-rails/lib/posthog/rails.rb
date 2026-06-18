@@ -12,6 +12,7 @@ require 'posthog/rails/logs/severity'
 require 'posthog/rails/logs/rate_limiter'
 require 'posthog/rails/logs/appender'
 require 'posthog/rails/logs/setup'
+require 'posthog/rails/facade'
 require 'posthog/rails/railtie'
 
 module PostHog
@@ -63,3 +64,5 @@ module PostHog
     end
   end
 end
+
+PostHog::Rails.install_posthog_facade!

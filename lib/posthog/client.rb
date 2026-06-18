@@ -167,6 +167,11 @@ module PostHog
         return
       end
 
+      if @worker.is_a?(NoopWorker)
+        clear
+        return
+      end
+
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
         @worker.request_flush
@@ -184,8 +189,10 @@ module PostHog
     end
 
     # @!macro common_attrs
-    #   @option attrs [String] :message_id ID that uniquely
-    #     identifies a message across the API. (optional)
+    #   @option attrs [String] :message_id Deprecated. Use `:uuid` instead. If `:uuid` is absent or
+    #     invalid and `:message_id` is a valid UUID, it is sent as `uuid` for backwards compatibility.
+    #     If neither value is valid, the SDK generates a `uuid`. SDK metadata is sent as `$lib` and
+    #     `$lib_version` properties.
     #   @option attrs [Time] :timestamp When the event occurred (optional)
     #   @option attrs [String] :distinct_id The ID for this user in your database
 
@@ -951,9 +958,6 @@ module PostHog
 
       action = process_before_send(action)
       return false if action.nil? || action.empty?
-
-      # add our request id for tracing purposes
-      action[:messageId] ||= uid
 
       if @sync_mode
         send_sync(action)

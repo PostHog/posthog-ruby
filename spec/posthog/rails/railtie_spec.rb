@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-# Minimal requires for testing the Railtie in isolation
+require 'spec_helper'
+
+# Load the full Rails stack so the boot-order test can simulate real load order.
 require 'logger'
-require 'posthog'
-require 'rails/railtie'
+require 'rails'
 
 # The posthog-rails lib has its own gemspec and isn't in the default load path,
 # so we add it manually for testing.
@@ -20,6 +21,17 @@ require 'posthog/rails/railtie'
 require 'posthog/rails'
 
 RSpec.describe PostHog::Rails::Railtie do
+  describe 'PostHog facade load order' do
+    after { PostHog.client = nil }
+
+    it 'allows PostHog.init before Railtie initializers run' do
+      client = PostHog.init(api_key: 'phc_test', test_mode: true)
+
+      expect(client).to be_a(PostHog::Client)
+      expect(PostHog.client).to eq(client)
+    end
+  end
+
   describe 'posthog.set_configs initializer' do
     before do
       initializer = PostHog::Rails::Railtie.initializers.find { |i| i.name == 'posthog.set_configs' }
