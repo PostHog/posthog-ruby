@@ -181,8 +181,9 @@ module PostHog
     end
 
     # @!macro common_attrs
-    #   @option attrs [String] :message_id ID that uniquely
-    #     identifies a message across the API. (optional)
+    #   @option attrs [String] :message_id Deprecated no-op. The batch endpoint ignores `messageId`.
+    #     Use `:uuid` on capture events for event identity/deduplication instead. Read SDK metadata from
+    #     `$lib` and `$lib_version` properties, not top-level `library` / `library_version` fields.
     #   @option attrs [Time] :timestamp When the event occurred (optional)
     #   @option attrs [String] :distinct_id The ID for this user in your database
 
@@ -949,7 +950,8 @@ module PostHog
       action = process_before_send(action)
       return false if action.nil? || action.empty?
 
-      # add our request id for tracing purposes
+      # Deprecated top-level request id retained for backwards compatibility.
+      # PostHog ingestion ignores `messageId`; use `uuid` on capture events for event identity/deduplication.
       action[:messageId] ||= uid
 
       if @sync_mode

@@ -1713,8 +1713,6 @@ module PostHog
     end
 
     context 'common' do
-      check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
-
       let(:data) do
         { distinct_id: 1, alias: 3, message_id: 5, event: 'cockatoo' }
       end
@@ -1755,10 +1753,16 @@ module PostHog
         expect(queue.length).to eq(1)
       end
 
-      it 'converts message id to string' do
+      it 'keeps deprecated top-level metadata while sending canonical properties' do
         %i[capture identify alias].each do |s|
           client.send(s, data)
-          expect(check_property.call(client.dequeue_last_message, :messageId, '5')).to eq(true)
+          message = client.dequeue_last_message
+
+          expect(message[:messageId]).to eq('5')
+          expect(message[:library]).to eq('posthog-ruby')
+          expect(message[:library_version]).to eq(PostHog::VERSION.to_s)
+          expect(message[:properties]['$lib']).to eq('posthog-ruby')
+          expect(message[:properties]['$lib_version']).to eq(PostHog::VERSION.to_s)
         end
       end
     end

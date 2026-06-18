@@ -130,7 +130,7 @@ module PostHog
       #
       # - "timestamp"
       # - "distinct_id"
-      # - "message_id"
+      # - "message_id" (deprecated no-op; use "uuid" on capture events for event identity/deduplication)
       # - "send_feature_flags"
       def parse_common_fields(fields)
         timestamp = fields[:timestamp] || Time.new
@@ -149,6 +149,9 @@ module PostHog
         }
         properties['$is_server'] = true if is_server
 
+        # Deprecated top-level metadata retained for backwards compatibility.
+        # PostHog ingestion reads SDK metadata from `$lib` / `$lib_version` properties
+        # and event identity from `uuid`, not from `library`, `library_version`, or `messageId`.
         parsed = {
           timestamp: datetime_in_iso8601(timestamp),
           library: 'posthog-ruby',
