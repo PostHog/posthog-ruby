@@ -39,6 +39,7 @@ constant PostHog::Defaults::MAX_HASH_SIZE: Integer
 module PostHog::Defaults::Message
 constant PostHog::Defaults::Message::MAX_BYTES: Integer
 module PostHog::Defaults::MessageBatch
+constant PostHog::Defaults::MessageBatch::FLUSH_INTERVAL_SECONDS: Float
 constant PostHog::Defaults::MessageBatch::MAX_BYTES: Integer
 constant PostHog::Defaults::MessageBatch::MAX_SIZE: Integer
 module PostHog::Defaults::Queue
