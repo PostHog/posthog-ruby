@@ -20,9 +20,7 @@ module PublicApiSnapshot
   def generate
     load_core_sdk
 
-    core_entries = []
-    append_constant(core_entries, Object, :PostHog, 'PostHog')
-    core_posthog_singleton_methods = public_singleton_methods(PostHog)
+    core_entries, core_singleton_methods = captured_core_api
 
     load_rails_sdk
 
@@ -31,7 +29,7 @@ module PublicApiSnapshot
       rails_entries,
       PostHog,
       'PostHog',
-      core_posthog_singleton_methods
+      core_singleton_methods
     )
     append_constant(rails_entries, PostHog, :Rails, 'PostHog::Rails')
 
@@ -62,6 +60,14 @@ module PublicApiSnapshot
   def load_core_sdk
     add_load_path(CORE_LIB_DIR)
     require 'posthog'
+  end
+
+  def captured_core_api
+    @captured_core_api ||= begin
+      entries = []
+      append_constant(entries, Object, :PostHog, 'PostHog')
+      [entries.freeze, public_singleton_methods(PostHog).freeze].freeze
+    end
   end
 
   def load_rails_sdk
