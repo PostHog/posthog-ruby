@@ -318,6 +318,7 @@ jobs:
           if [ -f "$CHANGELOG_FILE" ]; then
             awk -v defText="See $CHANGELOG_FILE" '
               /^## / { if (found_version) exit; found_version=1; next }
+              /^> Historical entries before the changelog split are copied from/ { next }
               found_version { print }
               END { if (!found_version) print defText }
             ' "$CHANGELOG_FILE" | sed '/[^[:space:]]/,$!d' | tac | sed '/[^[:space:]]/,$!d' | tac > release-notes.md
