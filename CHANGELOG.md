@@ -1,3 +1,9 @@
+## 3.13.1
+
+### Patch Changes
+
+- 2f66b28: Handle missing Rails middleware insertion targets with safe fallbacks.
+
 ## 3.13.0
 
 ### Minor Changes
