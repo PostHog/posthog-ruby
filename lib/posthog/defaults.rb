@@ -32,6 +32,7 @@ module PostHog
     module MessageBatch
       MAX_BYTES = 512_000 # 500Kb
       MAX_SIZE = 100
+      FLUSH_INTERVAL_SECONDS = 5.0 # seconds
     end
 
     module BackoffPolicy

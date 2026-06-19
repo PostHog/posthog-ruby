@@ -23,6 +23,7 @@ module PostHog
     # @param api_key [String] Project API key.
     # @param options [Hash] Worker options.
     # @option options [Integer] :batch_size How many items to send in a batch.
+    # @option options [Numeric] :flush_interval_seconds Maximum seconds to wait for a batch to fill before sending.
     # @option options [Proc] :on_error Callback invoked as `on_error.call(status, error)`.
     # @option options [String] :host PostHog API host URL.
     # @option options [Boolean] :skip_ssl_verification Disable SSL certificate verification.
@@ -32,44 +33,74 @@ module PostHog
       @api_key = api_key
       @on_error = options[:on_error] || proc { |status, error| }
       batch_size = options[:batch_size] || Defaults::MessageBatch::MAX_SIZE
+      flush_interval_seconds = options[:flush_interval_seconds] || Defaults::MessageBatch::FLUSH_INTERVAL_SECONDS
+      @flush_interval_seconds = flush_interval_seconds.to_f
       @batch = MessageBatch.new(batch_size)
       @lock = Mutex.new
-      @shutdown_mutex = Mutex.new
+      @state_lock = Mutex.new
+      @condition = ConditionVariable.new
+      @flush_requested = false
       @shutdown = false
-      @transport = Transport.new api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification]
+      @pid = Process.pid
+      @transport_options = { api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification] }
+      @transport = Transport.new(@transport_options)
     end
 
     # Continuously runs the loop to check for new events.
     #
     # @return [void]
     def run
-      until shutdown?
-        return if @queue.empty?
+      ensure_current_process!
 
-        @lock.synchronize do
-          consume_message_from_queue! until @batch.full? || @queue.empty?
-        end
+      until shutdown?
+        wait_for_work
+        break if shutdown?
+        next if @queue.empty?
+
+        build_batch
 
         begin
-          unless @batch.empty?
-            res = @transport.send @api_key, @batch
-            handle_error(res.status, res.error) unless res.status == 200
-          end
+          send_batch unless @batch.empty?
         ensure
           @lock.synchronize { @batch.clear }
+          clear_flush_request_if_idle
         end
       end
     ensure
-      # Worker threads exit when the queue is drained and are restarted for the
-      # next burst of events. Close the persistent connection on each exit and
-      # let Transport reconnect lazily when a future worker sends another batch.
-      @transport.shutdown
+      shutdown_transport
+    end
+
+    # Request the worker to send any pending events without waiting for the
+    # configured flush interval. Used by Client#flush and shutdown paths.
+    #
+    # @return [void]
+    def request_flush
+      ensure_current_process!
+
+      @state_lock.synchronize do
+        @flush_requested = true
+        @condition.broadcast
+      end
+    end
+
+    # Wake the worker when producers enqueue new messages.
+    #
+    # @return [void]
+    def notify
+      ensure_current_process!
+
+      @state_lock.synchronize { @condition.signal }
     end
 
     # @return [void]
     def shutdown
-      @shutdown_mutex.synchronize { @shutdown = true }
-      @transport.shutdown
+      ensure_current_process!
+
+      @state_lock.synchronize do
+        @shutdown = true
+        @flush_requested = true
+        @condition.broadcast
+      end
     end
 
     # public: Check whether we have outstanding requests.
@@ -77,25 +108,108 @@ module PostHog
     # @return [Boolean] Whether the worker has outstanding requests.
     # TODO: Rename to `requesting?` in future version
     def is_requesting? # rubocop:disable Naming/PredicateName
+      ensure_current_process!
+
       @lock.synchronize { !@batch.empty? }
     end
 
     private
 
-    def shutdown?
-      @shutdown_mutex.synchronize { @shutdown }
+    def ensure_current_process!
+      return if @pid == Process.pid
+
+      @lock.synchronize { @batch.clear }
+      @state_lock.synchronize do
+        @pid = Process.pid
+        @shutdown = false
+        @flush_requested = false
+        @condition.broadcast
+      end
+      shutdown_transport
+      @transport = Transport.new(@transport_options)
+    end
+
+    def build_batch
+      deadline = monotonic_time + @flush_interval_seconds
+
+      loop do
+        @lock.synchronize do
+          consume_message_from_queue! until @batch.full? || @queue.empty?
+        end
+
+        break if @batch.full? || @batch.empty? || flush_requested?
+
+        remaining = deadline - monotonic_time
+        break unless remaining.positive?
+
+        wait_for_more_messages(remaining)
+      end
+    end
+
+    def send_batch
+      res = @transport.send @api_key, @batch
+      handle_error(res.status, res.error) unless res.status == 200
     end
 
     def consume_message_from_queue!
-      @batch << @queue.pop
+      @batch << @queue.pop(true)
+    rescue ThreadError
+      # Queue was emptied by another thread between #empty? and #pop.
     rescue MessageBatch::JSONGenerationError => e
       handle_error(-1, e.to_s)
+    end
+
+    def wait_for_work
+      @state_lock.synchronize do
+        while @queue.empty? && !@shutdown
+          clear_flush_request_without_lock
+          @condition.wait(@state_lock)
+        end
+      end
+    end
+
+    def wait_for_more_messages(timeout)
+      @state_lock.synchronize do
+        return if @flush_requested || @shutdown || !@queue.empty?
+
+        @condition.wait(@state_lock, timeout)
+      end
+    end
+
+    def flush_requested?
+      @state_lock.synchronize { @flush_requested }
+    end
+
+    def shutdown?
+      @state_lock.synchronize { @shutdown }
+    end
+
+    def clear_flush_request
+      @state_lock.synchronize { clear_flush_request_without_lock }
+    end
+
+    def clear_flush_request_if_idle
+      @state_lock.synchronize { clear_flush_request_without_lock if @queue.empty? }
+    end
+
+    def clear_flush_request_without_lock
+      @flush_requested = false
     end
 
     def handle_error(status, error)
       @on_error.call(status, error)
     rescue StandardError => e
       logger.error("Error in on_error callback: #{e.message}")
+    end
+
+    def shutdown_transport
+      @transport.shutdown
+    rescue StandardError => e
+      logger.error("Error shutting down transport: #{e.message}")
+    end
+
+    def monotonic_time
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
   end
 end
