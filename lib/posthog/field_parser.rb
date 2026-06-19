@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-require 'securerandom'
-
 require 'posthog/logging'
+require 'posthog/uuid'
 
 module PostHog
   # Converts public SDK method arguments into PostHog API event payloads.
@@ -196,7 +195,7 @@ module PostHog
         message_id = fields[:message_id]
         return message_id if message_id && valid_uuid_for_event_props?(message_id)
 
-        SecureRandom.uuid
+        PostHog::Uuid.v7
       end
 
       # @param [Object] uuid - the UUID to validate, user provided, so we don't know the type
