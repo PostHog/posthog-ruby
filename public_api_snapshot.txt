@@ -113,6 +113,8 @@ instance_method PostHog::Logging#logger()
 class_method PostHog::Logging.included(base)
 class_method PostHog::Logging.logger()
 class_method PostHog::Logging.logger=(arg0)
+module PostHog::Rails
+constant PostHog::Rails::VERSION: String
 class PostHog::RequiresServerEvaluation < StandardError
 class PostHog::SendFeatureFlagsOptions
 instance_method PostHog::SendFeatureFlagsOptions#group_properties()

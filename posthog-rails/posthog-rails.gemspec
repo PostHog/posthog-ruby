@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 require File.expand_path('../lib/posthog/version', __dir__)
+require File.expand_path('lib/posthog/rails/version', __dir__)
 
 Gem::Specification.new do |spec|
   spec.name = 'posthog-rails'
-  spec.version = PostHog::VERSION
+  spec.version = PostHog::Rails::VERSION
   spec.files = Dir.glob('lib/**/*')
   spec.require_paths = ['lib']
   spec.summary = 'PostHog integration for Rails'
@@ -18,6 +19,7 @@ Gem::Specification.new do |spec|
 
   # Rails dependency - support Rails 5.2+
   spec.add_dependency 'railties', '>= 5.2.0'
-  # Core PostHog SDK
-  spec.add_dependency 'posthog-ruby', "~> #{PostHog::VERSION.split('.')[0..1].join('.')}"
+  # Core PostHog SDK. Pin to the posthog-ruby version present when this gem is built
+  # so Rails releases intentionally declare the exact core SDK version they use.
+  spec.add_dependency 'posthog-ruby', "= #{PostHog::VERSION}"
 end

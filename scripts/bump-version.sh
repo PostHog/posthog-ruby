@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NEW_VERSION="${1:?usage: scripts/bump-version.sh <version>}"
-export NEW_VERSION
-
 ruby <<'RUBY'
-path = 'lib/posthog/version.rb'
-new_version = ENV.fetch('NEW_VERSION')
-contents = File.read(path)
-updated = contents.sub(/VERSION = '[^']+'/, "VERSION = '#{new_version}'")
-raise 'Could not find VERSION constant in lib/posthog/version.rb' if updated == contents
-File.write(path, updated)
+require 'json'
+
+updates = {
+  'lib/posthog/version.rb' => JSON.parse(File.read('posthog-ruby/package.json')).fetch('version'),
+  'posthog-rails/lib/posthog/rails/version.rb' => JSON.parse(File.read('posthog-rails/package.json')).fetch('version')
+}
+
+updates.each do |path, version|
+  contents = File.read(path)
+  unless contents.match?(/VERSION = '[^']+'/)
+    raise "Could not find VERSION constant in #{path}"
+  end
+
+  updated = contents.sub(/VERSION = '[^']+'/, "VERSION = '#{version}'")
+  File.write(path, updated)
+end
 RUBY

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'posthog/rails/version'
 require 'posthog/rails/configuration'
 require 'posthog/rails/tracing_headers'
 require 'posthog/rails/request_metadata'
@@ -17,8 +18,6 @@ require 'posthog/rails/railtie'
 
 module PostHog
   module Rails
-    VERSION = PostHog::VERSION
-
     # Thread-local key for tracking web request context
     IN_WEB_REQUEST_KEY = :posthog_in_web_request
 
