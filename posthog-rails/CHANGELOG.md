@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.14.1
+
+### Patch Changes
+
+- 8008d60: Test separate package release workflow.
+
 > Historical entries before the changelog split are copied from the shared repository changelog and may include changes that primarily affected `posthog-ruby`. New entries are package-specific.
 
 ## 3.14.0
