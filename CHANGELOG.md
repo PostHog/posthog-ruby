@@ -1,3 +1,9 @@
+## 3.14.0
+
+### Minor Changes
+
+- 6a39951: Add configurable flush interval for async event batching.
+
 ## 3.13.1
 
 ### Patch Changes
