@@ -7,10 +7,13 @@ module PostHog
   #
   # @api private
   module Uuid
+    NATIVE_UUID_V7 = SecureRandom.respond_to?(:uuid_v7)
+    private_constant :NATIVE_UUID_V7
+
     module_function
 
     def v7
-      return SecureRandom.uuid_v7 if SecureRandom.respond_to?(:uuid_v7)
+      return SecureRandom.uuid_v7 if NATIVE_UUID_V7
 
       bytes = uuid_v7_bytes
       hex = bytes.pack('C*').unpack1('H*')
