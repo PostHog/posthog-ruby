@@ -14,7 +14,7 @@ gem 'irb'
 group :development, :test do
   gem 'activesupport', '~> 7.1'
   gem 'commander', '~> 5.0'
-  gem 'oj', '~> 3.16.10'
+  gem 'oj', '~> 3.17.3'
   gem 'prettier'
   gem 'railties', '~> 7.1'
   gem 'rake', '~> 13.2.1'
