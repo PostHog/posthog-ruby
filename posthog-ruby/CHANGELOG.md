@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.14.2
+
+### Patch Changes
+
+- 45996be: Clear the feature flag call dedupe cache on shutdown.
+
 ## 3.14.1
 
 ### Patch Changes
