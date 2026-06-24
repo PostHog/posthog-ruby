@@ -1309,7 +1309,7 @@ module PostHog
              Net::HTTPBadResponse,
              Net::HTTPHeaderSyntaxError,
              Net::ProtocolError
-        logger.debug("Unable to complete request to #{uri}")
+        logger.debug("Unable to complete request to #{_mask_tokens_in_url(uri.to_s)}")
         raise
       end
     end
