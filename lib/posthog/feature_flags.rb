@@ -1303,7 +1303,7 @@ module PostHog
           sleep(interval)
           retry
         end
-        logger.debug("Unable to complete request to #{uri}")
+        logger.debug("Unable to complete request to #{_mask_tokens_in_url(uri.to_s)}")
         raise
       rescue Errno::EINVAL,
              Net::HTTPBadResponse,
