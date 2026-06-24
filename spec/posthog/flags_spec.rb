@@ -230,6 +230,43 @@ module PostHog
       expect { poller.get_flags('test-distinct-id') }.to raise_error(Timeout::Error)
     end
 
+    context 'retrying transient network errors' do
+      let(:flags_response) { { featureFlags: { 'my-flag' => true }, featureFlagPayloads: {} } }
+
+      before do
+        # Avoid real backoff sleeps in tests.
+        allow(poller).to receive(:sleep)
+      end
+
+      it 'retries once and succeeds after a transient Net::ReadTimeout' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Net::ReadTimeout).then
+          .to_return(status: 200, body: flags_response.to_json)
+
+        result = poller.get_flags('test-distinct-id')
+
+        expect(result[:status]).to eq(200)
+        expect(result[:featureFlags]).to eq({ 'my-flag': true })
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(2)
+      end
+
+      it 'retries on Errno::ECONNRESET then re-raises once retries are exhausted' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Errno::ECONNRESET)
+
+        expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNRESET)
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(2)
+      end
+
+      it 'does not retry on a connection refused error' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Errno::ECONNREFUSED)
+
+        expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNREFUSED)
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+      end
+    end
+
     it 'handles quota limited responses v3' do
       quota_limited_response = {
         flags: {},

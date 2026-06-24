@@ -5,6 +5,8 @@ require 'net/http'
 require 'json'
 require 'posthog/version'
 require 'posthog/logging'
+require 'posthog/defaults'
+require 'posthog/backoff_policy'
 require 'posthog/feature_flag'
 require 'posthog/flag_definition_cache'
 require 'digest'
@@ -1240,12 +1242,26 @@ module PostHog
       _request(uri, req, @feature_flag_request_timeout_seconds)
     end
 
-    # rubocop:disable Lint/ShadowedException
+    # Transient network errors that are safe to retry. Flag requests are
+    # retry-safe (stateless reads and evaluations, no server-side mutation), so
+    # a one-off blip (TCP retransmit, TLS jitter, an edge/proxy hiccup) should
+    # be absorbed by a retry rather than surfaced to the caller.
+    RETRYABLE_REQUEST_ERRORS = [
+      Timeout::Error, # includes Net::OpenTimeout
+      Errno::ECONNRESET,
+      EOFError,
+      Net::ReadTimeout,
+      Net::WriteTimeout
+    ].freeze
+
     def _request(uri, request_object, timeout = nil, include_etag: false)
       request_object['User-Agent'] = "posthog-ruby/#{PostHog::VERSION}"
       request_timeout = timeout || 10
+      backoff_policy = nil
+      attempts = 0
 
       begin
+        attempts += 1
         Net::HTTP.start(
           uri.hostname,
           uri.port,
@@ -1279,20 +1295,24 @@ module PostHog
             return error_response
           end
         end
-      rescue Timeout::Error,
-             Errno::EINVAL,
-             Errno::ECONNRESET,
-             EOFError,
+      rescue *RETRYABLE_REQUEST_ERRORS => e
+        if attempts <= Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES
+          backoff_policy ||= BackoffPolicy.new
+          interval = backoff_policy.next_interval.to_f / 1000
+          logger.debug("Retrying request to #{_mask_tokens_in_url(uri.to_s)} after #{e.class} (attempt #{attempts})")
+          sleep(interval)
+          retry
+        end
+        logger.debug("Unable to complete request to #{uri}")
+        raise
+      rescue Errno::EINVAL,
              Net::HTTPBadResponse,
              Net::HTTPHeaderSyntaxError,
-             Net::ReadTimeout,
-             Net::WriteTimeout,
              Net::ProtocolError
         logger.debug("Unable to complete request to #{uri}")
         raise
       end
     end
-    # rubocop:enable Lint/ShadowedException
 
     def _mask_tokens_in_url(url)
       url.gsub(/token=([^&]{10})[^&]*/, 'token=\1...')
