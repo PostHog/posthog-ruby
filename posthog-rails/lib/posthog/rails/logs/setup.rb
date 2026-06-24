@@ -184,6 +184,11 @@ module PostHog
             # The posthog-rails name/version travel with each record via the
             # instrumentation scope (see LoggerProvider#logger above).
             {
+              # Identifies these records as the PostHog Ruby SDK so PostHog's usage
+              # report can attribute log volume to Ruby (mirrors posthog-ios/android/
+              # flutter/react-native). Overrides the OpenTelemetry SDK default of
+              # 'opentelemetry'; the posthog-rails integration name stays on the scope.
+              'telemetry.sdk.name' => 'posthog-ruby',
               'service.name' => service_name,
               'deployment.environment' => ::Rails.env.to_s
             }

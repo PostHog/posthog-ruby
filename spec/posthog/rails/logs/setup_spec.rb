@@ -72,6 +72,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
 
     context 'when the OpenTelemetry gems are available' do
       let(:exporter_args) { {} }
+      let(:resource_attrs) { {} }
       let(:otel_logger) { double('otel_logger') }
       let(:provider) { double('provider', add_log_record_processor: nil, logger: otel_logger) }
 
@@ -82,8 +83,12 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         resource_class.define_singleton_method(:create) { |attrs| attrs }
 
         provider_double = provider
+        captured_resource = resource_attrs
         provider_class = Class.new
-        provider_class.define_singleton_method(:new) { |**| provider_double }
+        provider_class.define_singleton_method(:new) do |**kwargs|
+          captured_resource.merge!(kwargs[:resource] || {})
+          provider_double
+        end
 
         captured = exporter_args
         exporter_class = Class.new
@@ -109,6 +114,14 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         expect(appender).to be_a(PostHog::Rails::Logs::Appender)
         expect(exporter_args[:endpoint]).to eq('https://us.i.posthog.com/i/v1/logs')
         expect(exporter_args[:headers]).to eq('Authorization' => 'Bearer phc_token')
+      end
+
+      it 'stamps telemetry.sdk.name so PostHog attributes the records to the Ruby SDK' do
+        described_class.remember_client_options(api_key: 'phc_token', host: 'https://us.i.posthog.com')
+
+        described_class.install
+
+        expect(resource_attrs['telemetry.sdk.name']).to eq('posthog-ruby')
       end
 
       it 'supports string-keyed init options and strips a trailing slash from the host' do
