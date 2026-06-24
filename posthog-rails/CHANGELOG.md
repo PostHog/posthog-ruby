@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.14.3
+
+### Patch Changes
+
+- 9300bdf: Stamp `telemetry.sdk.name = "posthog-ruby"` on forwarded logs so PostHog can attribute log volume to the Ruby SDK. Previously these records carried the OpenTelemetry SDK default (`opentelemetry`), so they could not be split out per-SDK the way the mobile SDKs are.
+
 ## 3.14.2
 
 ### Patch Changes
