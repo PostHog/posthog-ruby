@@ -1534,6 +1534,14 @@ module PostHog
     end
 
     describe '#shutdown' do
+      it 'clears feature flag call dedupe cache' do
+        client.instance_variable_get(:@distinct_id_has_sent_flag_calls)['user'] = ['flag_true']
+
+        client.shutdown
+
+        expect(client.instance_variable_get(:@distinct_id_has_sent_flag_calls).length).to eq(0)
+      end
+
       it 'is idempotent and stops accepting new events' do
         worker = instance_spy(PostHog::NoopWorker, is_requesting?: false)
         client.instance_variable_set(:@worker, worker)

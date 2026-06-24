@@ -790,6 +790,9 @@ module PostHog
         @worker&.shutdown
         @worker_thread&.join(1)
       end
+      @distinct_id_has_sent_flag_calls_mutex.synchronize do
+        @distinct_id_has_sent_flag_calls.clear
+      end
     end
 
     private
