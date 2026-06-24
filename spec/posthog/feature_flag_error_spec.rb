@@ -145,6 +145,8 @@ module PostHog
 
       context 'when request fails completely' do
         it 'adds timeout error to $feature_flag_called event on timeout' do
+          # A timeout is retryable now, so stub sleep to avoid real backoff delay.
+          allow_any_instance_of(PostHog::FeatureFlagsPoller).to receive(:sleep)
           stub_request(:post, flags_endpoint)
             .to_timeout
 

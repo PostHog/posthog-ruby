@@ -1247,11 +1247,9 @@ module PostHog
     # a one-off blip (TCP retransmit, TLS jitter, an edge/proxy hiccup) should
     # be absorbed by a retry rather than surfaced to the caller.
     RETRYABLE_REQUEST_ERRORS = [
-      Timeout::Error, # includes Net::OpenTimeout
+      Timeout::Error, # covers Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout
       Errno::ECONNRESET,
-      EOFError,
-      Net::ReadTimeout,
-      Net::WriteTimeout
+      EOFError
     ].freeze
 
     def _request(uri, request_object, timeout = nil, include_etag: false)

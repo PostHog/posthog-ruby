@@ -224,6 +224,8 @@ module PostHog
     end
 
     it 'handles network timeouts' do
+      # A timeout is retryable now, so stub sleep to avoid real backoff delay.
+      allow(poller).to receive(:sleep)
       stub_request(:post, flags_endpoint)
         .to_timeout
 
@@ -248,6 +250,7 @@ module PostHog
         expect(result[:status]).to eq(200)
         expect(result[:featureFlags]).to eq({ 'my-flag': true })
         expect(a_request(:post, flags_endpoint)).to have_been_made.times(2)
+        expect(poller).to have_received(:sleep).once
       end
 
       it 'retries on Errno::ECONNRESET then re-raises once retries are exhausted' do
@@ -263,6 +266,14 @@ module PostHog
           .to_raise(Errno::ECONNREFUSED)
 
         expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNREFUSED)
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+      end
+
+      it 'does not retry on a non-retryable network error' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Net::HTTPBadResponse)
+
+        expect { poller.get_flags('test-distinct-id') }.to raise_error(Net::HTTPBadResponse)
         expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
       end
     end
