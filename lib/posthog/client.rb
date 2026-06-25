@@ -2,7 +2,6 @@
 
 require 'time'
 require 'json'
-require 'securerandom'
 
 require 'posthog/defaults'
 require 'posthog/logging'
@@ -16,6 +15,7 @@ require 'posthog/feature_flag_evaluations'
 require 'posthog/send_feature_flags_options'
 require 'posthog/exception_capture'
 require 'posthog/internal/context'
+require 'posthog/uuid'
 
 module PostHog
   class Client
@@ -813,7 +813,7 @@ module PostHog
         return
       end
 
-      attrs[:distinct_id] = SecureRandom.uuid
+      attrs[:distinct_id] = PostHog::Uuid.v7
       return unless properties_are_hash
       return if property_key?(explicit_properties, '$process_person_profile')
 
