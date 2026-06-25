@@ -276,6 +276,42 @@ module PostHog
         expect { poller.get_flags('test-distinct-id') }.to raise_error(Net::HTTPBadResponse)
         expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
       end
+
+      context 'when feature_flag_request_max_retries is configured' do
+        let(:client) do
+          Client.new(
+            api_key: API_KEY,
+            personal_api_key: API_KEY,
+            test_mode: true,
+            feature_flag_request_max_retries: max_retries
+          )
+        end
+
+        context 'set to 0 (opt out)' do
+          let(:max_retries) { 0 }
+
+          it 'does not retry and re-raises the transient error immediately' do
+            stub_request(:post, flags_endpoint)
+              .to_raise(Net::ReadTimeout)
+
+            expect { poller.get_flags('test-distinct-id') }.to raise_error(Net::ReadTimeout)
+            expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+            expect(poller).not_to have_received(:sleep)
+          end
+        end
+
+        context 'set to a higher count' do
+          let(:max_retries) { 3 }
+
+          it 'retries up to the configured number of times before re-raising' do
+            stub_request(:post, flags_endpoint)
+              .to_raise(Errno::ECONNRESET)
+
+            expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNRESET)
+            expect(a_request(:post, flags_endpoint)).to have_been_made.times(4)
+          end
+        end
+      end
     end
 
     it 'handles quota limited responses v3' do

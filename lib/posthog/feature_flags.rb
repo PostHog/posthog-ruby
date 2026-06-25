@@ -36,6 +36,8 @@ module PostHog
     # @param feature_flag_request_timeout_seconds [Integer] Timeout for feature flag requests.
     # @param on_error [Proc, nil] Callback invoked as `on_error.call(status, error)`.
     # @param flag_definition_cache_provider [Object, nil] Optional {FlagDefinitionCacheProvider} implementation.
+    # @param feature_flag_request_max_retries [Integer, nil] Retries after a transient network error on a flag
+    #   request. Defaults to {Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES}. Set to 0 to disable retrying.
     def initialize(
       polling_interval,
       personal_api_key,
@@ -43,7 +45,8 @@ module PostHog
       host,
       feature_flag_request_timeout_seconds,
       on_error = nil,
-      flag_definition_cache_provider: nil
+      flag_definition_cache_provider: nil,
+      feature_flag_request_max_retries: nil
     )
       @polling_interval = polling_interval || 30
       @personal_api_key = personal_api_key
@@ -55,6 +58,8 @@ module PostHog
       @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
       @feature_flags_by_key = nil
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
+      @feature_flag_request_max_retries =
+        feature_flag_request_max_retries || Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @flags_etag = Concurrent::AtomicReference.new(nil)
@@ -1294,7 +1299,7 @@ module PostHog
           end
         end
       rescue *RETRYABLE_REQUEST_ERRORS => e
-        if attempts <= Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES
+        if attempts <= @feature_flag_request_max_retries
           backoff_policy ||= BackoffPolicy.new
           interval = backoff_policy.next_interval.to_f / 1000
           logger.debug("Retrying request to #{_mask_tokens_in_url(uri.to_s)} after #{e.class} (attempt #{attempts})")
