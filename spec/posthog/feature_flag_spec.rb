@@ -616,20 +616,23 @@ module PostHog
         .to_raise(Net::ReadTimeout)
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+      # Transient timeouts are retried, so each `/flags` call makes one extra
+      # request. Avoid real backoff sleeps in the test.
+      allow_any_instance_of(PostHog::FeatureFlagsPoller).to receive(:sleep)
 
-      # beta-feature falls back to `/flags`, which on error returns default
+      # beta-feature falls back to `/flags`, which on error (after a retry) returns default
       expect(c.get_feature_flag('beta-feature', 'some-distinct-id')).to be(nil)
-      assert_requested :post, flags_endpoint, times: 1
-      WebMock.reset_executed_requests!
-
-      # beta-feature2 falls back to `/flags`, which on error returns default
-      expect(c.get_feature_flag('beta-feature2', 'some-distinct-id')).to be(nil)
-      expect(c.is_feature_enabled('beta-feature2', 'some-distinct-id')).to be(nil)
       assert_requested :post, flags_endpoint, times: 2
       WebMock.reset_executed_requests!
 
+      # beta-feature2 falls back to `/flags`, which on error (after a retry) returns default
+      expect(c.get_feature_flag('beta-feature2', 'some-distinct-id')).to be(nil)
+      expect(c.is_feature_enabled('beta-feature2', 'some-distinct-id')).to be(nil)
+      assert_requested :post, flags_endpoint, times: 4
+      WebMock.reset_executed_requests!
+
       expect(c.get_all_flags('some-distinct-id')).to eq({})
-      assert_requested :post, flags_endpoint, times: 1
+      assert_requested :post, flags_endpoint, times: 2
       WebMock.reset_executed_requests!
     end
 

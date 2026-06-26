@@ -67,6 +67,9 @@ module PostHog
     #   in seconds. Defaults to 30.
     # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation,
     #   in seconds. Defaults to 3.
+    # @option opts [Integer] :feature_flag_request_max_retries How many times to retry a flag request after a
+    #   transient network error. Each retry sleeps on the calling thread before retrying, so this adds to
+    #   worst-case latency. Defaults to 1. Set to 0 to disable retrying.
     # @option opts [Proc] :before_send A callback that receives the event hash and should return either a modified
     #   hash to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`.
     # @option opts [Boolean] :disable_singleton_warning +true+ to suppress the warning when multiple clients share
@@ -140,7 +143,8 @@ module PostHog
             opts[:host],
             opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
             opts[:on_error],
-            flag_definition_cache_provider: opts[:flag_definition_cache_provider]
+            flag_definition_cache_provider: opts[:flag_definition_cache_provider],
+            feature_flag_request_max_retries: opts[:feature_flag_request_max_retries]
           )
       end
 

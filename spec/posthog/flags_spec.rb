@@ -224,10 +224,94 @@ module PostHog
     end
 
     it 'handles network timeouts' do
+      # A timeout is retryable now, so stub sleep to avoid real backoff delay.
+      allow(poller).to receive(:sleep)
       stub_request(:post, flags_endpoint)
         .to_timeout
 
       expect { poller.get_flags('test-distinct-id') }.to raise_error(Timeout::Error)
+    end
+
+    context 'retrying transient network errors' do
+      let(:flags_response) { { featureFlags: { 'my-flag' => true }, featureFlagPayloads: {} } }
+
+      before do
+        # Avoid real backoff sleeps in tests.
+        allow(poller).to receive(:sleep)
+      end
+
+      it 'retries once and succeeds after a transient Net::ReadTimeout' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Net::ReadTimeout).then
+          .to_return(status: 200, body: flags_response.to_json)
+
+        result = poller.get_flags('test-distinct-id')
+
+        expect(result[:status]).to eq(200)
+        expect(result[:featureFlags]).to eq({ 'my-flag': true })
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(2)
+        expect(poller).to have_received(:sleep).once
+      end
+
+      it 'retries on Errno::ECONNRESET then re-raises once retries are exhausted' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Errno::ECONNRESET)
+
+        expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNRESET)
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(2)
+      end
+
+      it 'does not retry on a connection refused error' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Errno::ECONNREFUSED)
+
+        expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNREFUSED)
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+      end
+
+      it 'does not retry on a non-retryable network error' do
+        stub_request(:post, flags_endpoint)
+          .to_raise(Net::HTTPBadResponse)
+
+        expect { poller.get_flags('test-distinct-id') }.to raise_error(Net::HTTPBadResponse)
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+      end
+
+      context 'when feature_flag_request_max_retries is configured' do
+        let(:client) do
+          Client.new(
+            api_key: API_KEY,
+            personal_api_key: API_KEY,
+            test_mode: true,
+            feature_flag_request_max_retries: max_retries
+          )
+        end
+
+        context 'set to 0 (opt out)' do
+          let(:max_retries) { 0 }
+
+          it 'does not retry and re-raises the transient error immediately' do
+            stub_request(:post, flags_endpoint)
+              .to_raise(Net::ReadTimeout)
+
+            expect { poller.get_flags('test-distinct-id') }.to raise_error(Net::ReadTimeout)
+            expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+            expect(poller).not_to have_received(:sleep)
+          end
+        end
+
+        context 'set to a higher count' do
+          let(:max_retries) { 3 }
+
+          it 'retries up to the configured number of times before re-raising' do
+            stub_request(:post, flags_endpoint)
+              .to_raise(Errno::ECONNRESET)
+
+            expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNRESET)
+            expect(a_request(:post, flags_endpoint)).to have_been_made.times(4)
+          end
+        end
+      end
     end
 
     it 'handles quota limited responses v3' do

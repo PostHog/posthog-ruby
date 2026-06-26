@@ -5,6 +5,8 @@ require 'net/http'
 require 'json'
 require 'posthog/version'
 require 'posthog/logging'
+require 'posthog/defaults'
+require 'posthog/backoff_policy'
 require 'posthog/feature_flag'
 require 'posthog/flag_definition_cache'
 require 'digest'
@@ -34,6 +36,8 @@ module PostHog
     # @param feature_flag_request_timeout_seconds [Integer] Timeout for feature flag requests.
     # @param on_error [Proc, nil] Callback invoked as `on_error.call(status, error)`.
     # @param flag_definition_cache_provider [Object, nil] Optional {FlagDefinitionCacheProvider} implementation.
+    # @param feature_flag_request_max_retries [Integer, nil] Retries after a transient network error on a flag
+    #   request. Defaults to {Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES}. Set to 0 to disable retrying.
     def initialize(
       polling_interval,
       personal_api_key,
@@ -41,7 +45,8 @@ module PostHog
       host,
       feature_flag_request_timeout_seconds,
       on_error = nil,
-      flag_definition_cache_provider: nil
+      flag_definition_cache_provider: nil,
+      feature_flag_request_max_retries: nil
     )
       @polling_interval = polling_interval || 30
       @personal_api_key = personal_api_key
@@ -53,6 +58,8 @@ module PostHog
       @loaded_flags_successfully_once = Concurrent::AtomicBoolean.new
       @feature_flags_by_key = nil
       @feature_flag_request_timeout_seconds = feature_flag_request_timeout_seconds
+      @feature_flag_request_max_retries =
+        feature_flag_request_max_retries || Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @flags_etag = Concurrent::AtomicReference.new(nil)
@@ -1240,12 +1247,24 @@ module PostHog
       _request(uri, req, @feature_flag_request_timeout_seconds)
     end
 
-    # rubocop:disable Lint/ShadowedException
+    # Transient network errors that are safe to retry. Flag requests are
+    # retry-safe (stateless reads and evaluations, no server-side mutation), so
+    # a one-off blip (TCP retransmit, TLS jitter, an edge/proxy hiccup) should
+    # be absorbed by a retry rather than surfaced to the caller.
+    RETRYABLE_REQUEST_ERRORS = [
+      Timeout::Error, # covers Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout
+      Errno::ECONNRESET,
+      EOFError
+    ].freeze
+
     def _request(uri, request_object, timeout = nil, include_etag: false)
       request_object['User-Agent'] = "posthog-ruby/#{PostHog::VERSION}"
       request_timeout = timeout || 10
+      backoff_policy = nil
+      attempts = 0
 
       begin
+        attempts += 1
         Net::HTTP.start(
           uri.hostname,
           uri.port,
@@ -1279,20 +1298,24 @@ module PostHog
             return error_response
           end
         end
-      rescue Timeout::Error,
-             Errno::EINVAL,
-             Errno::ECONNRESET,
-             EOFError,
+      rescue *RETRYABLE_REQUEST_ERRORS => e
+        if attempts <= @feature_flag_request_max_retries
+          backoff_policy ||= BackoffPolicy.new
+          interval = backoff_policy.next_interval.to_f / 1000
+          logger.debug("Retrying request to #{_mask_tokens_in_url(uri.to_s)} after #{e.class} (attempt #{attempts})")
+          sleep(interval)
+          retry
+        end
+        logger.debug("Unable to complete request to #{_mask_tokens_in_url(uri.to_s)}")
+        raise
+      rescue Errno::EINVAL,
              Net::HTTPBadResponse,
              Net::HTTPHeaderSyntaxError,
-             Net::ReadTimeout,
-             Net::WriteTimeout,
              Net::ProtocolError
-        logger.debug("Unable to complete request to #{uri}")
+        logger.debug("Unable to complete request to #{_mask_tokens_in_url(uri.to_s)}")
         raise
       end
     end
-    # rubocop:enable Lint/ShadowedException
 
     def _mask_tokens_in_url(url)
       url.gsub(/token=([^&]{10})[^&]*/, 'token=\1...')

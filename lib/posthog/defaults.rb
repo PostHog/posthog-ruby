@@ -19,6 +19,10 @@ module PostHog
 
     module FeatureFlags
       FLAG_REQUEST_TIMEOUT_SECONDS = 3
+      # Number of retries for a flag request after a transient network error.
+      # Flag requests are stateless and cause no server-side mutation, so
+      # retrying is safe.
+      FLAG_REQUEST_MAX_RETRIES = 1
     end
 
     module Queue
