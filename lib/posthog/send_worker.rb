@@ -43,6 +43,8 @@ module PostHog
       @shutdown = false
       @pid = Process.pid
       @transport_options = { api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification] }
+      @transport_options[:retries] = options[:max_retries].to_i + 1 if options.key?(:max_retries)
+      @transport_options[:gzip] = true if options[:enable_compression] == true
       @transport = Transport.new(@transport_options)
     end
 
