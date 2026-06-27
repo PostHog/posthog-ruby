@@ -33,6 +33,20 @@ module PostHog
 
         expect(worker.instance_variable_get(:@flush_interval_seconds)).to eq(5.0)
       end
+
+      it 'passes max_retries to the transport as total attempts' do
+        queue = Queue.new
+        worker = described_class.new(queue, 'secret', max_retries: 2)
+
+        expect(worker.instance_variable_get(:@transport_options)[:retries]).to eq(3)
+      end
+
+      it 'passes compression to the transport when enabled' do
+        queue = Queue.new
+        worker = described_class.new(queue, 'secret', enable_compression: true)
+
+        expect(worker.instance_variable_get(:@transport_options)[:gzip]).to eq(true)
+      end
     end
 
     describe '#run' do
