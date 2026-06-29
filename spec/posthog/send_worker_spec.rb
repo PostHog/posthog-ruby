@@ -34,18 +34,46 @@ module PostHog
         expect(worker.instance_variable_get(:@flush_interval_seconds)).to eq(5.0)
       end
 
-      it 'passes max_retries to the transport as total attempts' do
-        queue = Queue.new
-        worker = described_class.new(queue, 'secret', max_retries: 2)
+      [
+        {
+          description: 'passes max_retries: 0 to the transport as one total attempt',
+          options: { max_retries: 0 },
+          expected_options: { retries: 1 }
+        },
+        {
+          description: 'passes max_retries to the transport as total attempts',
+          options: { max_retries: 2 },
+          expected_options: { retries: 3 }
+        },
+        {
+          description: 'passes compression to the transport when enabled',
+          options: { enable_compression: true },
+          expected_options: { gzip: true }
+        },
+        {
+          description: 'leaves compression unset when disabled',
+          options: { enable_compression: false },
+          absent_options: [:gzip]
+        },
+        {
+          description: 'leaves compression unset when nil',
+          options: { enable_compression: nil },
+          absent_options: [:gzip]
+        }
+      ].each do |configuration|
+        it configuration[:description] do
+          queue = Queue.new
+          worker = described_class.new(queue, 'secret', configuration[:options])
+          transport_options = worker.instance_variable_get(:@transport_options)
 
-        expect(worker.instance_variable_get(:@transport_options)[:retries]).to eq(3)
-      end
+          configuration.fetch(:expected_options, {}).each do |key, value|
+            expect(transport_options[key]).to eq(value)
+          end
 
-      it 'passes compression to the transport when enabled' do
-        queue = Queue.new
-        worker = described_class.new(queue, 'secret', enable_compression: true)
-
-        expect(worker.instance_variable_get(:@transport_options)[:gzip]).to eq(true)
+          configuration.fetch(:absent_options, []).each do |key|
+            expect(transport_options).not_to have_key(key)
+          end
+        end
       end
     end
 

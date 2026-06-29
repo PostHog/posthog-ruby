@@ -155,7 +155,7 @@ module PostHog
       return nil if value.nil? || value.empty?
 
       seconds = Float(value, exception: false)
-      return seconds if seconds&.positive?
+      return seconds if seconds && seconds >= 0
 
       parsed_time = Time.httpdate(value)
       delay = parsed_time - Time.now
@@ -172,6 +172,7 @@ module PostHog
 
     # Sends a request for the batch, returns [status_code, body]
     def send_request(api_key, batch)
+      @last_retry_after = nil
       payload = JSON.generate(api_key: api_key, batch: batch)
 
       request = Net::HTTP::Post.new(@path, @headers)
