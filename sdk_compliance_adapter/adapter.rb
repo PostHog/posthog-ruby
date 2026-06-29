@@ -261,7 +261,7 @@ class ComplianceServer
       disable_singleton_warning: true
     }
     options[:max_retries] = data['max_retries'] if data.key?('max_retries')
-    options[:enable_compression] = true if data['enable_compression'] == true
+    options[:compress_request] = data['enable_compression'] unless data['enable_compression'].nil?
 
     SDKComplianceAdapter.state.client = PostHog::Client.new(options)
     [200, { success: true }]

@@ -8,7 +8,6 @@ require 'posthog/backoff_policy'
 require 'net/http'
 require 'net/https'
 require 'json'
-require 'stringio'
 require 'time'
 require 'zlib'
 
@@ -31,6 +30,7 @@ module PostHog
     # @option options [Integer] :retries Number of retry attempts for retryable failures.
     # @option options [PostHog::BackoffPolicy] :backoff_policy Backoff policy used between retries.
     # @option options [Boolean] :skip_ssl_verification Disable SSL certificate verification.
+    # @option options [Boolean] :compress_request Whether to gzip batch request bodies. Defaults to +true+.
     def initialize(options = {})
       if options[:api_host]
         uri = URI.parse(options[:api_host])
@@ -47,7 +47,7 @@ module PostHog
       @path = options[:path] || PATH
       @retries = options[:retries] || RETRIES
       @backoff_policy = options[:backoff_policy] || PostHog::BackoffPolicy.new
-      @gzip = options[:gzip] == true
+      @compress_request = options[:compress_request] != false
       @last_retry_after = nil
 
       http = Net::HTTP.new(options[:host], options[:port])
@@ -164,36 +164,45 @@ module PostHog
       nil
     end
 
-    def gzip(payload)
-      io = StringIO.new
-      Zlib::GzipWriter.wrap(io) { |gzip| gzip.write(payload) }
-      io.string
-    end
-
     # Sends a request for the batch, returns [status_code, body]
     def send_request(api_key, batch)
       @last_retry_after = nil
       payload = JSON.generate(api_key: api_key, batch: batch)
 
-      request = Net::HTTP::Post.new(@path, @headers)
-      if @gzip
-        payload = gzip(payload)
-        request['Content-Encoding'] = 'gzip'
-      end
+      request_path, request_headers, request_payload = build_request(@path, @headers, payload)
+      request = Net::HTTP::Post.new(request_path, request_headers)
 
       if self.class.stub
-        logger.debug "stubbed request to #{@path}: " \
+        logger.debug "stubbed request to #{request_path}: " \
                      "api key = #{api_key}, batch = #{JSON.generate(batch)}"
 
         [200, '{}']
       else
         @http_mutex.synchronize do
           @http.start unless @http.started? # Maintain a persistent connection
-          response = @http.request(request, payload)
+          response = @http.request(request, request_payload)
           @last_retry_after = response['Retry-After']
           [response.code.to_i, response.body]
         end
       end
+    end
+
+    def build_request(path, headers, payload)
+      return [path, headers, payload] unless @compress_request
+
+      compressed_payload = gzip_payload(payload)
+      return [path, headers, payload] unless compressed_payload
+
+      compressed_headers = headers.merge('Content-Encoding' => 'gzip')
+
+      [path, compressed_headers, compressed_payload]
+    end
+
+    def gzip_payload(payload)
+      Zlib.gzip(payload)
+    rescue Zlib::Error => e
+      logger.warn("gzip compression failed; sending uncompressed - #{e.message}")
+      nil
     end
 
     class << self

@@ -46,19 +46,14 @@ module PostHog
           expected_options: { retries: 3 }
         },
         {
-          description: 'passes compression to the transport when enabled',
-          options: { enable_compression: true },
-          expected_options: { gzip: true }
+          description: 'passes compress_request false to the transport',
+          options: { compress_request: false },
+          expected_options: { compress_request: false }
         },
         {
-          description: 'leaves compression unset when disabled',
-          options: { enable_compression: false },
-          absent_options: [:gzip]
-        },
-        {
-          description: 'leaves compression unset when nil',
-          options: { enable_compression: nil },
-          absent_options: [:gzip]
+          description: 'passes compress_request nil to the transport by default',
+          options: {},
+          expected_options: { compress_request: nil }
         }
       ].each do |configuration|
         it configuration[:description] do

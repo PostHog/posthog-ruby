@@ -69,7 +69,6 @@ module PostHog
     #   in seconds. Defaults to 3.
     # @option opts [Integer] :max_retries How many times to retry batch uploads after the first send attempt.
     #   Defaults to the transport default. Set to 0 to disable retrying.
-    # @option opts [Boolean] :enable_compression +true+ to gzip batch upload request bodies.
     # @option opts [Integer] :feature_flag_request_max_retries How many times to retry a flag request after a
     #   transient network error. Each retry sleeps on the calling thread before retrying, so this adds to
     #   worst-case latency. Defaults to 1. Set to 0 to disable retrying.
@@ -79,6 +78,7 @@ module PostHog
     #   the same API key. Use only when you intentionally need multiple clients. Defaults to +false+.
     # @option opts [Boolean] :skip_ssl_verification +true+ to disable SSL certificate verification for requests.
     #   Intended only for local development or custom deployments.
+    # @option opts [Boolean] :compress_request Set to +false+ to disable gzip compression for batch uploads.
     # @option opts [Object] :flag_definition_cache_provider An object implementing the {FlagDefinitionCacheProvider}
     #   interface for distributed flag definition caching.
     # @option opts [Boolean] :is_server +true+ to stamp captured events with `$is_server => true` so PostHog
@@ -113,7 +113,7 @@ module PostHog
           api_host: opts[:host],
           skip_ssl_verification: opts[:skip_ssl_verification],
           retries: opts.key?(:max_retries) ? opts[:max_retries].to_i + 1 : 3,
-          gzip: opts[:enable_compression] == true
+          compress_request: opts[:compress_request]
         )
         @sync_lock = Mutex.new
       end
