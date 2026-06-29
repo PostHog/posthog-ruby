@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.15.0
+
+### Minor Changes
+
+- ffc872d: Enable gzip compression for batch uploads by default.
+
 ## 3.14.4
 
 ### Patch Changes
