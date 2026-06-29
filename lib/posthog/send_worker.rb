@@ -27,6 +27,7 @@ module PostHog
     # @option options [Proc] :on_error Callback invoked as `on_error.call(status, error)`.
     # @option options [String] :host PostHog API host URL.
     # @option options [Boolean] :skip_ssl_verification Disable SSL certificate verification.
+    # @option options [Boolean] :compress_request Set to +false+ to disable gzip batch request bodies.
     def initialize(queue, api_key, options = {})
       symbolize_keys! options
       @queue = queue
@@ -42,7 +43,11 @@ module PostHog
       @flush_requested = false
       @shutdown = false
       @pid = Process.pid
-      @transport_options = { api_host: options[:host], skip_ssl_verification: options[:skip_ssl_verification] }
+      @transport_options = {
+        api_host: options[:host],
+        skip_ssl_verification: options[:skip_ssl_verification],
+        compress_request: options[:compress_request]
+      }
       @transport = Transport.new(@transport_options)
     end
 

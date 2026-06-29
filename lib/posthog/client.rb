@@ -76,6 +76,7 @@ module PostHog
     #   the same API key. Use only when you intentionally need multiple clients. Defaults to +false+.
     # @option opts [Boolean] :skip_ssl_verification +true+ to disable SSL certificate verification for requests.
     #   Intended only for local development or custom deployments.
+    # @option opts [Boolean] :compress_request Set to +false+ to disable gzip compression for batch uploads.
     # @option opts [Object] :flag_definition_cache_provider An object implementing the {FlagDefinitionCacheProvider}
     #   interface for distributed flag definition caching.
     # @option opts [Boolean] :is_server +true+ to stamp captured events with `$is_server => true` so PostHog
@@ -109,7 +110,8 @@ module PostHog
         @transport = Transport.new(
           api_host: opts[:host],
           skip_ssl_verification: opts[:skip_ssl_verification],
-          retries: 3
+          retries: 3,
+          compress_request: opts[:compress_request]
         )
         @sync_lock = Mutex.new
       end
