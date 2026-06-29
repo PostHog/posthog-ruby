@@ -307,6 +307,12 @@ module PostHog
         @base_options[:sync_mode] = value
       end
 
+      # @param value [Boolean]
+      # @return [Boolean]
+      def compress_request=(value)
+        @base_options[:compress_request] = value
+      end
+
       # @param value [Proc]
       # @return [Proc]
       def on_error=(value)

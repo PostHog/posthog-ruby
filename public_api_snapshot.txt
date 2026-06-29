@@ -184,6 +184,7 @@ constant PostHog::Rails::IN_WEB_REQUEST_KEY: Symbol
 class PostHog::Rails::InitConfig
 instance_method PostHog::Rails::InitConfig#api_key=(value)
 instance_method PostHog::Rails::InitConfig#before_send=(value)
+instance_method PostHog::Rails::InitConfig#compress_request=(value)
 instance_method PostHog::Rails::InitConfig#feature_flag_request_timeout_seconds=(value)
 instance_method PostHog::Rails::InitConfig#feature_flags_polling_interval=(value)
 instance_method PostHog::Rails::InitConfig#host=(value)
