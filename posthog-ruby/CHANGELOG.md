@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.15.1
+
+### Patch Changes
+
+- caa245a: Retry capture delivery on transient HTTP errors such as 408, 429, and 5xx while continuing to avoid retries for non-retryable 4xx responses.
+
 ## 3.15.0
 
 ### Minor Changes
