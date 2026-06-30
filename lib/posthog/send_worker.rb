@@ -48,6 +48,7 @@ module PostHog
         skip_ssl_verification: options[:skip_ssl_verification],
         compress_request: options[:compress_request]
       }
+      @transport_options[:retries] = options[:max_retries].to_i + 1 if options.key?(:max_retries)
       @transport = Transport.new(@transport_options)
     end
 

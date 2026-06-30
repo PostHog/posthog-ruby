@@ -33,6 +33,43 @@ module PostHog
 
         expect(worker.instance_variable_get(:@flush_interval_seconds)).to eq(5.0)
       end
+
+      [
+        {
+          description: 'passes max_retries: 0 to the transport as one total attempt',
+          options: { max_retries: 0 },
+          expected_options: { retries: 1 }
+        },
+        {
+          description: 'passes max_retries to the transport as total attempts',
+          options: { max_retries: 2 },
+          expected_options: { retries: 3 }
+        },
+        {
+          description: 'passes compress_request false to the transport',
+          options: { compress_request: false },
+          expected_options: { compress_request: false }
+        },
+        {
+          description: 'passes compress_request nil to the transport by default',
+          options: {},
+          expected_options: { compress_request: nil }
+        }
+      ].each do |configuration|
+        it configuration[:description] do
+          queue = Queue.new
+          worker = described_class.new(queue, 'secret', configuration[:options])
+          transport_options = worker.instance_variable_get(:@transport_options)
+
+          configuration.fetch(:expected_options, {}).each do |key, value|
+            expect(transport_options[key]).to eq(value)
+          end
+
+          configuration.fetch(:absent_options, []).each do |key|
+            expect(transport_options).not_to have_key(key)
+          end
+        end
+      end
     end
 
     describe '#run' do

@@ -67,6 +67,8 @@ module PostHog
     #   in seconds. Defaults to 30.
     # @option opts [Integer] :feature_flag_request_timeout_seconds How long to wait for feature flag evaluation,
     #   in seconds. Defaults to 3.
+    # @option opts [Integer] :max_retries How many times to retry batch uploads after the first send attempt.
+    #   Defaults to the transport default. Set to 0 to disable retrying.
     # @option opts [Integer] :feature_flag_request_max_retries How many times to retry a flag request after a
     #   transient network error. Each retry sleeps on the calling thread before retrying, so this adds to
     #   worst-case latency. Defaults to 1. Set to 0 to disable retrying.
@@ -110,7 +112,7 @@ module PostHog
         @transport = Transport.new(
           api_host: opts[:host],
           skip_ssl_verification: opts[:skip_ssl_verification],
-          retries: 3,
+          retries: opts.key?(:max_retries) ? opts[:max_retries].to_i + 1 : 3,
           compress_request: opts[:compress_request]
         )
         @sync_lock = Mutex.new

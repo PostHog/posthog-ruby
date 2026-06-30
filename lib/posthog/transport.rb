@@ -8,6 +8,7 @@ require 'posthog/backoff_policy'
 require 'net/http'
 require 'net/https'
 require 'json'
+require 'time'
 require 'zlib'
 
 module PostHog
@@ -42,11 +43,12 @@ module PostHog
       options[:port] = options[:port].nil? ? PORT : options[:port]
       options[:ssl] = options[:ssl].nil? ? SSL : options[:ssl]
 
-      @headers = options[:headers] || HEADERS
+      @headers = (options[:headers] || HEADERS).dup
       @path = options[:path] || PATH
       @retries = options[:retries] || RETRIES
       @backoff_policy = options[:backoff_policy] || PostHog::BackoffPolicy.new
       @compress_request = options[:compress_request] != false
+      @last_retry_after = nil
 
       http = Net::HTTP.new(options[:host], options[:port])
       http.use_ssl = options[:ssl]
@@ -103,10 +105,8 @@ module PostHog
     private
 
     def should_retry_request?(status_code, body)
-      if status_code >= 500
-        true # Server error
-      elsif status_code == 429 # rubocop:disable Lint/DuplicateBranch
-        true # Rate limited
+      if status_code >= 500 || [408, 429].include?(status_code)
+        true # Server error, request timeout, or rate limited
       elsif status_code >= 400
         logger.error(body)
         false # Client error. Do not retry, but log
@@ -136,15 +136,37 @@ module PostHog
 
       if should_retry && (retries_remaining > 1)
         logger.debug("Retrying request, #{retries_remaining} retries left")
-        sleep(@backoff_policy.next_interval.to_f / 1000)
+        sleep(retry_delay_seconds)
         retry_with_backoff(retries_remaining - 1, &block)
       else
         [result, caught_exception]
       end
     end
 
+    def retry_delay_seconds
+      retry_after = parse_retry_after(@last_retry_after)
+      @last_retry_after = nil
+      return retry_after if retry_after
+
+      @backoff_policy.next_interval.to_f / 1000
+    end
+
+    def parse_retry_after(value)
+      return nil if value.nil? || value.empty?
+
+      seconds = Float(value, exception: false)
+      return seconds if seconds && seconds >= 0
+
+      parsed_time = Time.httpdate(value)
+      delay = parsed_time - Time.now
+      delay.positive? ? delay : nil
+    rescue ArgumentError
+      nil
+    end
+
     # Sends a request for the batch, returns [status_code, body]
     def send_request(api_key, batch)
+      @last_retry_after = nil
       payload = JSON.generate(api_key: api_key, batch: batch)
 
       request_path, request_headers, request_payload = build_request(@path, @headers, payload)
@@ -159,6 +181,7 @@ module PostHog
         @http_mutex.synchronize do
           @http.start unless @http.started? # Maintain a persistent connection
           response = @http.request(request, request_payload)
+          @last_retry_after = response['Retry-After']
           [response.code.to_i, response.body]
         end
       end

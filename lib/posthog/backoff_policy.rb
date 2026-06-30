@@ -33,7 +33,7 @@ module PostHog
 
       @attempts += 1
 
-      [interval, @max_timeout_ms].min
+      interval.clamp(@min_timeout_ms, @max_timeout_ms)
     end
 
     private

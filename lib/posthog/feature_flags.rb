@@ -150,7 +150,7 @@ module PostHog
         group_properties: group_properties
       }
       request_data[:flag_keys_to_evaluate] = flag_keys if flag_keys && !flag_keys.empty?
-      request_data[:geoip_disable] = true if disable_geoip
+      request_data[:geoip_disable] = disable_geoip unless disable_geoip.nil?
 
       flags_response = _request_feature_flag_evaluation(request_data)
 

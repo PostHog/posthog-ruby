@@ -311,6 +311,52 @@ module PostHog
           it_behaves_like('non-retried request', 400, '{}')
         end
 
+        context 'a retryable response includes Retry-After' do
+          let(:status_code) { 429 }
+          let(:retries) { 2 }
+          let(:backoff_policy) { FakeBackoffPolicy.new([1000]) }
+
+          subject do
+            described_class.new(
+              retries: retries,
+              backoff_policy: backoff_policy
+            )
+          end
+
+          it 'honors Retry-After: 0 as an immediate retry' do
+            allow(response).to receive(:[]).with('Retry-After').and_return('0')
+            expect(subject).to receive(:sleep).once.with(0.0).and_return(nil)
+
+            subject.send(api_key, batch)
+          end
+
+          it 'does not reuse a stale Retry-After header after retries are exhausted' do
+            http = subject.instance_variable_get(:@http)
+            rate_limited_response = Net::HTTPResponse.new(http_version, 429, 'Too Many Requests')
+            allow(rate_limited_response).to receive(:body).and_return(response_body)
+            allow(rate_limited_response).to receive(:[]).with('Retry-After').and_return('123')
+
+            success_response = Net::HTTPResponse.new(http_version, 200, 'OK')
+            allow(success_response).to receive(:body).and_return(response_body)
+            allow(success_response).to receive(:[]).with('Retry-After').and_return(nil)
+
+            requests = [rate_limited_response, IOError.new('connection reset'), success_response]
+            allow(http).to receive(:request) do
+              next_request = requests.shift
+              raise next_request if next_request.is_a?(StandardError)
+
+              next_request
+            end
+
+            subject.instance_variable_set(:@retries, 1)
+            subject.send(api_key, batch)
+
+            subject.instance_variable_set(:@retries, 2)
+            expect(subject).to receive(:sleep).once.with(1).and_return(nil)
+            subject.send(api_key, batch)
+          end
+        end
+
         context 'response body is malformed JSON' do
           let(:response_body) { 'Malformed JSON ---' }
 
