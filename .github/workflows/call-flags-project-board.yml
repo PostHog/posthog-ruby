@@ -7,6 +7,8 @@ on:
     pull_request:
         types: [opened, ready_for_review, review_requested, synchronize, converted_to_draft, reopened]
 
+permissions: {}
+
 jobs:
     call-flags-project:
         # Dependabot and forked PRs cannot access the app credentials required by
