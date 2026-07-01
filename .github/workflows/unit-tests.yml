@@ -12,11 +12,139 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  classify-changes:
+    name: Classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      skip_heavy: ${{ steps.classify.outputs.skip_heavy }}
+    steps:
+      - name: Determine whether heavy CI can be skipped
+        id: classify
+        env:
+          API_URL: ${{ github.api_url }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          run_heavy() {
+            echo "skip_heavy=false" >> "$GITHUB_OUTPUT"
+            echo "$1"
+          }
+
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            run_heavy "Heavy CI will run for $EVENT_NAME events."
+            exit 0
+          fi
+
+          if [[ -z "${PR_NUMBER:-}" || -z "${GH_TOKEN:-}" ]]; then
+            run_heavy "Unable to determine pull request files; running heavy CI."
+            exit 0
+          fi
+
+          if ! command -v jq >/dev/null 2>&1; then
+            run_heavy "jq is not available; running heavy CI."
+            exit 0
+          fi
+
+          files_file="$(mktemp)"
+          page=1
+
+          while true; do
+            response_file="$(mktemp)"
+            http_status="$(curl --silent --show-error --location \
+              --write-out "%{http_code}" \
+              --output "$response_file" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$API_URL/repos/$REPO/pulls/$PR_NUMBER/files?per_page=100&page=$page" || true)"
+
+            if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+              run_heavy "GitHub API returned HTTP $http_status while listing PR files; running heavy CI."
+              exit 0
+            fi
+
+            if ! count="$(jq 'length' "$response_file")"; then
+              run_heavy "Unable to parse PR file list; running heavy CI."
+              exit 0
+            fi
+
+            if ! jq --raw-output '.[] | .filename, (.previous_filename // empty)' "$response_file" >> "$files_file"; then
+              run_heavy "Unable to read PR file names; running heavy CI."
+              exit 0
+            fi
+
+            if [[ "$count" -lt 100 ]]; then
+              break
+            fi
+
+            page=$((page + 1))
+            if [[ "$page" -gt 30 ]]; then
+              run_heavy "PR file list exceeded pagination safety limit; running heavy CI."
+              exit 0
+            fi
+          done
+
+          if [[ ! -s "$files_file" ]]; then
+            run_heavy "No changed files were returned; running heavy CI."
+            exit 0
+          fi
+
+          is_non_impacting() {
+            local file="$1"
+
+            if [[ -z "$file" ]]; then
+              return 1
+            fi
+
+            # Markdown files anywhere and docs tree changes are globally safe.
+            if [[ "$file" == *.md || "$file" == docs/* ]]; then
+              return 0
+            fi
+
+            # Repository metadata that does not affect source, tests, packages, or builds.
+            case "$file" in
+              CODEOWNERS|.github/CODEOWNERS|.github/dependabot.yml|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE/*|.github/pull_request_template.md)
+                return 0
+                ;;
+            esac
+
+            # Workflows that do not run current CI, build, test, lint, or package jobs.
+            case "$file" in
+              .github/workflows/release.yml|.github/workflows/release.yaml|.github/workflows/publish.yml|.github/workflows/publish.yaml|.github/workflows/stale.yml|.github/workflows/stale.yaml|.github/workflows/lint-pr.yml|.github/workflows/lint-pr.yaml|.github/workflows/call-flags-project-board.yml|.github/workflows/call-flags-project-board.yaml|.github/workflows/changeset-hygiene.yml|.github/workflows/changeset-hygiene.yaml|.github/workflows/dependabot-changeset.yml|.github/workflows/dependabot-changeset.yaml|.github/workflows/validate-versioning.yml|.github/workflows/validate-versioning.yaml|.github/workflows/new-pr.yml|.github/workflows/new-pr.yaml|.github/workflows/generated-files-notice.yml|.github/workflows/generated-files-notice.yaml|.github/workflows/posthog-upgrade.yml|.github/workflows/posthog-upgrade.yaml|.github/workflows/posthog-watcher-*.yml|.github/workflows/posthog-watcher-*.yaml)
+                return 0
+                ;;
+            esac
+
+            return 1
+          }
+
+          non_impacting=true
+          while IFS= read -r file; do
+            echo "Changed or previous file: $file"
+            if ! is_non_impacting "$file"; then
+              non_impacting=false
+            fi
+          done < "$files_file"
+
+          if [[ "$non_impacting" == "true" ]]; then
+            echo "skip_heavy=true" >> "$GITHUB_OUTPUT"
+            echo "Only globally safe metadata, documentation, or non-CI workflow files changed; heavy CI steps will be skipped."
+          else
+            run_heavy "At least one source, test, package, build, current CI, or unknown file changed; running heavy CI."
+          fi
+
   test:
     name: RSpec (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
+    needs: classify-changes
+    if: ${{ always() }}
     strategy:
       matrix:
         ruby-version: [3.2, 3.3, 3.4]
@@ -26,9 +154,15 @@ jobs:
       GH_ACTIONS_UNIT_TESTS: 1
 
     steps:
+      - name: Skip RSpec for non-impacting changes
+        if: ${{ needs.classify-changes.outputs.skip_heavy == 'true' }}
+        run: echo "Only globally safe metadata, documentation, or non-CI workflow files changed; RSpec is not required."
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
 
       - name: Use Ruby ${{ matrix.ruby-version }}
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
@@ -37,15 +171,24 @@ jobs:
           bundler-cache: true
 
       - name: Run RSpec tests
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         run: bundle exec rspec
 
   rubocop:
     name: RuboCop
     runs-on: ubuntu-latest
+    needs: classify-changes
+    if: ${{ always() }}
     steps:
+      - name: Skip RuboCop for non-impacting changes
+        if: ${{ needs.classify-changes.outputs.skip_heavy == 'true' }}
+        run: echo "Only globally safe metadata, documentation, or non-CI workflow files changed; RuboCop is not required."
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
 
       - name: Use Ruby 3.4
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: 3.4
@@ -53,15 +196,24 @@ jobs:
           bundler-cache: true
 
       - name: Run RuboCop
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         run: bundle exec rubocop
 
   public-api-snapshot:
     name: Public API snapshot
     runs-on: ubuntu-latest
+    needs: classify-changes
+    if: ${{ always() }}
     steps:
+      - name: Skip public API snapshot for non-impacting changes
+        if: ${{ needs.classify-changes.outputs.skip_heavy == 'true' }}
+        run: echo "Only globally safe metadata, documentation, or non-CI workflow files changed; public API snapshot check is not required."
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
 
       - name: Use Ruby 3.4
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: 3.4
@@ -69,15 +221,24 @@ jobs:
           bundler-cache: true
 
       - name: Check public API snapshot
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         run: bundle exec rake public_api:check
 
   gem-build:
     name: Gem build
     runs-on: ubuntu-latest
+    needs: classify-changes
+    if: ${{ always() }}
     steps:
+      - name: Skip gem build for non-impacting changes
+        if: ${{ needs.classify-changes.outputs.skip_heavy == 'true' }}
+        run: echo "Only globally safe metadata, documentation, or non-CI workflow files changed; gem build is not required."
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
 
       - name: Use Ruby 3.4
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: 3.4
@@ -85,8 +246,10 @@ jobs:
           bundler-cache: true
 
       - name: Build posthog-ruby gem
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         run: gem build posthog-ruby.gemspec
 
       - name: Build posthog-rails gem
+        if: ${{ needs.classify-changes.outputs.skip_heavy != 'true' }}
         run: gem build posthog-rails.gemspec
         working-directory: posthog-rails
