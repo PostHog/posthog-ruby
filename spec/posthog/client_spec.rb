@@ -4,6 +4,8 @@ require 'spec_helper'
 
 module PostHog
   flags_endpoint = 'https://us.i.posthog.com/flags/?v=2'
+  UUID_V7_REGEX =
+    /\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i
 
   RSpec::Support::ObjectFormatter.default_instance.max_formatted_output_length = nil
 
@@ -267,8 +269,7 @@ module PostHog
         client.capture(event: 'Event')
 
         message = client.dequeue_last_message
-        expect(message[:distinct_id]).to be_a(String)
-        expect(message[:distinct_id].length).to eq(36)
+        expect(message[:distinct_id]).to match(UUID_V7_REGEX)
         expect(message[:properties]['$process_person_profile']).to be false
       end
 
@@ -779,7 +780,7 @@ module PostHog
         )
 
         message = client.dequeue_last_message
-        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+        expect(message['uuid']).to match(UUID_V7_REGEX)
         expect(logger).to have_received(:warn).with(
           'UUID is not valid: i am also not a uuid. Ignoring it.'
         )
@@ -796,7 +797,7 @@ module PostHog
         )
 
         message = client.dequeue_last_message
-        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+        expect(message['uuid']).to match(UUID_V7_REGEX)
         expect(logger).not_to have_received(:warn)
       end
 
@@ -810,7 +811,7 @@ module PostHog
         )
 
         message = client.dequeue_last_message
-        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+        expect(message['uuid']).to match(UUID_V7_REGEX)
         expect(logger).to have_received(:warn).with(
           'UUID is not valid: i am obviously not a uuid. Ignoring it.'
         )
@@ -1076,7 +1077,7 @@ module PostHog
         )
 
         message = client.dequeue_last_message
-        expect(message['uuid']).to match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i)
+        expect(message['uuid']).to match(UUID_V7_REGEX)
         expect(logger).to have_received(:warn).with(
           'UUID is not a string. Ignoring it.'
         )
@@ -1809,8 +1810,7 @@ module PostHog
 
         message = client.dequeue_last_message
 
-        expect(message[:distinct_id]).to be_a(String)
-        expect(message[:distinct_id].length).to eq(36)
+        expect(message[:distinct_id]).to match(UUID_V7_REGEX)
         expect(message[:properties]['$process_person_profile']).to be false
       end
     end
