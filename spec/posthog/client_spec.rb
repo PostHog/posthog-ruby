@@ -1700,7 +1700,7 @@ module PostHog
               'company' => { '$group_key' => 'id:5', 'x' => 'y' },
               'instance' => { '$group_key' => 'app.posthog.com' }
             },
-            'person_properties' => { 'distinct_id' => 'some_id', 'x1' => 'y1' }, 'token' => 'testsecret'
+            'person_properties' => { 'x1' => 'y1' }, 'token' => 'testsecret'
           }
         )
 
@@ -1734,7 +1734,7 @@ module PostHog
         assert_requested :post, flags_endpoint, times: 1
         expect(WebMock).to have_requested(:post, flags_endpoint).with(
           body: { 'distinct_id' => 'some_id', 'groups' => {}, 'group_properties' => {},
-                  'person_properties' => { 'distinct_id' => 'some_id' }, 'token' => 'testsecret' }
+                  'person_properties' => {}, 'token' => 'testsecret' }
         )
         WebMock.reset_executed_requests!
 
@@ -1745,7 +1745,7 @@ module PostHog
             'distinct_id' => 'some_id',
             'groups' => { 'company' => 'id:5' },
             'group_properties' => { 'company' => { '$group_key' => 'id:5' } },
-            'person_properties' => { 'distinct_id' => 'some_id' },
+            'person_properties' => {},
             'token' => 'testsecret'
           }
         )
@@ -1761,7 +1761,7 @@ module PostHog
         assert_requested :post, flags_endpoint, times: 1
         expect(WebMock).to have_requested(:post, flags_endpoint).with(
           body: { 'distinct_id' => 'some_id', 'groups' => {}, 'group_properties' => {},
-                  'person_properties' => { 'distinct_id' => 'some_id' }, 'token' => 'testsecret' }
+                  'person_properties' => {}, 'token' => 'testsecret' }
         )
         WebMock.reset_executed_requests!
 
@@ -1769,7 +1769,7 @@ module PostHog
         assert_requested :post, flags_endpoint, times: 1
         expect(WebMock).to have_requested(:post, flags_endpoint).with(
           body: { 'distinct_id' => 'some_id', 'groups' => {}, 'group_properties' => {},
-                  'person_properties' => { 'distinct_id' => 'some_id' }, 'token' => 'testsecret' }
+                  'person_properties' => {}, 'token' => 'testsecret' }
         )
         WebMock.reset_executed_requests!
       end

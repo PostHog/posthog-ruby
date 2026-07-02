@@ -57,6 +57,50 @@ module PostHog
                                 person_properties: { 'region' => 'Canada' })).to eq(false)
     end
 
+    it 'evaluates distinct_id locally without sending it in person_properties' do
+      api_feature_flag_res = {
+        'flags' => [
+          {
+            'id' => 1,
+            'name' => 'Distinct ID Feature',
+            'key' => 'distinct-id-flag',
+            'is_simple_flag' => true,
+            'active' => true,
+            'filters' => {
+              'groups' => [
+                {
+                  'properties' => [
+                    {
+                      'key' => 'distinct_id',
+                      'operator' => 'exact',
+                      'value' => 'some-distinct-id',
+                      'type' => 'person'
+                    }
+                  ],
+                  'rollout_percentage' => 100
+                }
+              ]
+            }
+          }
+        ]
+      }
+      stub_request(
+        :get,
+        'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: api_feature_flag_res.to_json)
+      stub_request(:post, flags_endpoint).to_return(status: 400)
+
+      c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+      person_properties = { region: 'USA' }
+
+      expect(c.get_feature_flag('distinct-id-flag', 'some-distinct-id',
+                                person_properties: person_properties,
+                                only_evaluate_locally: true,
+                                send_feature_flag_events: false)).to eq(true)
+      expect(person_properties).not_to have_key(:distinct_id)
+      expect(a_request(:post, flags_endpoint)).not_to have_been_made
+    end
+
     it 'accepts symbol flag keys when evaluating locally' do
       api_feature_flag_res = {
         'flags' => [
@@ -320,7 +364,7 @@ module PostHog
           'distinct_id' => 'some-distinct-id_outside_rollout?',
           'groups' => {},
           'group_properties' => {},
-          'person_properties' => { 'distinct_id' => 'some-distinct-id_outside_rollout?', 'region' => 'USA',
+          'person_properties' => { 'region' => 'USA',
                                    'email' => 'a@b.com' },
           'token' => 'testsecret'
         }
@@ -338,7 +382,7 @@ module PostHog
           'distinct_id' => 'some-distinct-id',
           'groups' => {},
           'group_properties' => {},
-          'person_properties' => { 'distinct_id' => 'some-distinct-id', 'doesnt_matter' => '1' },
+          'person_properties' => { 'doesnt_matter' => '1' },
           'token' => 'testsecret'
         }
       )
@@ -4815,7 +4859,7 @@ module PostHog
 
       # Add the exact stub for the `/flags` endpoint as recommended in the error
       stub_request(:post, 'https://us.i.posthog.com/flags/?v=2').with(
-        body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"distinct_id":"distinct_id","region":"USA"},"group_properties":{},"token":"testsecret"}', # rubocop:disable Layout/LineLength
+        body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"region":"USA"},"group_properties":{},"token":"testsecret"}', # rubocop:disable Layout/LineLength
         headers: {
           'Accept' => '*/*',
           'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',
