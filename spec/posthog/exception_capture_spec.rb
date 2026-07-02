@@ -143,6 +143,19 @@ module PostHog
         expect(stacktrace['frames'][0]['filename']).to eq('action_controller.rb')
         expect(stacktrace['frames'][1]['filename']).to eq('user.rb')
       end
+
+      it 'computes dependency roots once for all frames' do
+        backtrace = [
+          '/app/app/models/user.rb:42:in `validate_email\'',
+          '/app/app/controllers/users_controller.rb:10:in `show\''
+        ]
+
+        expect(described_class).to receive(:dependency_roots).once.and_return([])
+
+        stacktrace = described_class.build_stacktrace(backtrace)
+
+        expect(stacktrace['frames'].length).to eq(2)
+      end
     end
 
     describe '#build_parsed_exception' do

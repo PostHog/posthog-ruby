@@ -98,8 +98,9 @@ module PostHog
       return nil unless backtrace && !backtrace.empty?
 
       root = project_root
+      roots = dependency_roots(root)
       frames = backtrace.first(50).map do |line|
-        parse_backtrace_line(line, project_root: root)
+        parse_backtrace_line(line, project_root: root, dependency_roots: roots)
       end.compact.reverse
 
       {
@@ -110,8 +111,9 @@ module PostHog
 
     # @param line [String]
     # @param project_root [String, nil] Project root used to derive project-relative filenames.
+    # @param dependency_roots [Array<String>, nil] Cached gem and stdlib roots.
     # @return [Hash, nil]
-    def self.parse_backtrace_line(line, project_root: self.project_root)
+    def self.parse_backtrace_line(line, project_root: self.project_root, dependency_roots: nil)
       match = line.match(RUBY_INPUT_FORMAT)
       return nil unless match
 
@@ -124,7 +126,7 @@ module PostHog
         'abs_path' => file,
         'lineno' => lineno,
         'function' => method_name,
-        'in_app' => !gem_path?(file),
+        'in_app' => !gem_path?(file, dependency_roots || self.dependency_roots(project_root)),
         'platform' => 'ruby'
       }
 
@@ -169,13 +171,15 @@ module PostHog
     # based on gem install locations rather than path substrings.
     #
     # @param path [String]
+    # @param dependency_roots [Array<String>]
     # @return [Boolean]
-    def self.gem_path?(path)
+    def self.gem_path?(path, dependency_roots = self.dependency_roots)
       dependency_roots.any? { |root| path_within?(path, root) }
     end
 
+    # @param project_root [String]
     # @return [Array<String>] Directories containing installed gems and the Ruby stdlib.
-    def self.dependency_roots
+    def self.dependency_roots(project_root = self.project_root)
       roots = []
       if defined?(Gem)
         roots.concat(Gem.path) if Gem.respond_to?(:path)
