@@ -74,9 +74,9 @@ module PostHog
           execution_interval: polling_interval
         ) { _load_feature_flags }
 
-      # If no personal API key, disable local evaluation & thus polling for definitions
+      # If no secret_key, disable local evaluation & thus polling for definitions
       if @personal_api_key.nil?
-        logger.info 'No personal API key provided, disabling local evaluation'
+        logger.info 'No secret_key provided, disabling local evaluation'
         @loaded_flags_successfully_once.make_true
       else
         # load once before timer

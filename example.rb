@@ -54,7 +54,7 @@ begin
   # Create a minimal client for testing
   test_client = PostHog::Client.new(
     api_key: api_key,
-    personal_api_key: personal_api_key,
+    secret_key: personal_api_key,
     host: host,
     on_error: proc { |_status, _msg| }, # Suppress error output during test
     feature_flags_polling_interval: 60 # Longer interval for test
@@ -82,7 +82,7 @@ end
 
 posthog = PostHog::Client.new(
   api_key: api_key, # You can find this key on the /setup page in PostHog
-  personal_api_key: personal_api_key, # Required for local feature flag evaluation
+  secret_key: personal_api_key, # Required for local feature flag evaluation (Personal or Project Secret API Key)
   host: host, # Where you host PostHog. You can remove this line if using app.posthog.com
   on_error: proc { |_status, msg| print msg },
   feature_flags_polling_interval: 10 # How often to poll for feature flags

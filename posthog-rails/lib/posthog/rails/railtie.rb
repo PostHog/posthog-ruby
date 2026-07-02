@@ -277,6 +277,16 @@ module PostHog
         @base_options[:api_key] = value
       end
 
+      # The credential used for local feature flag evaluation and remote config. Accepts either a
+      # Personal API Key (`phx_...`) or a Project Secret API Key (`phs_...`).
+      #
+      # @param value [String, nil]
+      # @return [String, nil]
+      def secret_key=(value)
+        @base_options[:secret_key] = value
+      end
+
+      # @deprecated Use {#secret_key=} instead. Retained as an alias.
       # @param value [String, nil]
       # @return [String, nil]
       def personal_api_key=(value)
