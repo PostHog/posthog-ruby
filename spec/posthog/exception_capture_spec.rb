@@ -20,23 +20,55 @@ module PostHog
       end
 
       it 'identifies gem files correctly' do
-        gem_line = '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/some_gem/lib/some_gem.rb:10:in `gem_method\''
-        frame = described_class.parse_backtrace_line(gem_line)
+        gem_file = File.join(Gem.path.first, 'gems', 'some_gem-1.0.0', 'lib', 'some_gem.rb')
+        frame = described_class.parse_backtrace_line("#{gem_file}:10:in `gem_method'")
+
+        expect(frame['in_app']).to be false
+      end
+
+      it 'identifies standard library files correctly' do
+        stdlib_file = File.join(RbConfig::CONFIG['rubylibdir'], 'json.rb')
+        frame = described_class.parse_backtrace_line("#{stdlib_file}:10:in `parse'")
 
         expect(frame['in_app']).to be false
       end
 
       it 'does not add context lines for non-in_app frames' do
-        # Use a gem-style path that points to this real file so File.exist? would be true
-        # but in_app should be false, so context lines should not be added
-        gem_line = "#{__FILE__}:10:in `gem_method'"
-                   .gsub(%r{/spec/}, '/gems/ruby/spec/')
-        frame = described_class.parse_backtrace_line(gem_line)
+        # Use a real file from a loaded gem so File.exist? is true
+        # but in_app is false, so context lines should not be added
+        gem_file = File.join(Gem.loaded_specs['rspec-core'].full_gem_path, 'lib', 'rspec', 'core.rb')
+        expect(File.exist?(gem_file)).to be true
+
+        frame = described_class.parse_backtrace_line("#{gem_file}:10:in `gem_method'")
 
         expect(frame['in_app']).to be false
         expect(frame['context_line']).to be_nil
         expect(frame['pre_context']).to be_nil
         expect(frame['post_context']).to be_nil
+      end
+
+      it 'uses project-relative filenames for paths inside the project root' do
+        line = '/app/releases/20240101/app/models/user.rb:42:in `validate_email\''
+        frame = described_class.parse_backtrace_line(line, project_root: '/app/releases/20240101')
+
+        expect(frame['filename']).to eq('app/models/user.rb')
+        expect(frame['abs_path']).to eq('/app/releases/20240101/app/models/user.rb')
+      end
+
+      it 'falls back to the basename for paths outside the project root' do
+        line = '/somewhere/else/app/models/user.rb:42:in `validate_email\''
+        frame = described_class.parse_backtrace_line(line, project_root: '/app/releases/20240101')
+
+        expect(frame['filename']).to eq('user.rb')
+        expect(frame['abs_path']).to eq('/somewhere/else/app/models/user.rb')
+      end
+
+      it 'derives filenames for real project files relative to the current working directory' do
+        frame = described_class.parse_backtrace_line("#{File.expand_path(__FILE__)}:10:in `app_method'")
+
+        expect(frame['filename']).to eq('spec/posthog/exception_capture_spec.rb')
+        expect(frame['abs_path']).to eq(File.expand_path(__FILE__))
+        expect(frame['in_app']).to be true
       end
 
       it 'adds context lines for in_app frames' do

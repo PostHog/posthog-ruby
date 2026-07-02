@@ -97,8 +97,9 @@ module PostHog
     def self.build_stacktrace(backtrace)
       return nil unless backtrace && !backtrace.empty?
 
+      root = project_root
       frames = backtrace.first(50).map do |line|
-        parse_backtrace_line(line)
+        parse_backtrace_line(line, project_root: root)
       end.compact.reverse
 
       {
@@ -108,8 +109,9 @@ module PostHog
     end
 
     # @param line [String]
+    # @param project_root [String, nil] Project root used to derive project-relative filenames.
     # @return [Hash, nil]
-    def self.parse_backtrace_line(line)
+    def self.parse_backtrace_line(line, project_root: self.project_root)
       match = line.match(RUBY_INPUT_FORMAT)
       return nil unless match
 
@@ -118,7 +120,7 @@ module PostHog
       method_name = match[5]
 
       frame = {
-        'filename' => File.basename(file),
+        'filename' => frame_filename(file, project_root),
         'abs_path' => file,
         'lineno' => lineno,
         'function' => method_name,
@@ -131,13 +133,69 @@ module PostHog
       frame
     end
 
+    # Root directory the application runs from, used to derive stable
+    # project-relative filenames from per-host deploy paths
+    # (e.g. `/app/releases/20240101/...`).
+    #
+    # @return [String]
+    def self.project_root
+      if defined?(::Rails) && ::Rails.respond_to?(:root) && ::Rails.root
+        ::Rails.root.to_s
+      else
+        Dir.pwd
+      end
+    rescue StandardError
+      Dir.pwd
+    end
+
+    # Stable filename used for fingerprinting: the project-relative path when
+    # the file lives inside the project root, its basename otherwise. The raw
+    # absolute path is kept separately in `abs_path`.
+    #
+    # @param path [String]
+    # @param project_root [String, nil]
+    # @return [String]
+    def self.frame_filename(path, project_root)
+      if project_root && !project_root.empty? && path_within?(path, project_root)
+        relative = path[project_root.length..]
+        relative = relative[1..] while relative.start_with?(File::SEPARATOR)
+        return relative unless relative.empty?
+      end
+
+      File.basename(path)
+    end
+
+    # Whether the path belongs to an installed gem or the Ruby standard library,
+    # based on gem install locations rather than path substrings.
+    #
     # @param path [String]
     # @return [Boolean]
     def self.gem_path?(path)
-      path.include?('/gems/') ||
-        path.include?('/ruby/') ||
-        path.include?('/.rbenv/') ||
-        path.include?('/.rvm/')
+      dependency_roots.any? { |root| path_within?(path, root) }
+    end
+
+    # @return [Array<String>] Directories containing installed gems and the Ruby stdlib.
+    def self.dependency_roots
+      roots = []
+      if defined?(Gem)
+        roots.concat(Gem.path) if Gem.respond_to?(:path)
+        roots << Gem.default_dir if Gem.respond_to?(:default_dir)
+        roots.concat(Gem.loaded_specs.each_value.map(&:full_gem_path)) if Gem.respond_to?(:loaded_specs)
+      end
+      roots << RbConfig::CONFIG['rubylibprefix'] if defined?(RbConfig)
+      # The project itself can be a loaded spec (e.g. a gem developed in place,
+      # or a Rails engine); its frames are still application code.
+      roots.compact.reject(&:empty?).uniq - [project_root]
+    rescue StandardError
+      []
+    end
+
+    # @param path [String]
+    # @param root [String]
+    # @return [Boolean]
+    def self.path_within?(path, root)
+      root = root.chomp(File::SEPARATOR)
+      path == root || path.start_with?("#{root}#{File::SEPARATOR}")
     end
 
     # @param frame [Hash]
