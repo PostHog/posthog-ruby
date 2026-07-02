@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.15.3
+
+### Patch Changes
+
+- fcc6205: Stop duplicating `distinct_id` inside `/flags` person properties.
+
 ## 3.15.2
 
 ### Patch Changes

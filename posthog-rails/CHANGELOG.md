@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.15.2
+
+### Patch Changes
+
+- fcc6205: Stop duplicating `distinct_id` inside `/flags` person properties.
+
 ## 3.15.1
 
 ### Patch Changes
