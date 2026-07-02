@@ -921,7 +921,12 @@ module PostHog
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
       if aggregation_group_type_index.nil?
-        return match_feature_flag_properties(flag, distinct_id, person_properties, evaluation_cache, @cohorts,
+        local_person_properties = person_properties || {}
+        unless local_person_properties.key?(:distinct_id) || local_person_properties.key?('distinct_id')
+          local_person_properties = local_person_properties.merge(distinct_id: distinct_id)
+        end
+
+        return match_feature_flag_properties(flag, distinct_id, local_person_properties, evaluation_cache, @cohorts,
                                              groups: groups, group_properties: group_properties)
       end
 
