@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.15.2
+
+### Patch Changes
+
+- 1376f19: Retry remote feature flag requests after transient 502 and 504 responses.
+
 ## 3.15.1
 
 ### Patch Changes
