@@ -39,15 +39,15 @@ module PostHog
       root_mechanism = DEFAULT_MECHANISM.merge(mechanism || {})
 
       exceptions = []
-      seen = []
+      seen = {}.compare_by_identity
       current = value
 
-      while current && exceptions.length < MAX_CHAINED_EXCEPTIONS && seen.none? { |e| e.equal?(current) }
+      while current && exceptions.length < MAX_CHAINED_EXCEPTIONS && !seen.key?(current)
         parsed = build_parsed_exception(current, mechanism: chain_mechanism(root_mechanism, exceptions.length))
         break if parsed.nil?
 
         exceptions << parsed
-        seen << current
+        seen[current] = true
         current = current.respond_to?(:cause) ? current.cause : nil
       end
 

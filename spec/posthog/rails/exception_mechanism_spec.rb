@@ -42,36 +42,25 @@ RSpec.describe 'automatic exception capture mechanisms' do
   end
 
   describe PostHog::Rails::ErrorSubscriber do
-    it 'forwards the handled flag reported by Rails' do
-      described_class.new.report(
-        StandardError.new('boom'),
-        handled: true,
-        severity: :warning,
-        context: {}
-      )
+    [
+      { handled: true, severity: :warning, description: 'forwards the handled flag reported by Rails' },
+      { handled: false, severity: :error, description: 'tags unhandled reports as unhandled' }
+    ].each do |scenario|
+      it scenario[:description] do
+        described_class.new.report(
+          StandardError.new('boom'),
+          handled: scenario[:handled],
+          severity: scenario[:severity],
+          context: {}
+        )
 
-      expect(PostHog).to have_received(:capture_exception).with(
-        an_instance_of(StandardError),
-        anything,
-        an_instance_of(Hash),
-        mechanism: { 'type' => 'rails_error_reporter', 'handled' => true }
-      )
-    end
-
-    it 'tags unhandled reports as unhandled' do
-      described_class.new.report(
-        StandardError.new('boom'),
-        handled: false,
-        severity: :error,
-        context: {}
-      )
-
-      expect(PostHog).to have_received(:capture_exception).with(
-        an_instance_of(StandardError),
-        anything,
-        an_instance_of(Hash),
-        mechanism: { 'type' => 'rails_error_reporter', 'handled' => false }
-      )
+        expect(PostHog).to have_received(:capture_exception).with(
+          an_instance_of(StandardError),
+          anything,
+          an_instance_of(Hash),
+          mechanism: { 'type' => 'rails_error_reporter', 'handled' => scenario[:handled] }
+        )
+      end
     end
   end
 
