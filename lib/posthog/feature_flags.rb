@@ -30,7 +30,8 @@ module PostHog
     include PostHog::Utils
 
     # @param polling_interval [Integer, nil] Seconds between local feature flag definition polls.
-    # @param personal_api_key [String, nil] Personal API key used to fetch local evaluation definitions.
+    # @param secret_key [String, nil] Credential used to fetch local evaluation definitions. Accepts either a
+    #   Personal API Key (`phx_...`) or a Project Secret API Key (`phs_...`).
     # @param project_api_key [String] Project API key.
     # @param host [String] PostHog API host URL.
     # @param feature_flag_request_timeout_seconds [Integer] Timeout for feature flag requests.
@@ -41,7 +42,7 @@ module PostHog
     #   Set to 0 to disable retrying.
     def initialize(
       polling_interval,
-      personal_api_key,
+      secret_key,
       project_api_key,
       host,
       feature_flag_request_timeout_seconds,
@@ -50,7 +51,7 @@ module PostHog
       feature_flag_request_max_retries: nil
     )
       @polling_interval = polling_interval || 30
-      @personal_api_key = personal_api_key
+      @secret_key = secret_key
       @project_api_key = project_api_key
       @host = host
       @feature_flags = Concurrent::Array.new
@@ -75,7 +76,7 @@ module PostHog
         ) { _load_feature_flags }
 
       # If no secret_key, disable local evaluation & thus polling for definitions
-      if @personal_api_key.nil?
+      if @secret_key.nil?
         logger.info 'No secret_key provided, disabling local evaluation'
         @loaded_flags_successfully_once.make_true
       else
@@ -1227,7 +1228,7 @@ module PostHog
       uri = URI("#{@host}/flags/definitions")
       uri.query = URI.encode_www_form([['token', @project_api_key], %w[send_cohorts true]])
       req = Net::HTTP::Get.new(uri)
-      req['Authorization'] = "Bearer #{@personal_api_key}"
+      req['Authorization'] = "Bearer #{@secret_key}"
       req['If-None-Match'] = etag if etag
 
       _request(uri, req, nil, include_etag: true)
@@ -1253,7 +1254,7 @@ module PostHog
       uri.query = URI.encode_www_form([['token', @project_api_key]])
       req = Net::HTTP::Get.new(uri)
       req['Content-Type'] = 'application/json'
-      req['Authorization'] = "Bearer #{@personal_api_key}"
+      req['Authorization'] = "Bearer #{@secret_key}"
 
       _request(uri, req, @feature_flag_request_timeout_seconds)
     end

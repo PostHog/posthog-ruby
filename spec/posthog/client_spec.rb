@@ -140,30 +140,24 @@ module PostHog
             .to_return(status: 200, body: '{"flags":[]}')
         end
 
-        it 'sets the credential from :secret_key' do
-          client = Client.new(api_key: API_KEY, secret_key: 'phs_secret', test_mode: true)
+        [
+          ['resolves the credential from :secret_key', { secret_key: 'phs_secret' }, 'phs_secret', false],
+          ['accepts the deprecated :personal_api_key alias and warns',
+           { personal_api_key: 'phx_personal' }, 'phx_personal', true],
+          ['prefers :secret_key when both are supplied',
+           { secret_key: 'phs_secret', personal_api_key: 'phx_personal' }, 'phs_secret', false]
+        ].each do |description, opts, expected, warns|
+          it description do
+            client = Client.new(api_key: API_KEY, test_mode: true, **opts)
 
-          expect(client.instance_variable_get(:@secret_key)).to eq('phs_secret')
-          expect(client.instance_variable_get(:@personal_api_key)).to eq('phs_secret')
-          expect(logger).not_to have_received(:warn)
-        end
-
-        it 'still accepts the deprecated :personal_api_key alias and warns' do
-          client = Client.new(api_key: API_KEY, personal_api_key: 'phx_personal', test_mode: true)
-
-          expect(client.instance_variable_get(:@secret_key)).to eq('phx_personal')
-          expect(client.instance_variable_get(:@personal_api_key)).to eq('phx_personal')
-          expect(logger).to have_received(:warn).with(include(':personal_api_key option is deprecated')).once
-        end
-
-        it 'prefers :secret_key when both are supplied' do
-          client = Client.new(
-            api_key: API_KEY, secret_key: 'phs_secret', personal_api_key: 'phx_personal', test_mode: true
-          )
-
-          expect(client.instance_variable_get(:@secret_key)).to eq('phs_secret')
-          expect(client.instance_variable_get(:@personal_api_key)).to eq('phs_secret')
-          expect(logger).not_to have_received(:warn)
+            expect(client.instance_variable_get(:@secret_key)).to eq(expected)
+            expect(client.instance_variable_get(:@personal_api_key)).to eq(expected)
+            if warns
+              expect(logger).to have_received(:warn).with(include(':personal_api_key option is deprecated')).once
+            else
+              expect(logger).not_to have_received(:warn)
+            end
+          end
         end
       end
 
