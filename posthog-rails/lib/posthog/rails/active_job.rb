@@ -64,7 +64,12 @@ module PostHog
         # Add serialized job arguments (be careful with sensitive data)
         properties['$job_arguments'] = sanitize_job_arguments(arguments) if arguments.present?
 
-        PostHog.capture_exception(exception, distinct_id, properties)
+        PostHog.capture_exception(
+          exception,
+          distinct_id,
+          properties,
+          mechanism: { 'type' => 'active_job', 'handled' => false }
+        )
       rescue StandardError => e
         # Don't let PostHog errors break job processing
         PostHog::Logging.logger.error("Failed to capture job exception: #{e.message}")

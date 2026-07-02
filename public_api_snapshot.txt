@@ -7,7 +7,7 @@ module PostHog
 class PostHog::Client
 instance_method PostHog::Client#alias(attrs)
 instance_method PostHog::Client#capture(attrs)
-instance_method PostHog::Client#capture_exception(exception, distinct_id = ..., additional_properties = ..., flags: ...)
+instance_method PostHog::Client#capture_exception(exception, distinct_id = ..., additional_properties = ..., flags: ..., mechanism: ...)
 instance_method PostHog::Client#clear()
 instance_method PostHog::Client#dequeue_last_message()
 instance_method PostHog::Client#enabled?()

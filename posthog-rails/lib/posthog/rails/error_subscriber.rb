@@ -41,7 +41,12 @@ module PostHog
           end
         end
 
-        PostHog.capture_exception(error, distinct_id, properties)
+        PostHog.capture_exception(
+          error,
+          distinct_id,
+          properties,
+          mechanism: { 'type' => 'rails_error_reporter', 'handled' => handled }
+        )
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to report error via subscriber: #{e.message}")
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")

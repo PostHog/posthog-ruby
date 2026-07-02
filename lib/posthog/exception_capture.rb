@@ -22,27 +22,72 @@ module PostHog
         (?: :in\s('|`)(?:([\w:]+)\#)?([^']+)')?$
       /x
 
+    # Maximum number of exceptions extracted from a single `cause` chain.
+    MAX_CHAINED_EXCEPTIONS = 50
+
+    DEFAULT_MECHANISM = { 'type' => 'generic', 'handled' => true }.freeze
+
+    # Builds the `$exception_list` payload for an exception, walking its
+    # `cause` chain outermost-first (wrapper first, root cause last).
+    #
     # @param value [Exception, String, Object] Exception input to parse.
+    # @param mechanism [Hash, nil] Mechanism applied to the outermost exception,
+    #   e.g. `{ 'type' => 'rails', 'handled' => false }`. Chained causes are
+    #   tagged with `{ 'type' => 'chained', ... }` and parent linkage.
+    # @return [Array<Hash>, nil] Parsed exception payloads, or nil when the input is unsupported.
+    def self.build_exception_list(value, mechanism: nil)
+      root_mechanism = DEFAULT_MECHANISM.merge(mechanism || {})
+
+      exceptions = []
+      seen = []
+      current = value
+
+      while current && exceptions.length < MAX_CHAINED_EXCEPTIONS && seen.none? { |e| e.equal?(current) }
+        parsed = build_parsed_exception(current, mechanism: chain_mechanism(root_mechanism, exceptions.length))
+        break if parsed.nil?
+
+        exceptions << parsed
+        seen << current
+        current = current.respond_to?(:cause) ? current.cause : nil
+      end
+
+      exceptions.empty? ? nil : exceptions
+    end
+
+    # @param root_mechanism [Hash] Mechanism of the outermost exception.
+    # @param exception_id [Integer] Zero-based position in the cause chain.
+    # @return [Hash]
+    def self.chain_mechanism(root_mechanism, exception_id)
+      mechanism = root_mechanism.merge('exception_id' => exception_id)
+      return mechanism if exception_id.zero?
+
+      mechanism.merge(
+        'type' => 'chained',
+        'source' => 'cause',
+        'parent_id' => exception_id - 1
+      )
+    end
+
+    # @param value [Exception, String, Object] Exception input to parse.
+    # @param mechanism [Hash, nil] Mechanism describing how the exception was captured.
     # @return [Hash, nil] Parsed exception payload, or nil when the input is unsupported.
-    def self.build_parsed_exception(value)
+    def self.build_parsed_exception(value, mechanism: nil)
       title, message, backtrace = coerce_exception_input(value)
       return nil if title.nil?
 
-      build_single_exception_from_data(title, message, backtrace)
+      build_single_exception_from_data(title, message, backtrace, mechanism: mechanism)
     end
 
     # @param title [String]
     # @param message [String, nil]
     # @param backtrace [Array<String>, nil]
+    # @param mechanism [Hash, nil]
     # @return [Hash]
-    def self.build_single_exception_from_data(title, message, backtrace)
+    def self.build_single_exception_from_data(title, message, backtrace, mechanism: nil)
       {
         'type' => title,
         'value' => message || '',
-        'mechanism' => {
-          'type' => 'generic',
-          'handled' => true
-        },
+        'mechanism' => DEFAULT_MECHANISM.merge(mechanism || {}),
         'stacktrace' => build_stacktrace(backtrace)
       }
     end

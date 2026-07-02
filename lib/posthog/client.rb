@@ -311,15 +311,18 @@ module PostHog
     # @param flags [PostHog::FeatureFlagEvaluations, nil] A snapshot returned by {#evaluate_flags}.
     #   Forwarded to the inner {#capture} call so the captured `$exception` event carries the
     #   same `$feature/<key>` and `$active_feature_flags` properties as the snapshot.
+    # @param mechanism [Hash, nil] How the exception was captured, e.g.
+    #   `{ 'type' => 'rails', 'handled' => false }` for automatic integrations.
+    #   Defaults to `{ 'type' => 'generic', 'handled' => true }` for manual captures.
     # @return [Boolean, nil] Whether the exception event was queued or sent, or nil if the input could not be parsed.
-    def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil)
+    def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)
       return false if @disabled
 
-      exception_info = ExceptionCapture.build_parsed_exception(exception)
+      exception_list = ExceptionCapture.build_exception_list(exception, mechanism: mechanism)
 
-      return if exception_info.nil?
+      return if exception_list.nil?
 
-      properties = { '$exception_list' => [exception_info] }
+      properties = { '$exception_list' => exception_list }
       properties.merge!(additional_properties) if additional_properties && !additional_properties.empty?
 
       event_data = {
