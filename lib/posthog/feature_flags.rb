@@ -36,8 +36,9 @@ module PostHog
     # @param feature_flag_request_timeout_seconds [Integer] Timeout for feature flag requests.
     # @param on_error [Proc, nil] Callback invoked as `on_error.call(status, error)`.
     # @param flag_definition_cache_provider [Object, nil] Optional {FlagDefinitionCacheProvider} implementation.
-    # @param feature_flag_request_max_retries [Integer, nil] Retries after a transient network error on a flag
-    #   request. Defaults to {Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES}. Set to 0 to disable retrying.
+    # @param feature_flag_request_max_retries [Integer, nil] Retries after a transient network error or retryable
+    #   HTTP response status on a flag request. Defaults to {Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES}.
+    #   Set to 0 to disable retrying.
     def initialize(
       polling_interval,
       personal_api_key,
@@ -1234,7 +1235,12 @@ module PostHog
       data['token'] = @project_api_key
       req.body = data.to_json
 
-      _request(uri, req, @feature_flag_request_timeout_seconds)
+      _request(
+        uri,
+        req,
+        @feature_flag_request_timeout_seconds,
+        retry_status_codes: RETRYABLE_FLAGS_REQUEST_STATUS_CODES
+      )
     end
 
     def _request_remote_config_payload(flag_key)
@@ -1256,14 +1262,15 @@ module PostHog
       Errno::ECONNRESET,
       EOFError
     ].freeze
+    RETRYABLE_FLAGS_REQUEST_STATUS_CODES = [502, 504].freeze
 
-    def _request(uri, request_object, timeout = nil, include_etag: false)
+    def _request(uri, request_object, timeout = nil, include_etag: false, retry_status_codes: [])
       request_object['User-Agent'] = "posthog-ruby/#{PostHog::VERSION}"
       request_timeout = timeout || 10
       backoff_policy = nil
       attempts = 0
 
-      begin
+      loop do
         attempts += 1
         Net::HTTP.start(
           uri.hostname,
@@ -1276,6 +1283,16 @@ module PostHog
           res = http.request(request_object)
           status_code = res.code.to_i
           etag = include_etag ? res['ETag'] : nil
+
+          if retry_status_codes.include?(status_code) && attempts <= @feature_flag_request_max_retries
+            backoff_policy ||= BackoffPolicy.new
+            interval = backoff_policy.next_interval.to_f / 1000
+            logger.debug(
+              "Retrying request to #{_mask_tokens_in_url(uri.to_s)} after HTTP #{status_code} (attempt #{attempts})"
+            )
+            sleep(interval)
+            next
+          end
 
           # Handle 304 Not Modified - return special response indicating no change
           if status_code == 304
@@ -1304,7 +1321,7 @@ module PostHog
           interval = backoff_policy.next_interval.to_f / 1000
           logger.debug("Retrying request to #{_mask_tokens_in_url(uri.to_s)} after #{e.class} (attempt #{attempts})")
           sleep(interval)
-          retry
+          next
         end
         logger.debug("Unable to complete request to #{_mask_tokens_in_url(uri.to_s)}")
         raise

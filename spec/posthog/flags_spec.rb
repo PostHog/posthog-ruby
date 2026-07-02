@@ -253,6 +253,33 @@ module PostHog
         expect(poller).to have_received(:sleep).once
       end
 
+      [502, 504].each do |status|
+        it "retries once and succeeds after HTTP #{status}" do
+          stub_request(:post, flags_endpoint)
+            .to_return(status: status, body: { error: 'temporary' }.to_json).then
+            .to_return(status: 200, body: flags_response.to_json)
+
+          result = poller.get_flags('test-distinct-id')
+
+          expect(result[:status]).to eq(200)
+          expect(result[:featureFlags]).to eq({ 'my-flag': true })
+          expect(a_request(:post, flags_endpoint)).to have_been_made.times(2)
+          expect(poller).to have_received(:sleep).once
+        end
+      end
+
+      it 'does not retry other HTTP statuses' do
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 500, body: { error: 'internal error' }.to_json).then
+          .to_return(status: 200, body: flags_response.to_json)
+
+        result = poller.get_flags('test-distinct-id')
+
+        expect(result).to eq({ error: 'internal error', status: 500 })
+        expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+        expect(poller).not_to have_received(:sleep)
+      end
+
       it 'retries on Errno::ECONNRESET then re-raises once retries are exhausted' do
         stub_request(:post, flags_endpoint)
           .to_raise(Errno::ECONNRESET)
@@ -298,6 +325,18 @@ module PostHog
             expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
             expect(poller).not_to have_received(:sleep)
           end
+
+          it 'does not retry HTTP 502 responses' do
+            stub_request(:post, flags_endpoint)
+              .to_return(status: 502, body: { error: 'temporary' }.to_json).then
+              .to_return(status: 200, body: flags_response.to_json)
+
+            result = poller.get_flags('test-distinct-id')
+
+            expect(result).to eq({ error: 'temporary', status: 502 })
+            expect(a_request(:post, flags_endpoint)).to have_been_made.times(1)
+            expect(poller).not_to have_received(:sleep)
+          end
         end
 
         context 'set to a higher count' do
@@ -309,6 +348,19 @@ module PostHog
 
             expect { poller.get_flags('test-distinct-id') }.to raise_error(Errno::ECONNRESET)
             expect(a_request(:post, flags_endpoint)).to have_been_made.times(4)
+          end
+
+          [502, 504].each do |status|
+            it "retries HTTP #{status} up to the configured number of times before returning the response" do
+              stub_request(:post, flags_endpoint)
+                .to_return(status: status, body: { error: 'temporary' }.to_json)
+
+              result = poller.get_flags('test-distinct-id')
+
+              expect(result).to eq({ error: 'temporary', status: status })
+              expect(a_request(:post, flags_endpoint)).to have_been_made.times(4)
+              expect(poller).to have_received(:sleep).exactly(3).times
+            end
           end
         end
       end
