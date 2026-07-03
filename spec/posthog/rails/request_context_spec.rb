@@ -61,6 +61,7 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$request_method']).to eq('POST')
     expect(message[:properties]['$request_path']).to eq('/api/test')
     expect(message[:properties]['$user_agent']).to eq('RSpec Agent')
+    expect(message[:properties]['$raw_user_agent']).to eq('RSpec Agent')
     expect(message[:properties]['$ip']).to eq('203.0.113.10')
   end
 
@@ -92,6 +93,7 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to be_nil
     expect(message[:properties]['$request_path']).to eq('/api/test')
     expect(message[:properties]['$user_agent']).to eq('RSpec Agent')
+    expect(message[:properties]['$raw_user_agent']).to eq('RSpec Agent')
     expect(message[:properties]['$process_person_profile']).to be false
   end
 
@@ -339,6 +341,7 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to eq('exception-session')
     expect(message[:properties]['$request_path']).to eq('/boom')
     expect(message[:properties]['$user_agent']).to eq('Exception Agent')
+    expect(message[:properties]['$raw_user_agent']).to eq('Exception Agent')
   end
 
   it 'disables tracing headers for exceptions while preserving request metadata' do
@@ -371,6 +374,7 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$process_person_profile']).to be false
     expect(message[:properties]['$request_path']).to eq('/boom')
     expect(message[:properties]['$user_agent']).to eq('Disabled Context Agent')
+    expect(message[:properties]['$raw_user_agent']).to eq('Disabled Context Agent')
     expect(message[:properties]['$ip']).to eq('203.0.113.11')
   end
 end

@@ -18,7 +18,11 @@ module PostHog
         request_method = request_value(request, :request_method) || request_value(request, :method)
         add_property(properties, '$request_method', request_method)
         add_property(properties, '$request_path', request_value(request, :path) || request_value(request, :path_info))
-        add_property(properties, '$user_agent', TracingHeaders.extract_header(request, 'User-Agent'))
+        user_agent = TracingHeaders.extract_header(request, 'User-Agent')
+        add_property(properties, '$user_agent', user_agent)
+        # Mirrored into $raw_user_agent, the standardized property PostHog's
+        # server-side classification (e.g. bot detection) reads
+        add_property(properties, '$raw_user_agent', user_agent)
         add_property(properties, '$ip', client_ip(request))
         properties
       end
