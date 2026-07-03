@@ -72,18 +72,69 @@ module PostHog
       lineno = match[2].to_i
       method_name = match[5]
 
+      in_app = !gem_path?(file)
+
       frame = {
-        'filename' => File.basename(file),
+        'filename' => compute_filename(file, in_app),
         'abs_path' => file,
         'lineno' => lineno,
         'function' => method_name,
-        'in_app' => !gem_path?(file),
+        'in_app' => in_app,
         'platform' => 'ruby'
       }
 
       add_context_lines(frame, file, lineno) if frame['in_app'] && File.exist?(file)
 
       frame
+    end
+
+    # @param path [String]
+    # @param in_app [Boolean]
+    # @return [String]
+    def self.compute_filename(path, in_app)
+      return path unless absolute_path?(path)
+
+      prefixes = in_app ? [rails_root, Dir.pwd] : $LOAD_PATH
+      strip_path_prefix(path, prefixes) || path
+    end
+
+    # @param path [String]
+    # @param prefixes [Array<String, nil>]
+    # @return [String, nil]
+    def self.strip_path_prefix(path, prefixes)
+      normalized_path = normalize_path(path)
+      normalized_prefixes = prefixes.compact.map do |prefix|
+        normalize_path(File.expand_path(prefix.to_s))
+      end
+
+      normalized_prefixes
+        .select { |prefix| normalized_path.start_with?("#{prefix}/") }
+        .max_by(&:length)
+        &.then { |prefix| normalized_path[(prefix.length + 1)..] }
+    end
+
+    # @param path [String]
+    # @return [String]
+    def self.normalize_path(path)
+      path.tr('\\', '/').sub(%r{/+\z}, '')
+    end
+
+    # @return [String, nil]
+    def self.rails_root
+      return nil unless Object.const_defined?(:Rails)
+
+      rails = Object.const_get(:Rails)
+      return nil unless rails.respond_to?(:root) && rails.root
+
+      rails.root.to_s
+    rescue StandardError
+      nil
+    end
+
+    # @param path [String]
+    # @return [Boolean]
+    def self.absolute_path?(path)
+      path.start_with?('/') || path.match?(%r{\A[a-zA-Z]:[/\\]})
     end
 
     # @param path [String]

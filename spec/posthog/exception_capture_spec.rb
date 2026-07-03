@@ -2,21 +2,45 @@
 
 require 'spec_helper'
 
-# rubocop:disable Layout/LineLength
-
 module PostHog
   describe ExceptionCapture do
     describe '#parse_backtrace_line' do
       it 'parses stacktrace line into frame with correct details' do
-        line = '/path/to/project/app/models/user.rb:42:in `validate_email\''
+        path = File.join(Dir.pwd, 'app/models/user.rb')
+        line = "#{path}:42:in `validate_email'"
         frame = described_class.parse_backtrace_line(line)
 
-        expect(frame['filename']).to eq('user.rb')
-        expect(frame['abs_path']).to eq('/path/to/project/app/models/user.rb')
+        expect(frame['filename']).to eq('app/models/user.rb')
+        expect(frame['abs_path']).to eq(path)
         expect(frame['lineno']).to eq(42)
         expect(frame['function']).to eq('validate_email')
         expect(frame['platform']).to eq('ruby')
         expect(frame['in_app']).to be true
+      end
+
+      it 'uses Rails.root to make in-app filenames project relative' do
+        rails = Class.new do
+          def self.root
+            '/path/to/project'
+          end
+        end
+        stub_const('Rails', rails)
+
+        line = '/path/to/project/app/services/foo/bar.rb:42'
+        frame = described_class.parse_backtrace_line(line)
+
+        expect(frame['filename']).to eq('app/services/foo/bar.rb')
+      end
+
+      it 'keeps directory structure for files with the same basename' do
+        first_line = "#{File.join(Dir.pwd, 'app/services/foo/bar.rb')}:7"
+        second_line = "#{File.join(Dir.pwd, 'app/jobs/foo/bar.rb')}:8"
+
+        first_frame = described_class.parse_backtrace_line(first_line)
+        second_frame = described_class.parse_backtrace_line(second_line)
+
+        expect(first_frame['filename']).to eq('app/services/foo/bar.rb')
+        expect(second_frame['filename']).to eq('app/jobs/foo/bar.rb')
       end
 
       it 'identifies gem files correctly' do
@@ -24,6 +48,18 @@ module PostHog
         frame = described_class.parse_backtrace_line(gem_line)
 
         expect(frame['in_app']).to be false
+      end
+
+      it 'uses load path relative filenames for gem frames' do
+        gem_lib_path = '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/some_gem/lib'
+        gem_line = "#{gem_lib_path}/some_gem/client.rb:10:in `gem_method'"
+        $LOAD_PATH.unshift(gem_lib_path)
+
+        frame = described_class.parse_backtrace_line(gem_line)
+
+        expect(frame['filename']).to eq('some_gem/client.rb')
+      ensure
+        $LOAD_PATH.delete(gem_lib_path)
       end
 
       it 'does not add context lines for non-in_app frames' do
@@ -98,9 +134,11 @@ module PostHog
 
     describe '#build_stacktrace' do
       it 'converts backtrace array to structured frames' do
+        gem_lib_path = '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/actionpack-7.0.0/lib'
+        $LOAD_PATH.unshift(gem_lib_path)
         backtrace = [
-          '/path/to/project/app/models/user.rb:42:in `validate_email\'',
-          '/path/to/gems/ruby-3.0.0/lib/ruby/gems/3.0.0/gems/actionpack-7.0.0/lib/action_controller.rb:123:in `dispatch\''
+          "#{File.join(Dir.pwd, 'app/models/user.rb')}:42:in `validate_email'",
+          "#{gem_lib_path}/action_controller.rb:123:in `dispatch'"
         ]
 
         stacktrace = described_class.build_stacktrace(backtrace)
@@ -109,7 +147,9 @@ module PostHog
         expect(stacktrace['frames'].length).to eq(2)
 
         expect(stacktrace['frames'][0]['filename']).to eq('action_controller.rb')
-        expect(stacktrace['frames'][1]['filename']).to eq('user.rb')
+        expect(stacktrace['frames'][1]['filename']).to eq('app/models/user.rb')
+      ensure
+        $LOAD_PATH.delete(gem_lib_path)
       end
     end
 
@@ -165,4 +205,3 @@ module PostHog
     end
   end
 end
-# rubocop:enable Layout/LineLength
