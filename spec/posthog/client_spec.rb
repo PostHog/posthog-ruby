@@ -1800,6 +1800,43 @@ module PostHog
         expect(message[:properties]['request_id']).to eq('req-123')
       end
 
+      it 'captures the full cause chain outermost-first' do
+        begin
+          begin
+            raise ArgumentError, 'Root cause'
+          rescue ArgumentError
+            raise StandardError, 'Wrapper error'
+          end
+        rescue StandardError => e
+          client.capture_exception(e, 'user-123')
+        end
+
+        message = client.dequeue_last_message
+        exception_list = message[:properties]['$exception_list']
+
+        expect(exception_list.length).to eq(2)
+        expect(exception_list[0]['type']).to eq('StandardError')
+        expect(exception_list[0]['mechanism']['type']).to eq('generic')
+        expect(exception_list[0]['mechanism']['handled']).to be true
+        expect(exception_list[1]['type']).to eq('ArgumentError')
+        expect(exception_list[1]['mechanism']['type']).to eq('chained')
+        expect(exception_list[1]['mechanism']['parent_id']).to eq(0)
+      end
+
+      it 'applies a custom mechanism' do
+        begin
+          raise StandardError, 'Test exception'
+        rescue StandardError => e
+          client.capture_exception(e, 'user-123', {}, mechanism: { 'type' => 'rails', 'handled' => false })
+        end
+
+        message = client.dequeue_last_message
+        mechanism = message[:properties]['$exception_list'].first['mechanism']
+
+        expect(mechanism['type']).to eq('rails')
+        expect(mechanism['handled']).to be false
+      end
+
       it 'generates UUID as distinct_id when none was provided' do
         begin
           raise StandardError, 'Test error'

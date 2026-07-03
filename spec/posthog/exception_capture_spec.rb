@@ -162,6 +162,145 @@ module PostHog
         expect(described_class.build_parsed_exception(123)).to be_nil
         expect(described_class.build_parsed_exception(nil)).to be_nil
       end
+
+      it 'applies a custom mechanism' do
+        exception_info = described_class.build_parsed_exception(
+          'Simple error',
+          mechanism: { 'type' => 'rails', 'handled' => false }
+        )
+
+        expect(exception_info['mechanism']['type']).to eq('rails')
+        expect(exception_info['mechanism']['handled']).to be false
+      end
+    end
+
+    describe '#build_exception_list' do
+      # Exception-like object with a configurable cause, used to build chains
+      # without raising for real.
+      let(:chainable_class) do
+        Class.new do
+          attr_accessor :cause
+
+          def initialize(message)
+            @message = message
+          end
+
+          attr_reader :message
+
+          def backtrace
+            nil
+          end
+        end
+      end
+
+      def raise_chained
+        begin
+          raise ArgumentError, 'Root cause'
+        rescue ArgumentError
+          raise 'Middle error'
+        end
+      rescue RuntimeError
+        raise StandardError, 'Wrapper error'
+      end
+
+      it 'builds a single-element list for an exception without a cause' do
+        raise StandardError, 'Test exception'
+      rescue StandardError => e
+        exception_list = described_class.build_exception_list(e)
+
+        expect(exception_list.length).to eq(1)
+        expect(exception_list.first['type']).to eq('StandardError')
+        expect(exception_list.first['mechanism']).to eq(
+          'type' => 'generic',
+          'handled' => true,
+          'exception_id' => 0
+        )
+      end
+
+      it 'walks the cause chain outermost-first' do
+        raise_chained
+      rescue StandardError => e
+        exception_list = described_class.build_exception_list(e)
+
+        expect(exception_list.map { |entry| entry['type'] }).to eq(%w[StandardError RuntimeError ArgumentError])
+        expect(exception_list.map { |entry| entry['value'] }).to eq(['Wrapper error', 'Middle error', 'Root cause'])
+      end
+
+      it 'tags chained causes with a chained mechanism and parent linkage' do
+        raise_chained
+      rescue StandardError => e
+        exception_list = described_class.build_exception_list(e)
+
+        expect(exception_list[0]['mechanism']).to eq(
+          'type' => 'generic',
+          'handled' => true,
+          'exception_id' => 0
+        )
+        expect(exception_list[1]['mechanism']).to eq(
+          'type' => 'chained',
+          'handled' => true,
+          'source' => 'cause',
+          'exception_id' => 1,
+          'parent_id' => 0
+        )
+        expect(exception_list[2]['mechanism']).to eq(
+          'type' => 'chained',
+          'handled' => true,
+          'source' => 'cause',
+          'exception_id' => 2,
+          'parent_id' => 1
+        )
+      end
+
+      it 'threads a custom mechanism through the chain' do
+        raise_chained
+      rescue StandardError => e
+        exception_list = described_class.build_exception_list(e, mechanism: { 'type' => 'rails', 'handled' => false })
+
+        expect(exception_list[0]['mechanism']['type']).to eq('rails')
+        expect(exception_list[0]['mechanism']['handled']).to be false
+        expect(exception_list[1]['mechanism']['type']).to eq('chained')
+        expect(exception_list[1]['mechanism']['handled']).to be false
+      end
+
+      it 'guards against cycles in the cause chain' do
+        first = chainable_class.new('first')
+        second = chainable_class.new('second')
+        first.cause = second
+        second.cause = first
+
+        exception_list = described_class.build_exception_list(first)
+
+        expect(exception_list.map { |entry| entry['value'] }).to eq(%w[first second])
+      end
+
+      it 'caps the cause chain depth' do
+        outermost = chainable_class.new('error 0')
+        current = outermost
+        1.upto(59) do |i|
+          cause = chainable_class.new("error #{i}")
+          current.cause = cause
+          current = cause
+        end
+
+        exception_list = described_class.build_exception_list(outermost)
+
+        expect(exception_list.length).to eq(described_class::MAX_CHAINED_EXCEPTIONS)
+        expect(exception_list.last['value']).to eq('error 49')
+      end
+
+      it 'builds a single-element list for strings' do
+        exception_list = described_class.build_exception_list('Simple error')
+
+        expect(exception_list.length).to eq(1)
+        expect(exception_list.first['value']).to eq('Simple error')
+      end
+
+      it 'returns nil for invalid input types' do
+        expect(described_class.build_exception_list({ invalid: 'object' })).to be_nil
+        expect(described_class.build_exception_list(123)).to be_nil
+        expect(described_class.build_exception_list(nil)).to be_nil
+      end
     end
   end
 end
