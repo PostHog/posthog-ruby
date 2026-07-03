@@ -116,7 +116,10 @@ module PostHog
     # @param path [String]
     # @return [String]
     def self.normalize_path(path)
-      path.tr('\\', '/').sub(%r{/+\z}, '')
+      normalized = path.tr('\\', '/')
+      end_index = normalized.length
+      end_index -= 1 while end_index.positive? && normalized.getbyte(end_index - 1) == 47
+      normalized[0...end_index]
     end
 
     # @return [String, nil]
@@ -124,9 +127,12 @@ module PostHog
       return nil unless Object.const_defined?(:Rails)
 
       rails = Object.const_get(:Rails)
-      return nil unless rails.respond_to?(:root) && rails.root
+      return nil unless rails.respond_to?(:root)
 
-      rails.root.to_s
+      root = rails.root
+      return nil unless root
+
+      root.to_s
     rescue StandardError
       nil
     end
