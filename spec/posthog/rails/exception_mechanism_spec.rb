@@ -62,6 +62,41 @@ RSpec.describe 'automatic exception capture mechanisms' do
         )
       end
     end
+
+    it 'skips exceptions already captured by ActiveJobExtensions' do
+      PostHog::Rails.config.auto_instrument_active_job = true
+      error = StandardError.new('boom')
+      PostHog::Rails.mark_active_job_exception_captured(error)
+
+      described_class.new.report(
+        error,
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.active_support'
+      )
+
+      expect(PostHog).not_to have_received(:capture_exception)
+    end
+
+    it 'still captures unmarked ActiveSupport reports when ActiveJob instrumentation is enabled' do
+      PostHog::Rails.config.auto_instrument_active_job = true
+
+      described_class.new.report(
+        StandardError.new('boom'),
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.active_support'
+      )
+
+      expect(PostHog).to have_received(:capture_exception).with(
+        an_instance_of(StandardError),
+        anything,
+        hash_including('$exception_source' => 'application.active_support'),
+        mechanism: { 'type' => 'rails_error_reporter', 'handled' => false }
+      )
+    end
   end
 
   describe PostHog::Rails::ActiveJobExtensions do
@@ -109,6 +144,33 @@ RSpec.describe 'automatic exception capture mechanisms' do
         an_instance_of(StandardError),
         anything,
         an_instance_of(Hash),
+        mechanism: { 'type' => 'active_job', 'handled' => false }
+      )
+    end
+
+    it 'prevents Rails error subscriber from capturing the same job exception again' do
+      PostHog::Rails.config.auto_instrument_active_job = true
+      error = nil
+
+      begin
+        job_class.new.perform_now
+      rescue StandardError => e
+        error = e
+      end
+
+      PostHog::Rails::ErrorSubscriber.new.report(
+        error,
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.active_support'
+      )
+
+      expect(PostHog).to have_received(:capture_exception).once
+      expect(PostHog).to have_received(:capture_exception).with(
+        an_instance_of(StandardError),
+        anything,
+        hash_including('$exception_source' => 'active_job'),
         mechanism: { 'type' => 'active_job', 'handled' => false }
       )
     end
