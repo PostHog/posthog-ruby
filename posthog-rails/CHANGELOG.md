@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.16.1
+
+### Patch Changes
+
+- 737acbc: Avoid double-capturing ActiveJob exceptions through the Rails error subscriber.
+
 ## 3.16.0
 
 ### Minor Changes
