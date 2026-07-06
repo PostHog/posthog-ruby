@@ -23,6 +23,8 @@ module PostHog
         # Skip if in a web request - CaptureExceptions middleware will handle it
         # with richer context (URL, params, controller, etc.)
         return if PostHog::Rails.in_web_request?
+        return if PostHog::Rails.config&.auto_instrument_active_job &&
+                  PostHog::Rails.active_job_exception_captured?(error)
 
         distinct_id = context[:user_id] || context[:distinct_id]
 

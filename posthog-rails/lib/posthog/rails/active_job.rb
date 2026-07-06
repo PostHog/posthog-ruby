@@ -70,6 +70,7 @@ module PostHog
           properties,
           mechanism: { 'type' => 'active_job', 'handled' => false }
         )
+        PostHog::Rails.mark_active_job_exception_captured(exception)
       rescue StandardError => e
         # Don't let PostHog errors break job processing
         PostHog::Logging.logger.error("Failed to capture job exception: #{e.message}")
