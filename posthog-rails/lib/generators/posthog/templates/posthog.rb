@@ -123,7 +123,7 @@ PostHog.init do |config|
   # Secret key (optional, but required for local feature flag evaluation).
   # Accepts a Personal API Key (phx_...) or a Project Secret API Key (phs_...).
   # Get this from: PostHog Settings > Personal API Keys / Project API Keys
-  config.secret_key = ENV.fetch('POSTHOG_SECRET_API_KEY', ENV.fetch('POSTHOG_PERSONAL_API_KEY', nil))
+  config.secret_key = ENV.fetch('POSTHOG_SECRET_KEY', nil)
 
   # Maximum number of events to queue before dropping (default: 10000)
   config.max_queue_size = 10_000

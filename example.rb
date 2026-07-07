@@ -36,13 +36,13 @@ end
 
 # Get configuration
 api_key = ENV['POSTHOG_PROJECT_API_KEY'] || ''
-personal_api_key = ENV['POSTHOG_PERSONAL_API_KEY'] || ''
+secret_key = ENV['POSTHOG_SECRET_KEY'] || ''
 host = ENV['POSTHOG_HOST'] || 'http://localhost:8000'
 
 # Check if credentials are provided
-if api_key.empty? || personal_api_key.empty?
+if api_key.empty? || secret_key.empty?
   puts '❌ Missing PostHog credentials!'
-  puts '   Please set POSTHOG_PROJECT_API_KEY and POSTHOG_PERSONAL_API_KEY environment variables'
+  puts '   Please set POSTHOG_PROJECT_API_KEY and POSTHOG_SECRET_KEY environment variables'
   puts '   or copy .env.example to .env and fill in your values'
   exit 1
 end
@@ -54,7 +54,7 @@ begin
   # Create a minimal client for testing
   test_client = PostHog::Client.new(
     api_key: api_key,
-    secret_key: personal_api_key,
+    secret_key: secret_key,
     host: host,
     on_error: proc { |_status, _msg| }, # Suppress error output during test
     feature_flags_polling_interval: 60 # Longer interval for test
@@ -66,7 +66,7 @@ begin
   # If we get here without exception, credentials work
   puts '✅ Authentication successful!'
   puts "   API Key: #{api_key[0..8]}..."
-  puts "   Personal API Key: #{personal_api_key[0..8]}..."
+  puts "   Secret Key: #{secret_key[0..8]}..."
   puts "   Host: #{host}\n\n"
 
   test_client.shutdown
@@ -75,14 +75,14 @@ rescue StandardError => e
   puts "   Error: #{e.message}"
   puts "\n   Please check your credentials:"
   puts '   - POSTHOG_PROJECT_API_KEY: Project API key from PostHog settings'
-  puts '   - POSTHOG_PERSONAL_API_KEY: Personal API key (required for local evaluation)'
+  puts '   - POSTHOG_SECRET_KEY: Secret key (required for local evaluation)'
   puts '   - POSTHOG_HOST: Your PostHog instance URL'
   exit 1
 end
 
 posthog = PostHog::Client.new(
   api_key: api_key, # You can find this key on the /setup page in PostHog
-  secret_key: personal_api_key, # Required for local feature flag evaluation (Personal or Project Secret API Key)
+  secret_key: secret_key, # Required for local feature flag evaluation (Personal or Project Secret API Key)
   host: host, # Where you host PostHog. You can remove this line if using app.posthog.com
   on_error: proc { |_status, msg| print msg },
   feature_flags_polling_interval: 10 # How often to poll for feature flags

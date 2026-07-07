@@ -21,7 +21,7 @@ module Posthog
         say '  1. Edit config/initializers/posthog.rb with your PostHog API key'
         say '  2. Set environment variables:'
         say '     - POSTHOG_API_KEY (required)'
-        say '     - POSTHOG_PERSONAL_API_KEY (optional, for feature flags)'
+        say '     - POSTHOG_SECRET_KEY (optional, for feature flags)'
         say ''
         say 'Optional: forward Rails.logger to PostHog Logs', :yellow
         say '  - Add to your Gemfile (requires Ruby 3.3+):'
