@@ -15,7 +15,7 @@
 #
 # Create a .env file with:
 #   POSTHOG_PROJECT_API_KEY=your_project_api_key
-#   POSTHOG_PERSONAL_API_KEY=your_personal_api_key
+#   POSTHOG_SECRET_KEY=your_secret_key
 #   POSTHOG_HOST=https://us.posthog.com  # optional
 
 # Import the library (use local development version)
@@ -53,16 +53,16 @@ end
 load_env_file
 
 API_KEY = ENV['POSTHOG_PROJECT_API_KEY'] || ''
-PERSONAL_API_KEY = ENV['POSTHOG_PERSONAL_API_KEY'] || ''
+SECRET_KEY = ENV['POSTHOG_SECRET_KEY'] || ''
 HOST = ENV['POSTHOG_HOST'] || 'https://us.posthog.com'
 POLL_INTERVAL_SECONDS = 5
 
-if API_KEY.empty? || PERSONAL_API_KEY.empty?
+if API_KEY.empty? || SECRET_KEY.empty?
   warn 'Missing required environment variables.'
   warn ''
   warn 'Create a .env file with:'
   warn '  POSTHOG_PROJECT_API_KEY=your_project_api_key'
-  warn '  POSTHOG_PERSONAL_API_KEY=your_personal_api_key'
+  warn '  POSTHOG_SECRET_KEY=your_secret_key'
   warn '  POSTHOG_HOST=https://us.posthog.com  # optional'
   exit 1
 end
@@ -78,7 +78,7 @@ puts ''
 # Create PostHog client with local evaluation enabled
 posthog = PostHog::Client.new(
   api_key: API_KEY,
-  personal_api_key: PERSONAL_API_KEY,
+  secret_key: SECRET_KEY,
   host: HOST,
   feature_flags_polling_interval: POLL_INTERVAL_SECONDS,
   on_error: proc { |status, msg| puts "Error (#{status}): #{msg}" }

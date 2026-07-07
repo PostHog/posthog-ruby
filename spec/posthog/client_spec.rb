@@ -134,6 +134,33 @@ module PostHog
         expect(client.instance_variable_get(:@feature_flags_poller).instance_variable_get(:@host)).to eq('https://us.i.posthog.com')
       end
 
+      context 'secret_key' do
+        before do
+          stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
+            .to_return(status: 200, body: '{"flags":[]}')
+        end
+
+        [
+          ['resolves the credential from :secret_key', { secret_key: 'phs_secret' }, 'phs_secret', false],
+          ['accepts the deprecated :personal_api_key alias and warns',
+           { personal_api_key: 'phx_personal' }, 'phx_personal', true],
+          ['prefers :secret_key when both are supplied',
+           { secret_key: 'phs_secret', personal_api_key: 'phx_personal' }, 'phs_secret', false]
+        ].each do |description, opts, expected, warns|
+          it description do
+            client = Client.new(api_key: API_KEY, test_mode: true, **opts)
+
+            expect(client.instance_variable_get(:@secret_key)).to eq(expected)
+            expect(client.instance_variable_get(:@personal_api_key)).to eq(expected)
+            if warns
+              expect(logger).to have_received(:warn).with(include(':personal_api_key option is deprecated')).once
+            else
+              expect(logger).not_to have_received(:warn)
+            end
+          end
+        end
+      end
+
       context 'singleton warning' do
         before do
           # Stub HTTP to allow creating clients without test_mode (which triggers the warning)

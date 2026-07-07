@@ -53,7 +53,11 @@ module PostHog
 
     # @param opts [Hash] Client configuration.
     # @option opts [String, nil] :api_key Your project's API key. Missing or blank values disable the client.
-    # @option opts [String, nil] :personal_api_key Your personal API key. Required for local feature flag evaluation.
+    # @option opts [String, nil] :secret_key The credential used for local feature flag evaluation and remote
+    #   config. Accepts either a Personal API Key (`phx_...`) or a Project Secret API Key (`phs_...`). Required
+    #   for local feature flag evaluation.
+    # @option opts [String, nil] :personal_api_key
+    #   @deprecated Use +:secret_key+ instead. Retained as an alias; when both are supplied, +:secret_key+ wins.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`.
     # @option opts [Integer] :max_queue_size Maximum number of calls to remain queued. Defaults to 10_000.
     # @option opts [Integer] :batch_size Maximum number of events to send in one async batch.
@@ -88,8 +92,17 @@ module PostHog
       symbolize_keys!(opts)
 
       opts[:api_key] = normalize_string_option(opts[:api_key])
+      opts[:secret_key] = normalize_string_option(opts[:secret_key], blank_as_nil: true)
       opts[:personal_api_key] = normalize_string_option(opts[:personal_api_key], blank_as_nil: true)
       opts[:host] = normalize_host_option(opts[:host])
+
+      if opts[:secret_key].nil? && !opts[:personal_api_key].nil?
+        logger.warn(
+          'The :personal_api_key option is deprecated; use :secret_key instead. It accepts either a ' \
+          'Personal API Key (phx_...) or a Project Secret API Key (phs_...).'
+        )
+      end
+      secret_key = opts[:secret_key] || opts[:personal_api_key]
 
       @queue = Queue.new
       @queue_mutex = Mutex.new
@@ -119,7 +132,8 @@ module PostHog
       end
       @worker_thread = nil
       @feature_flags_poller = nil
-      @personal_api_key = opts[:personal_api_key]
+      @secret_key = secret_key
+      @personal_api_key = secret_key
 
       if @disabled && !opts[:silence_disabled_client_error]
         logger.error('api_key is missing or empty after trimming whitespace; check your project API key')
@@ -142,7 +156,7 @@ module PostHog
         @feature_flags_poller =
           FeatureFlagsPoller.new(
             opts[:feature_flags_polling_interval],
-            opts[:personal_api_key],
+            secret_key,
             @api_key,
             opts[:host],
             opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
@@ -761,9 +775,9 @@ module PostHog
     def reload_feature_flags
       return if @disabled
 
-      unless @personal_api_key
+      unless @secret_key
         logger.error(
-          'You need to specify a personal_api_key to locally evaluate feature flags'
+          'You need to specify a secret_key to locally evaluate feature flags'
         )
         return
       end
