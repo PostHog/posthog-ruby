@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.17.1
+
+### Patch Changes
+
+- 5bdf777: fix: also send the request user agent as $raw_user_agent, the standardized property PostHog's server-side classification reads
+
 ## 3.17.0
 
 ### Minor Changes
