@@ -13,7 +13,7 @@ module PostHog
     EVALUATED_LOCALLY_REASON = 'Evaluated locally'
 
     EvaluatedFlagRecord = Struct.new(
-      :key, :enabled, :variant, :payload, :id, :version, :reason, :locally_evaluated,
+      :key, :enabled, :variant, :payload, :id, :version, :reason, :locally_evaluated, :has_experiment,
       keyword_init: true
     )
 
@@ -165,6 +165,7 @@ module PostHog
         '$feature_flag' => key,
         '$feature_flag_response' => response,
         'locally_evaluated' => flag&.locally_evaluated ? true : false,
+        '$feature_flag_has_experiment' => flag&.has_experiment ? true : false,
         "$feature/#{key}" => response
       }
 

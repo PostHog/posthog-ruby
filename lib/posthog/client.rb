@@ -609,7 +609,8 @@ module PostHog
           id: definition[:id],
           version: nil,
           reason: FeatureFlagEvaluations::EVALUATED_LOCALLY_REASON,
-          locally_evaluated: true
+          locally_evaluated: true,
+          has_experiment: definition[:has_experiment] ? true : false
         )
         locally_evaluated_keys << key.to_s
       end
@@ -649,7 +650,8 @@ module PostHog
               id: metadata ? metadata.id : nil,
               version: metadata ? metadata.version : nil,
               reason: reason ? (reason.description || reason.code) : nil,
-              locally_evaluated: false
+              locally_evaluated: false,
+              has_experiment: metadata ? metadata.has_experiment : false
             )
           end
         rescue StandardError => e
@@ -766,6 +768,7 @@ module PostHog
       # Remove internal information
       response.delete(:requestId)
       response.delete(:evaluatedAt)
+      response.delete(:flagDetails)
       response
     end
 
@@ -921,7 +924,8 @@ module PostHog
       person_properties, group_properties = add_local_person_and_group_properties(
         groups, person_properties, group_properties
       )
-      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload =
+      feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload,
+        has_experiment =
         @feature_flags_poller.get_feature_flag(
           key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally
         )
@@ -929,7 +933,8 @@ module PostHog
         properties = {
           '$feature_flag' => key,
           '$feature_flag_response' => feature_flag_response,
-          'locally_evaluated' => flag_was_locally_evaluated
+          'locally_evaluated' => flag_was_locally_evaluated,
+          '$feature_flag_has_experiment' => has_experiment ? true : false
         }
         properties['$feature_flag_request_id'] = request_id if request_id
         properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at

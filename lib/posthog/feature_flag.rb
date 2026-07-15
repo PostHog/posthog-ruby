@@ -68,7 +68,7 @@ module PostHog
   #
   # @api private
   class FeatureFlagMetadata
-    attr_reader :id, :version, :payload, :description
+    attr_reader :id, :version, :payload, :description, :has_experiment
 
     # @param json [Hash] Raw metadata returned by /flags.
     def initialize(json)
@@ -77,6 +77,9 @@ module PostHog
       @version = json['version']
       @payload = json['payload']
       @description = json['description']
+      # Whether the flag is linked to an experiment. Defaults to false when the
+      # server (an older deployment) does not report the field.
+      @has_experiment = json['has_experiment'] ? true : false
     end
   end
 end

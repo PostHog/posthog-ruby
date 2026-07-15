@@ -221,6 +221,11 @@ module PostHog
       end
 
       flag_was_locally_evaluated = !response.nil?
+      # Whether the flag is linked to an experiment, as reported by the server.
+      # Locally-evaluated flags carry it in the stored definition; remotely
+      # evaluated flags carry it in the response metadata. Defaults to false
+      # when the server (an older deployment) does not report it.
+      has_experiment = flag_was_locally_evaluated && feature_flag[:has_experiment] ? true : false
 
       request_id = nil
       evaluated_at = nil
@@ -253,6 +258,9 @@ module PostHog
           payload = payloads[key]
           feature_flag_error = errors.join(',') unless errors.empty?
 
+          flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
+          has_experiment = flag_detail&.metadata&.has_experiment ? true : false
+
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue Timeout::Error => e
           @on_error.call(-1, "Timeout while fetching flags remotely: #{e}")
@@ -266,7 +274,7 @@ module PostHog
         end
       end
 
-      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload]
+      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload, has_experiment]
     end
 
     def get_all_flags(
@@ -324,10 +332,12 @@ module PostHog
       errors_while_computing = false
       quota_limited = nil
       status_code = nil
+      flag_details = nil
 
       if fallback_to_server && !only_evaluate_locally
         begin
           flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties)
+          flag_details = flags_and_payloads[:flags]
           errors_while_computing = flags_and_payloads[:errorsWhileComputingFlags] || false
           quota_limited = flags_and_payloads[:quotaLimited]
           status_code = flags_and_payloads[:status]
@@ -368,6 +378,7 @@ module PostHog
       {
         featureFlags: flags,
         featureFlagPayloads: payloads,
+        flagDetails: flag_details,
         requestId: request_id,
         evaluatedAt: evaluated_at,
         errorsWhileComputingFlags: errors_while_computing,
