@@ -2,4 +2,4 @@
 "posthog-ruby": minor
 ---
 
-feat: add a `$feature_flag_has_experiment` boolean property to every `$feature_flag_called` event, sourced from the server-reported `has_experiment` field (defaults to false when the server does not report it)
+feat: add a `$feature_flag_has_experiment` boolean property to `$feature_flag_called` events when the server explicitly reports the `has_experiment` field; the property is omitted when the server does not report it (older deployments)

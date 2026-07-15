@@ -165,11 +165,11 @@ module PostHog
         '$feature_flag' => key,
         '$feature_flag_response' => response,
         'locally_evaluated' => flag&.locally_evaluated ? true : false,
-        '$feature_flag_has_experiment' => flag&.has_experiment ? true : false,
         "$feature/#{key}" => response
       }
 
       if flag
+        properties['$feature_flag_has_experiment'] = flag.has_experiment unless flag.has_experiment.nil?
         properties['$feature_flag_payload'] = flag.payload unless flag.payload.nil?
         properties['$feature_flag_id'] = flag.id if flag.id
         properties['$feature_flag_version'] = flag.version if flag.version

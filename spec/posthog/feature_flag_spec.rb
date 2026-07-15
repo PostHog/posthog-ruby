@@ -5311,12 +5311,12 @@ module PostHog
         expect(flag_called_properties(c, 'test-flag')['$feature_flag_has_experiment']).to be false
       end
 
-      it 'is false when the local definition omits has_experiment' do
+      it 'is omitted when the local definition omits has_experiment' do
         stub_definitions(local_definition)
         stub_request(:post, flags_endpoint).to_return(status: 400)
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-        expect(flag_called_properties(c, 'test-flag')['$feature_flag_has_experiment']).to be false
+        expect(flag_called_properties(c, 'test-flag')).not_to have_key('$feature_flag_has_experiment')
       end
 
       it 'sources has_experiment from the /flags response metadata on remote evaluation' do
@@ -5336,7 +5336,7 @@ module PostHog
         expect(flag_called_properties(c, 'remote-flag')['$feature_flag_has_experiment']).to be true
       end
 
-      it 'is false when the /flags response omits has_experiment' do
+      it 'is omitted when the /flags response omits has_experiment' do
         stub_definitions('flags' => [])
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: {
@@ -5345,7 +5345,7 @@ module PostHog
           }.to_json)
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-        expect(flag_called_properties(c, 'remote-flag')['$feature_flag_has_experiment']).to be false
+        expect(flag_called_properties(c, 'remote-flag')).not_to have_key('$feature_flag_has_experiment')
       end
     end
   end

@@ -559,7 +559,6 @@ module PostHog
           expect(captured_message[:properties]).to eq(
             '$feature_flag' => 'beta-feature',
             '$feature_flag_response' => true,
-            '$feature_flag_has_experiment' => false,
             '$lib' => 'posthog-ruby',
             '$lib_version' => '1.2.4',
             '$is_server' => true,
@@ -623,8 +622,7 @@ module PostHog
                                               properties: {
                                                 '$feature_flag' => 'beta-feature',
                                                 '$feature_flag_response' => true,
-                                                'locally_evaluated' => true,
-                                                '$feature_flag_has_experiment' => false
+                                                'locally_evaluated' => true
                                               },
                                               groups: {}
                                             }).exactly(1).times
@@ -648,8 +646,7 @@ module PostHog
                                               properties: {
                                                 '$feature_flag' => 'beta-feature',
                                                 '$feature_flag_response' => true,
-                                                'locally_evaluated' => true,
-                                                '$feature_flag_has_experiment' => false
+                                                'locally_evaluated' => true
                                               },
                                               groups: {}
                                             }).exactly(1).times
@@ -671,8 +668,7 @@ module PostHog
                                               properties: {
                                                 '$feature_flag' => 'decide-flag',
                                                 '$feature_flag_response' => 'decide-value',
-                                                'locally_evaluated' => false,
-                                                '$feature_flag_has_experiment' => false
+                                                'locally_evaluated' => false
                                               },
                                               groups: { organization: 'org1' }
                                             }).exactly(1).times

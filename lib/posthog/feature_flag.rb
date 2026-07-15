@@ -77,9 +77,9 @@ module PostHog
       @version = json['version']
       @payload = json['payload']
       @description = json['description']
-      # Whether the flag is linked to an experiment. Defaults to false when the
-      # server (an older deployment) does not report the field.
-      @has_experiment = json['has_experiment'] ? true : false
+      # Whether the flag is linked to an experiment. nil when the server
+      # (an older deployment) does not report the field.
+      @has_experiment = json['has_experiment']
     end
   end
 end

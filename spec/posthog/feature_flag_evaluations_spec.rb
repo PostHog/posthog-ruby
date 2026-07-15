@@ -343,14 +343,14 @@ module PostHog
         expect(flag_called_properties(client, 'plain-flag')['$feature_flag_has_experiment']).to be(false)
       end
 
-      it 'is false when the server omits has_experiment' do
+      it 'is omitted when the server does not report has_experiment' do
         stub_flags(has_experiment_response)
-        expect(flag_called_properties(client, 'legacy-flag')['$feature_flag_has_experiment']).to be(false)
+        expect(flag_called_properties(client, 'legacy-flag')).not_to have_key('$feature_flag_has_experiment')
       end
 
-      it 'is false for flags missing from the evaluation' do
+      it 'is omitted for flags missing from the evaluation' do
         stub_flags(has_experiment_response)
-        expect(flag_called_properties(client, 'not-a-flag')['$feature_flag_has_experiment']).to be(false)
+        expect(flag_called_properties(client, 'not-a-flag')).not_to have_key('$feature_flag_has_experiment')
       end
     end
 
@@ -478,7 +478,7 @@ module PostHog
         msgs = drain_messages(c).select { |m| m[:event] == '$feature_flag_called' }
         by_key = msgs.to_h { |m| [m[:properties]['$feature_flag'], m[:properties]] }
         expect(by_key['local-flag']['$feature_flag_has_experiment']).to be(true)
-        expect(by_key['plain-local-flag']['$feature_flag_has_experiment']).to be(false)
+        expect(by_key['plain-local-flag']).not_to have_key('$feature_flag_has_experiment')
       end
 
       it 'skips the remote /flags call when flag_keys are all resolved locally' do

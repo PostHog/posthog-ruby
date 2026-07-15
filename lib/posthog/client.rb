@@ -610,7 +610,7 @@ module PostHog
           version: nil,
           reason: FeatureFlagEvaluations::EVALUATED_LOCALLY_REASON,
           locally_evaluated: true,
-          has_experiment: definition[:has_experiment] ? true : false
+          has_experiment: definition[:has_experiment]
         )
         locally_evaluated_keys << key.to_s
       end
@@ -651,7 +651,7 @@ module PostHog
               version: metadata ? metadata.version : nil,
               reason: reason ? (reason.description || reason.code) : nil,
               locally_evaluated: false,
-              has_experiment: metadata ? metadata.has_experiment : false
+              has_experiment: metadata&.has_experiment
             )
           end
         rescue StandardError => e
@@ -933,9 +933,9 @@ module PostHog
         properties = {
           '$feature_flag' => key,
           '$feature_flag_response' => feature_flag_response,
-          'locally_evaluated' => flag_was_locally_evaluated,
-          '$feature_flag_has_experiment' => has_experiment ? true : false
+          'locally_evaluated' => flag_was_locally_evaluated
         }
+        properties['$feature_flag_has_experiment'] = has_experiment unless has_experiment.nil?
         properties['$feature_flag_request_id'] = request_id if request_id
         properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at
         properties['$feature_flag_error'] = feature_flag_error if feature_flag_error

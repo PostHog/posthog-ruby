@@ -223,9 +223,9 @@ module PostHog
       flag_was_locally_evaluated = !response.nil?
       # Whether the flag is linked to an experiment, as reported by the server.
       # Locally-evaluated flags carry it in the stored definition; remotely
-      # evaluated flags carry it in the response metadata. Defaults to false
-      # when the server (an older deployment) does not report it.
-      has_experiment = flag_was_locally_evaluated && feature_flag[:has_experiment] ? true : false
+      # evaluated flags carry it in the response metadata. nil when the server
+      # (an older deployment) does not report it.
+      has_experiment = feature_flag[:has_experiment] if flag_was_locally_evaluated
 
       request_id = nil
       evaluated_at = nil
@@ -259,7 +259,7 @@ module PostHog
           feature_flag_error = errors.join(',') unless errors.empty?
 
           flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
-          has_experiment = flag_detail&.metadata&.has_experiment ? true : false
+          has_experiment = flag_detail&.metadata&.has_experiment
 
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue Timeout::Error => e

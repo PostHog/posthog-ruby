@@ -463,7 +463,7 @@ module PostHog
           version: 23,
           payload: '{"foo": 1}',
           description: 'This is an enabled flag',
-          has_experiment: false
+          has_experiment: nil
         )
       )
     end
@@ -504,7 +504,6 @@ module PostHog
           eq({
                '$feature_flag' => 'enabled-flag',
                '$feature_flag_response' => true,
-               '$feature_flag_has_experiment' => false,
                '$feature_flag_request_id' => '42853c54-1431-4861-996e-3a548989fa2c',
                '$feature_flag_evaluated_at' => 1_704_067_200_000,
                '$lib' => 'posthog-ruby',
