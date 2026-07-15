@@ -462,9 +462,25 @@ module PostHog
           id: 1,
           version: 23,
           payload: '{"foo": 1}',
-          description: 'This is an enabled flag'
+          description: 'This is an enabled flag',
+          has_experiment: nil
         )
       )
+    end
+
+    it 'parses has_experiment from metadata' do
+      result = FeatureFlag.new({
+                                 'key' => 'experiment-flag',
+                                 'enabled' => true,
+                                 'variant' => nil,
+                                 'metadata' => {
+                                   'id' => 1,
+                                   'version' => 23,
+                                   'has_experiment' => true
+                                 }
+                               })
+
+      expect(result.metadata.has_experiment).to be(true)
     end
   end
 

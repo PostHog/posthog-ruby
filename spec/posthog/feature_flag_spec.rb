@@ -5267,5 +5267,86 @@ module PostHog
       expect(captured_message[:properties]['$feature_flag_evaluated_at']).to eq(1_704_067_200_000)
       expect(captured_message[:properties]['locally_evaluated']).to be false
     end
+
+    describe '$feature_flag_has_experiment' do
+      def local_definition(has_experiment: nil)
+        flag = {
+          'id' => 1,
+          'name' => 'Beta Feature',
+          'key' => 'test-flag',
+          'active' => true,
+          'filters' => { 'groups' => [{ 'rollout_percentage' => 100 }] }
+        }
+        flag['has_experiment'] = has_experiment unless has_experiment.nil?
+        { 'flags' => [flag] }
+      end
+
+      def stub_definitions(body)
+        stub_request(
+          :get,
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+        ).to_return(status: 200, body: body.to_json)
+      end
+
+      def flag_called_properties(client, key)
+        client.get_feature_flag_result(key, 'some-distinct-id')
+        captured_message = client.dequeue_last_message
+        expect(captured_message[:event]).to eq('$feature_flag_called')
+        captured_message[:properties]
+      end
+
+      it 'is true when the local definition reports has_experiment' do
+        stub_definitions(local_definition(has_experiment: true))
+        stub_request(:post, flags_endpoint).to_return(status: 400)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(flag_called_properties(c, 'test-flag')['$feature_flag_has_experiment']).to be true
+      end
+
+      it 'is false when the local definition reports has_experiment false' do
+        stub_definitions(local_definition(has_experiment: false))
+        stub_request(:post, flags_endpoint).to_return(status: 400)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(flag_called_properties(c, 'test-flag')['$feature_flag_has_experiment']).to be false
+      end
+
+      it 'is omitted when the local definition omits has_experiment' do
+        stub_definitions(local_definition)
+        stub_request(:post, flags_endpoint).to_return(status: 400)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(flag_called_properties(c, 'test-flag')).not_to have_key('$feature_flag_has_experiment')
+      end
+
+      it 'sources has_experiment from the /flags response metadata on remote evaluation' do
+        stub_definitions('flags' => [])
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: {
+            'flags' => {
+              'remote-flag' => {
+                'key' => 'remote-flag', 'enabled' => true, 'variant' => nil,
+                'metadata' => { 'id' => 7, 'version' => 3, 'has_experiment' => true }
+              }
+            },
+            'requestId' => 'test-request-id'
+          }.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(flag_called_properties(c, 'remote-flag')['$feature_flag_has_experiment']).to be true
+      end
+
+      it 'is omitted when the /flags response omits has_experiment' do
+        stub_definitions('flags' => [])
+        stub_request(:post, flags_endpoint)
+          .to_return(status: 200, body: {
+            'featureFlags' => { 'remote-flag' => true },
+            'requestId' => 'test-request-id'
+          }.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        expect(flag_called_properties(c, 'remote-flag')).not_to have_key('$feature_flag_has_experiment')
+      end
+    end
   end
 end

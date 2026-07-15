@@ -68,6 +68,8 @@ constant PostHog::FeatureFlagEvaluations::EVALUATED_LOCALLY_REASON: String
 class PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord < Struct
 instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#enabled()
 instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#enabled=(_)
+instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#has_experiment()
+instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#has_experiment=(_)
 instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#id()
 instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#id=(_)
 instance_method PostHog::FeatureFlagEvaluations::EvaluatedFlagRecord#key()

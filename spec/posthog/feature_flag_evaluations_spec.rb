@@ -304,6 +304,56 @@ module PostHog
       end
     end
 
+    describe '$feature_flag_has_experiment' do
+      let(:has_experiment_response) do
+        {
+          flags: {
+            'experiment-flag' => {
+              key: 'experiment-flag', enabled: true, variant: nil,
+              metadata: { id: 10, version: 1, has_experiment: true }
+            },
+            'plain-flag' => {
+              key: 'plain-flag', enabled: true, variant: nil,
+              metadata: { id: 11, version: 1, has_experiment: false }
+            },
+            'legacy-flag' => {
+              key: 'legacy-flag', enabled: true, variant: nil,
+              metadata: { id: 12, version: 1 }
+            }
+          },
+          requestId: 'request-id-2'
+        }
+      end
+
+      def flag_called_properties(client, key)
+        client.evaluate_flags('user-1').enabled?(key)
+        event = drain_messages(client).find do |m|
+          m[:event] == '$feature_flag_called' && m[:properties]['$feature_flag'] == key
+        end
+        event[:properties]
+      end
+
+      it 'is true when the server reports has_experiment' do
+        stub_flags(has_experiment_response)
+        expect(flag_called_properties(client, 'experiment-flag')['$feature_flag_has_experiment']).to be(true)
+      end
+
+      it 'is false when the server reports has_experiment false' do
+        stub_flags(has_experiment_response)
+        expect(flag_called_properties(client, 'plain-flag')['$feature_flag_has_experiment']).to be(false)
+      end
+
+      it 'is omitted when the server does not report has_experiment' do
+        stub_flags(has_experiment_response)
+        expect(flag_called_properties(client, 'legacy-flag')).not_to have_key('$feature_flag_has_experiment')
+      end
+
+      it 'is omitted for flags missing from the evaluation' do
+        stub_flags(has_experiment_response)
+        expect(flag_called_properties(client, 'not-a-flag')).not_to have_key('$feature_flag_has_experiment')
+      end
+    end
+
     describe 'response-level errors' do
       it 'combines errorsWhileComputingFlags with flag_missing on $feature_flag_error' do
         stub_flags(flags_response.merge(errorsWhileComputingFlags: true))
@@ -387,7 +437,11 @@ module PostHog
         {
           flags: [
             {
-              id: 99, name: 'Local flag', key: 'local-flag', active: true,
+              id: 99, name: 'Local flag', key: 'local-flag', active: true, has_experiment: true,
+              filters: { groups: [{ properties: [], rollout_percentage: 100 }] }
+            },
+            {
+              id: 100, name: 'Plain local flag', key: 'plain-local-flag', active: true,
               filters: { groups: [{ properties: [], rollout_percentage: 100 }] }
             }
           ]
@@ -410,6 +464,21 @@ module PostHog
         expect(event[:properties]['$feature_flag_reason']).to eq('Evaluated locally')
         expect(event[:properties]['$feature_flag_id']).to eq(99)
         expect(event[:properties]['$feature_flag_definitions_loaded_at']).to be_a(Integer)
+      end
+
+      it 'sources $feature_flag_has_experiment from the local flag definition' do
+        stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
+          .to_return(status: 200, body: local_definitions.to_json)
+        c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        snapshot = c.evaluate_flags('user-1', only_evaluate_locally: true)
+
+        snapshot.enabled?('local-flag')
+        snapshot.enabled?('plain-local-flag')
+
+        msgs = drain_messages(c).select { |m| m[:event] == '$feature_flag_called' }
+        by_key = msgs.to_h { |m| [m[:properties]['$feature_flag'], m[:properties]] }
+        expect(by_key['local-flag']['$feature_flag_has_experiment']).to be(true)
+        expect(by_key['plain-local-flag']).not_to have_key('$feature_flag_has_experiment')
       end
 
       it 'skips the remote /flags call when flag_keys are all resolved locally' do
