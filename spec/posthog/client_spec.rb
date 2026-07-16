@@ -290,6 +290,24 @@ module PostHog
         )
       end
 
+      it 'does not minimize when a caller supplies the minimal marker inside properties' do
+        client.capture(
+          distinct_id: 'user',
+          event: '$feature_flag_called',
+          properties: {
+            '_minimal_flag_called_event' => true,
+            '$feature_flag' => 'test-flag',
+            'custom_prop' => 'value'
+          }
+        )
+
+        message = client.dequeue_last_message
+        # Both properties would be stripped by the allowlist if the smuggled
+        # marker had triggered minimization.
+        expect(message[:properties]['custom_prop']).to eq('value')
+        expect(message[:properties]['_minimal_flag_called_event']).to be true
+      end
+
       it 'generates a personless distinct_id without an explicit or context distinct_id' do
         client.capture(event: 'Event')
 

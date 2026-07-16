@@ -412,6 +412,25 @@ module PostHog
         expect(cohorts[:'1'][:type]).to eq('AND')
       end
 
+      it 'persists the minimal_flag_called_events gate to the cache provider' do
+        provider.should_fetch_return_value = true
+
+        stub_request(:get, local_eval_url)
+          .to_return(status: 200, body: sample_flags_data.merge('minimal_flag_called_events' => true).to_json)
+        create_client_with_cache(provider: provider, stub_api: false)
+
+        expect(provider.stored_data[:minimal_flag_called_events]).to eq(true)
+      end
+
+      it 'applies the minimal_flag_called_events gate from cached data' do
+        provider.should_fetch_return_value = false
+        provider.stored_data = sample_flags_data.merge('minimal_flag_called_events' => true)
+
+        client = create_client_with_cache(provider: provider, stub_api: false)
+
+        expect(get_poller(client).minimal_flag_called_events).to eq(true)
+      end
+
       it 'updates cache when API returns new data' do
         provider.should_fetch_return_value = true
 

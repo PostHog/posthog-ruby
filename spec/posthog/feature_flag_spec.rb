@@ -5348,6 +5348,135 @@ module PostHog
         expect(flag_called_properties(c, 'remote-flag')).not_to have_key('$feature_flag_has_experiment')
       end
     end
+
+    describe 'minimal $feature_flag_called events' do
+      def local_definitions(has_experiment: false, minimal_flag_called_events: true)
+        flag = {
+          'id' => 1,
+          'name' => 'Beta Feature',
+          'key' => 'test-flag',
+          'active' => true,
+          'filters' => { 'groups' => [{ 'rollout_percentage' => 100 }] }
+        }
+        flag['has_experiment'] = has_experiment unless has_experiment.nil?
+        definitions = { 'flags' => [flag] }
+        definitions['minimal_flag_called_events'] = minimal_flag_called_events unless minimal_flag_called_events.nil?
+        definitions
+      end
+
+      def remote_flags_response(has_experiment: false, minimal_flag_called_events: true)
+        metadata = { 'id' => 7, 'version' => 3 }
+        metadata['has_experiment'] = has_experiment unless has_experiment.nil?
+        response = {
+          'flags' => {
+            'remote-flag' => { 'key' => 'remote-flag', 'enabled' => true, 'variant' => nil, 'metadata' => metadata }
+          },
+          'requestId' => 'test-request-id'
+        }
+        response['minimalFlagCalledEvents'] = minimal_flag_called_events unless minimal_flag_called_events.nil?
+        response
+      end
+
+      def stub_definitions(body)
+        stub_request(
+          :get,
+          'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+        ).to_return(status: 200, body: body.to_json)
+      end
+
+      def flag_called_properties(client, key, groups: {})
+        Internal::Context.with_context(session_id: 'session-abc', properties: { 'custom_context_prop' => 'value' }) do
+          client.get_feature_flag_result(key, 'some-distinct-id', groups: groups)
+        end
+        captured_message = client.dequeue_last_message
+        expect(captured_message[:event]).to eq('$feature_flag_called')
+        captured_message[:properties]
+      end
+
+      context 'with local evaluation' do
+        it 'sends only the allowlisted properties when gated and the flag has no experiment' do
+          stub_definitions(local_definitions)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          properties = flag_called_properties(c, 'test-flag')
+          expect(properties.keys).to match_array(
+            %w[$feature_flag $feature_flag_response $feature_flag_has_experiment $groups $session_id
+               $is_server locally_evaluated $lib $lib_version]
+          )
+          expect(properties['$feature_flag_response']).to be true
+          expect(properties['$feature_flag_has_experiment']).to be false
+          expect(properties['locally_evaluated']).to be true
+          expect(properties['$session_id']).to eq('session-abc')
+          expect(properties['$is_server']).to be true
+        end
+
+        it 'keeps $groups on minimal events' do
+          stub_definitions(local_definitions)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          properties = flag_called_properties(c, 'test-flag', groups: { 'company' => 'id_5' })
+          expect(properties['$groups']).to eq(company: 'id_5')
+        end
+
+        it 'sends the full event when the flag has an experiment' do
+          stub_definitions(local_definitions(has_experiment: true))
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          properties = flag_called_properties(c, 'test-flag')
+          expect(properties['$feature_flag_has_experiment']).to be true
+          expect(properties['custom_context_prop']).to eq('value')
+        end
+
+        it 'sends the full event when the definitions payload omits the gate' do
+          stub_definitions(local_definitions(minimal_flag_called_events: nil))
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          expect(flag_called_properties(c, 'test-flag')['custom_context_prop']).to eq('value')
+        end
+
+        it 'sends the full event when the flag does not report has_experiment' do
+          stub_definitions(local_definitions(has_experiment: nil))
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          expect(flag_called_properties(c, 'test-flag')['custom_context_prop']).to eq('value')
+        end
+      end
+
+      context 'with remote evaluation' do
+        before { stub_definitions('flags' => []) }
+
+        it 'sends only the allowlisted properties when the /flags response gates and reports no experiment' do
+          stub_request(:post, flags_endpoint).to_return(status: 200, body: remote_flags_response.to_json)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          properties = flag_called_properties(c, 'remote-flag')
+          expect(properties.keys).to match_array(
+            %w[$feature_flag $feature_flag_response $feature_flag_has_experiment $feature_flag_request_id
+               $groups $session_id $is_server locally_evaluated $lib $lib_version]
+          )
+          expect(properties['$feature_flag_has_experiment']).to be false
+          expect(properties['locally_evaluated']).to be false
+        end
+
+        it 'sends the full event when the /flags response reports an experiment' do
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: remote_flags_response(has_experiment: true).to_json)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          properties = flag_called_properties(c, 'remote-flag')
+          expect(properties['$feature_flag_has_experiment']).to be true
+          expect(properties['custom_context_prop']).to eq('value')
+        end
+
+        it 'sends the full event when the /flags response omits the gate' do
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: remote_flags_response(minimal_flag_called_events: nil).to_json)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          expect(flag_called_properties(c, 'remote-flag')['custom_context_prop']).to eq('value')
+        end
+      end
+    end
   end
 
   describe 'definitions polling interval' do
