@@ -76,6 +76,13 @@ module PostHog
     # @option opts [Integer] :feature_flag_request_max_retries How many times to retry a flag request after a
     #   transient network error. Each retry sleeps on the calling thread before retrying, so this adds to
     #   worst-case latency. Defaults to 1. Set to 0 to disable retrying.
+    # @option opts [Boolean] :feature_flags_async_load +true+ to fetch feature flag definitions for local
+    #   evaluation only on the poller's background thread instead of the calling thread. The constructor
+    #   returns without waiting for definitions: the poller fetches immediately on boot and, if that fails,
+    #   keeps retrying on its regular polling interval until a load succeeds. Until then local evaluation
+    #   treats definitions as absent (check {#feature_flags_loaded?}), so evaluations return nil with
+    #   +only_evaluate_locally: true+, or fall back to the remote flags endpoint (which still runs on the
+    #   calling thread) without it. Defaults to +false+.
     # @option opts [Proc] :before_send A callback that receives the event hash and should return either a modified
     #   hash to be sent to PostHog or nil to prevent the event from being sent. e.g. `before_send: ->(event) { event }`.
     # @option opts [Boolean] :disable_singleton_warning +true+ to suppress the warning when multiple clients share
@@ -162,7 +169,8 @@ module PostHog
             opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
             opts[:on_error],
             flag_definition_cache_provider: opts[:flag_definition_cache_provider],
-            feature_flag_request_max_retries: opts[:feature_flag_request_max_retries]
+            feature_flag_request_max_retries: opts[:feature_flag_request_max_retries],
+            async_load: opts[:feature_flags_async_load] == true
           )
       end
 
@@ -772,7 +780,8 @@ module PostHog
       response
     end
 
-    # Reload locally cached feature flag definitions.
+    # Reload locally cached feature flag definitions synchronously on the
+    # calling thread.
     #
     # @return [void]
     def reload_feature_flags
@@ -785,6 +794,17 @@ module PostHog
         return
       end
       @feature_flags_poller.load_feature_flags(true)
+    end
+
+    # Whether feature flag definitions for local evaluation are currently loaded.
+    # False until the first successful load, and false again if a quota-limited
+    # (402) response discards the definitions.
+    #
+    # @return [Boolean]
+    def feature_flags_loaded?
+      return false if @disabled
+
+      @feature_flags_poller.definitions_loaded?
     end
 
     # Whether the client will actually send events. It is disabled when the
