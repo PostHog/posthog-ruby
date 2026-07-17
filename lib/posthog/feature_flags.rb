@@ -40,6 +40,9 @@ module PostHog
     # @param feature_flag_request_max_retries [Integer, nil] Retries after a transient network error or retryable
     #   HTTP response status on a flag request. Defaults to {Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES}.
     #   Set to 0 to disable retrying.
+    # @param async_load [Boolean] When true, flag definitions are fetched only on the poller thread: an
+    #   immediate first tick at construction, then the regular polling cadence, which keeps retrying until a
+    #   load succeeds.
     def initialize(
       polling_interval,
       secret_key,
@@ -48,7 +51,8 @@ module PostHog
       feature_flag_request_timeout_seconds,
       on_error = nil,
       flag_definition_cache_provider: nil,
-      feature_flag_request_max_retries: nil
+      feature_flag_request_max_retries: nil,
+      async_load: false
     )
       @polling_interval = polling_interval || 30
       @secret_key = secret_key
@@ -66,13 +70,15 @@ module PostHog
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @flags_etag = Concurrent::AtomicReference.new(nil)
       @flag_definitions_loaded_at = nil
+      @async_load = async_load
 
       @flag_definition_cache_provider = flag_definition_cache_provider
       FlagDefinitionCacheProvider.validate!(@flag_definition_cache_provider) if @flag_definition_cache_provider
 
       @task =
         Concurrent::TimerTask.new(
-          execution_interval: polling_interval
+          execution_interval: polling_interval,
+          run_now: @async_load
         ) { _load_feature_flags }
 
       # If no secret_key, disable local evaluation & thus polling for definitions
@@ -80,16 +86,21 @@ module PostHog
         logger.info 'No secret_key provided, disabling local evaluation'
         @loaded_flags_successfully_once.make_true
       else
-        # load once before timer
-        load_feature_flags
+        # load once synchronously before timer, unless @async_load
+        load_feature_flags unless @async_load
         @task.execute
       end
     end
 
     def load_feature_flags(force_reload = false)
-      return unless @loaded_flags_successfully_once.false? || force_reload
+      return if (@loaded_flags_successfully_once.true? || @async_load) && !force_reload
 
       _load_feature_flags
+    end
+
+    # Whether flag definitions have been successfully loaded at least once.
+    def definitions_loaded?
+      !@flag_definitions_loaded_at.nil?
     end
 
     attr_reader :flag_definitions_loaded_at, :feature_flags_by_key
