@@ -69,7 +69,7 @@ module PostHog
       @on_error = on_error || proc { |status, error| }
       @quota_limited = Concurrent::AtomicBoolean.new(false)
       @flags_etag = Concurrent::AtomicReference.new(nil)
-      @flag_definitions_loaded_at = nil
+      @flag_definitions_loaded_at = Concurrent::AtomicReference.new(nil)
       @async_load = async_load
 
       @flag_definition_cache_provider = flag_definition_cache_provider
@@ -102,10 +102,15 @@ module PostHog
     # successful load, and false again if a quota-limited (402) response
     # discards them.
     def definitions_loaded?
-      !@flag_definitions_loaded_at.nil?
+      !@flag_definitions_loaded_at.value.nil?
     end
 
-    attr_reader :flag_definitions_loaded_at, :feature_flags_by_key
+    # Epoch milliseconds of the last successful definitions load, or nil.
+    def flag_definitions_loaded_at
+      @flag_definitions_loaded_at.value
+    end
+
+    attr_reader :feature_flags_by_key
 
     def get_feature_variants(
       distinct_id,
@@ -1196,7 +1201,7 @@ module PostHog
         @feature_flags_by_key = {}
         @group_type_mapping = Concurrent::Hash.new
         @cohorts = Concurrent::Hash.new
-        @flag_definitions_loaded_at = nil
+        @flag_definitions_loaded_at.value = nil
         @loaded_flags_successfully_once.make_false
         @quota_limited.make_true
         return
@@ -1245,7 +1250,7 @@ module PostHog
       @cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
 
       logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
-      @flag_definitions_loaded_at = (Time.now.to_f * 1000).to_i
+      @flag_definitions_loaded_at.value = (Time.now.to_f * 1000).to_i
       @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
     end
 
