@@ -36,6 +36,7 @@ constant PostHog::Defaults::BackoffPolicy::RANDOMIZATION_FACTOR: Float
 module PostHog::Defaults::FeatureFlags
 constant PostHog::Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES: Integer
 constant PostHog::Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS: Integer
+constant PostHog::Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS: Integer
 constant PostHog::Defaults::MAX_HASH_SIZE: Integer
 module PostHog::Defaults::Message
 constant PostHog::Defaults::Message::MAX_BYTES: Integer
