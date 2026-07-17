@@ -5349,4 +5349,33 @@ module PostHog
       end
     end
   end
+
+  describe 'definitions polling interval' do
+    before do
+      stub_request(
+        :get,
+        'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true'
+      ).to_return(status: 200, body: { flags: [] }.to_json)
+    end
+
+    def timer_task_interval(client)
+      poller = client.instance_variable_get(:@feature_flags_poller)
+      poller.instance_variable_get(:@task).execution_interval
+    end
+
+    it 'defaults to the documented 30 seconds' do
+      client = Client.new(api_key: API_KEY, secret_key: API_KEY, test_mode: true)
+
+      expect(timer_task_interval(client)).to eq(30)
+    end
+
+    it 'uses feature_flags_polling_interval when provided' do
+      client = Client.new(
+        api_key: API_KEY, secret_key: API_KEY, test_mode: true,
+        feature_flags_polling_interval: 15
+      )
+
+      expect(timer_task_interval(client)).to eq(15)
+    end
+  end
 end

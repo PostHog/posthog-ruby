@@ -30,6 +30,7 @@ module PostHog
     include PostHog::Utils
 
     # @param polling_interval [Integer, nil] Seconds between local feature flag definition polls.
+    #   Defaults to {Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS}.
     # @param secret_key [String, nil] Credential used to fetch local evaluation definitions. Accepts either a
     #   Personal API Key (`phx_...`) or a Project Secret API Key (`phs_...`).
     # @param project_api_key [String] Project API key.
@@ -54,7 +55,7 @@ module PostHog
       feature_flag_request_max_retries: nil,
       async_load: false
     )
-      @polling_interval = polling_interval || 30
+      @polling_interval = polling_interval || Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS
       @secret_key = secret_key
       @project_api_key = project_api_key
       @host = host
@@ -77,7 +78,7 @@ module PostHog
 
       @task =
         Concurrent::TimerTask.new(
-          execution_interval: polling_interval,
+          execution_interval: @polling_interval,
           run_now: @async_load
         ) { _load_feature_flags }
 
