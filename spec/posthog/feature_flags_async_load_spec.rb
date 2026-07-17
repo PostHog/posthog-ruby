@@ -145,6 +145,18 @@ module PostHog
         client = @client = Client.new(api_key: API_KEY, test_mode: true)
         expect(client.feature_flags_loaded?).to be(false)
       end
+
+      it 'becomes false again when a 402 quota-limited response discards the definitions' do
+        stub_request(:get, definitions_endpoint).to_return(status: 200, body: definitions_body)
+        client = build_client
+        eventually { expect(client.feature_flags_loaded?).to be(true) }
+
+        stub_request(:get, definitions_endpoint)
+          .to_return(status: 402, body: { error: 'quota_limit_exceeded' }.to_json)
+        client.reload_feature_flags
+
+        expect(client.feature_flags_loaded?).to be(false)
+      end
     end
   end
 end

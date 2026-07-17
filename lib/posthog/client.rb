@@ -796,8 +796,9 @@ module PostHog
       @feature_flags_poller.load_feature_flags(true)
     end
 
-    # Whether feature flag definitions for local evaluation have been successfully
-    # loaded at least once.
+    # Whether feature flag definitions for local evaluation are currently loaded.
+    # False until the first successful load, and false again if a quota-limited
+    # (402) response discards the definitions.
     #
     # @return [Boolean]
     def feature_flags_loaded?

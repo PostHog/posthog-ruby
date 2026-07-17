@@ -98,7 +98,9 @@ module PostHog
       _load_feature_flags
     end
 
-    # Whether flag definitions have been successfully loaded at least once.
+    # Whether flag definitions are currently loaded. False until the first
+    # successful load, and false again if a quota-limited (402) response
+    # discards them.
     def definitions_loaded?
       !@flag_definitions_loaded_at.nil?
     end
@@ -1194,6 +1196,7 @@ module PostHog
         @feature_flags_by_key = {}
         @group_type_mapping = Concurrent::Hash.new
         @cohorts = Concurrent::Hash.new
+        @flag_definitions_loaded_at = nil
         @loaded_flags_successfully_once.make_false
         @quota_limited.make_true
         return
