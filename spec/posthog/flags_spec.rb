@@ -1940,6 +1940,23 @@ module PostHog
         expect(poller.instance_variable_get(:@group_type_mapping)).to eq({ '0': 'company' })
       end
 
+      it 'preserves the minimal_flag_called_events gate across a 304 Not Modified response' do
+        beta_flags = { flags: [{ id: 1, key: 'beta-feature', active: true }],
+                       group_type_mapping: {}, cohorts: {}, minimal_flag_called_events: true }
+        stub_request(:get, feature_flag_endpoint)
+          .to_return(
+            { status: 200, body: beta_flags.to_json, headers: { 'ETag' => '"test-etag"' } },
+            { status: 304, body: '', headers: { 'ETag' => '"test-etag"' } }
+          )
+
+        poller.load_feature_flags(true)
+        expect(poller.minimal_flag_called_events).to be(true)
+
+        poller.load_feature_flags(true)
+
+        expect(poller.minimal_flag_called_events).to be(true)
+      end
+
       it 'updates ETag when flags change' do
         # Need 3 responses: 1 for client initialization, 2 for the test
         empty_flags = { flags: [], group_type_mapping: {}, cohorts: {} }

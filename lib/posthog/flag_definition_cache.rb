@@ -16,7 +16,9 @@ module PostHog
   #   Retrieve cached flag definitions. Return a Hash with +:flags+,
   #   +:group_type_mapping+, +:cohorts+, and +:minimal_flag_called_events+
   #   keys, or +nil+ if the cache is empty. Returning +nil+ triggers an API
-  #   fetch when no flags are loaded yet (emergency fallback).
+  #   fetch when no flags are loaded yet (emergency fallback). Providers
+  #   written before +:minimal_flag_called_events+ existed continue to work;
+  #   a missing key is treated as +false+.
   #   @return [Hash, nil]
   #
   # @!method should_fetch_flag_definitions?
