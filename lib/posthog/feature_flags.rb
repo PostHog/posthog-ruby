@@ -115,6 +115,7 @@ module PostHog
     end
 
     attr_reader :feature_flags_by_key, :minimal_flag_called_events
+
     def get_feature_variants(
       distinct_id,
       groups = {},
