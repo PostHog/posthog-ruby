@@ -72,7 +72,10 @@ module PostHog
       @flags_etag = Concurrent::AtomicReference.new(nil)
       @flag_definitions_loaded_at = Concurrent::AtomicReference.new(nil)
       @async_load = async_load
-
+      # Server-controlled gate for minimal `$feature_flag_called` events, read
+      # from the top-level `minimal_flag_called_events` key of the local
+      # evaluation definitions payload. false when the server does not send it.
+      @minimal_flag_called_events = false
       @flag_definition_cache_provider = flag_definition_cache_provider
       FlagDefinitionCacheProvider.validate!(@flag_definition_cache_provider) if @flag_definition_cache_provider
 
@@ -111,7 +114,7 @@ module PostHog
       @flag_definitions_loaded_at.value
     end
 
-    attr_reader :feature_flags_by_key
+    attr_reader :feature_flags_by_key, :minimal_flag_called_events
 
     def get_feature_variants(
       distinct_id,
@@ -245,6 +248,11 @@ module PostHog
       # evaluated flags carry it in the response metadata. nil when the server
       # (an older deployment) does not report it.
       has_experiment = feature_flag[:has_experiment] if flag_was_locally_evaluated
+      # Server-controlled gate for minimal `$feature_flag_called` events.
+      # Locally-evaluated flags read it from the definitions payload; remotely
+      # evaluated flags read it from the /flags response. nil when the signal
+      # is unavailable, which fails safe to the full event.
+      minimal_flag_called_events = @minimal_flag_called_events if flag_was_locally_evaluated
 
       request_id = nil
       evaluated_at = nil
@@ -279,6 +287,7 @@ module PostHog
 
           flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
           has_experiment = flag_detail&.metadata&.has_experiment
+          minimal_flag_called_events = flags_data[:minimalFlagCalledEvents]
 
           logger.debug "Successfully computed flag remotely: #{key} -> #{response}"
         rescue Timeout::Error => e
@@ -293,7 +302,8 @@ module PostHog
         end
       end
 
-      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload, has_experiment]
+      [response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload, has_experiment,
+       minimal_flag_called_events]
     end
 
     def get_all_flags(
@@ -352,6 +362,7 @@ module PostHog
       quota_limited = nil
       status_code = nil
       flag_details = nil
+      minimal_flag_called_events = nil
 
       if fallback_to_server && !only_evaluate_locally
         begin
@@ -367,6 +378,7 @@ module PostHog
 
           request_id = flags_and_payloads[:requestId]
           evaluated_at = flags_and_payloads[:evaluatedAt]
+          minimal_flag_called_events = flags_and_payloads[:minimalFlagCalledEvents]
 
           # Check if feature_flags are quota limited
           if quota_limited&.include?('feature_flags')
@@ -402,7 +414,8 @@ module PostHog
         evaluatedAt: evaluated_at,
         errorsWhileComputingFlags: errors_while_computing,
         quotaLimited: quota_limited,
-        status: status_code
+        status: status_code,
+        minimalFlagCalledEvents: minimal_flag_called_events
       }
     end
 
@@ -1203,6 +1216,7 @@ module PostHog
         @group_type_mapping = Concurrent::Hash.new
         @cohorts = Concurrent::Hash.new
         @flag_definitions_loaded_at.value = nil
+        @minimal_flag_called_events = false
         @loaded_flags_successfully_once.make_false
         @quota_limited.make_true
         return
@@ -1226,7 +1240,8 @@ module PostHog
         data = {
           flags: @feature_flags.to_a,
           group_type_mapping: @group_type_mapping.to_h,
-          cohorts: @cohorts.to_h
+          cohorts: @cohorts.to_h,
+          minimal_flag_called_events: @minimal_flag_called_events
         }
         @flag_definition_cache_provider.on_flag_definitions_received(data)
       rescue StandardError => e
@@ -1238,6 +1253,7 @@ module PostHog
       flags = get_by_symbol_or_string_key(data, 'flags') || []
       group_type_mapping = get_by_symbol_or_string_key(data, 'group_type_mapping') || {}
       cohorts = get_by_symbol_or_string_key(data, 'cohorts') || {}
+      minimal_flag_called_events = get_by_symbol_or_string_key(data, 'minimal_flag_called_events')
 
       @feature_flags = Concurrent::Array.new(flags.map { |f| deep_symbolize_keys(f) })
 
@@ -1249,6 +1265,7 @@ module PostHog
 
       @group_type_mapping = Concurrent::Hash[deep_symbolize_keys(group_type_mapping)]
       @cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
+      @minimal_flag_called_events = minimal_flag_called_events == true
 
       logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
       @flag_definitions_loaded_at.value = (Time.now.to_f * 1000).to_i

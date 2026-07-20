@@ -44,6 +44,8 @@ module PostHog
     # @param flag_definitions_loaded_at [Time, nil] When local flag definitions were loaded.
     # @param errors_while_computing [Boolean] Whether the server reported errors while computing flags.
     # @param quota_limited [Boolean] Whether feature flag evaluation was quota limited.
+    # @param minimal_flag_called_events [Boolean] Server-controlled gate for minimal
+    #   `$feature_flag_called` events.
     # @param accessed [Array<String>, Set<String>, nil] Flag keys already accessed by this snapshot.
     def initialize(
       host: nil,
@@ -56,6 +58,7 @@ module PostHog
       flag_definitions_loaded_at: nil,
       errors_while_computing: false,
       quota_limited: false,
+      minimal_flag_called_events: false,
       accessed: nil
     )
       @host = host
@@ -68,6 +71,7 @@ module PostHog
       @flag_definitions_loaded_at = flag_definitions_loaded_at
       @errors_while_computing = errors_while_computing
       @quota_limited = quota_limited
+      @minimal_flag_called_events = minimal_flag_called_events == true
       @accessed = Set.new(accessed || [])
     end
 
@@ -188,13 +192,19 @@ module PostHog
       errors << 'flag_missing' if flag.nil?
       properties['$feature_flag_error'] = errors.join(',') unless errors.empty?
 
+      # Emit a minimal event only when the server gate is on and the flag is
+      # known to have no linked experiment. Any missing signal (unknown flag,
+      # has_experiment absent) fails safe to the full event.
+      minimal = @minimal_flag_called_events && !flag.nil? && flag.has_experiment == false
+
       @host.capture_flag_called_event_if_needed.call(
         distinct_id: @distinct_id,
         key: key,
         response: response,
         properties: properties,
         groups: @groups,
-        disable_geoip: @disable_geoip
+        disable_geoip: @disable_geoip,
+        minimal: minimal
       )
     end
 
@@ -210,6 +220,7 @@ module PostHog
         flag_definitions_loaded_at: @flag_definitions_loaded_at,
         errors_while_computing: @errors_while_computing,
         quota_limited: @quota_limited,
+        minimal_flag_called_events: @minimal_flag_called_events,
         accessed: @accessed.dup
       )
     end

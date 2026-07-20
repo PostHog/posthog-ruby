@@ -22,6 +22,31 @@ module PostHog
     include PostHog::Utils
     include PostHog::Logging
 
+    # Strict allowlist of properties kept on minimal `$feature_flag_called`
+    # events (server-gated, non-experiment flags only). Everything else —
+    # context properties, `$feature/<key>`, payloads, system metadata — is
+    # stripped. Includes symbol forms so allowlisted properties supplied
+    # through context with symbol keys survive.
+    MINIMAL_FLAG_CALLED_EVENT_PROPERTIES = %w[
+      $feature_flag
+      $feature_flag_response
+      $feature_flag_has_experiment
+      $feature_flag_id
+      $feature_flag_version
+      $feature_flag_reason
+      $feature_flag_request_id
+      $feature_flag_evaluated_at
+      $feature_flag_error
+      locally_evaluated
+      $groups
+      $process_person_profile
+      $session_id
+      $is_server
+      $lib
+      $lib_version
+    ].flat_map { |key| [key, key.to_sym] }.freeze
+    private_constant :MINIMAL_FLAG_CALLED_EVENT_PROPERTIES
+
     # Thread-safe tracking of client instances per API key for singleton warnings
     @instances_by_api_key = {}
     @instances_mutex = Mutex.new
@@ -253,6 +278,7 @@ module PostHog
       return false if @disabled
 
       symbolize_keys! attrs
+      minimal_flag_called_event = attrs.delete(:_minimal_flag_called_event) == true
       enrich_capture_attrs_with_context(attrs)
 
       # Precedence: an explicit `flags` snapshot always wins, regardless of
@@ -321,7 +347,13 @@ module PostHog
       end
 
       attrs[:is_server] = @is_server
-      enqueue(FieldParser.parse_for_capture(attrs))
+      message = FieldParser.parse_for_capture(attrs)
+      # Minimal events are built from the allowlist after full assembly so
+      # context properties and parser-added metadata can never leak in.
+      if minimal_flag_called_event
+        message[:properties] = message[:properties].slice(*MINIMAL_FLAG_CALLED_EVENT_PROPERTIES)
+      end
+      enqueue(message)
     end
 
     # Captures an exception as an event
@@ -627,6 +659,11 @@ module PostHog
       evaluated_at = nil
       errors_while_computing = false
       quota_limited = false
+      # Server-controlled gate for minimal `$feature_flag_called` events. When
+      # the snapshot uses a remote /flags response, the response's top-level
+      # `minimalFlagCalledEvents` field governs; a local-only snapshot reads
+      # the gate polled with the flag definitions.
+      minimal_flag_called_events = @feature_flags_poller.minimal_flag_called_events
 
       # Skip the remote `/flags` round-trip when the caller scoped the request
       # to a fixed set of `flag_keys` and we've already resolved every one of
@@ -635,10 +672,16 @@ module PostHog
       all_requested_flags_resolved_locally = flag_keys_set && (flag_keys_set - locally_evaluated_keys).empty?
 
       if !only_evaluate_locally && !all_requested_flags_resolved_locally
+        # The gate is team-level, so the /flags response gate supersedes the
+        # poller gate for mixed snapshots — both signals come from the same
+        # server and agree in steady state. When the response omits the gate,
+        # the whole snapshot fails safe to full events.
+        minimal_flag_called_events = false
         begin
           flags_response = @feature_flags_poller.get_flags(
             distinct_id, groups, person_properties, group_properties, flag_keys, disable_geoip
           )
+          minimal_flag_called_events = flags_response[:minimalFlagCalledEvents] == true
           request_id = flags_response[:requestId]
           evaluated_at = flags_response[:evaluatedAt]
           errors_while_computing = flags_response[:errorsWhileComputingFlags] == true
@@ -677,7 +720,8 @@ module PostHog
         evaluated_at: evaluated_at,
         flag_definitions_loaded_at: @feature_flags_poller.flag_definitions_loaded_at,
         errors_while_computing: errors_while_computing,
-        quota_limited: quota_limited
+        quota_limited: quota_limited,
+        minimal_flag_called_events: minimal_flag_called_events
       )
     end
 
@@ -777,6 +821,7 @@ module PostHog
       response.delete(:requestId)
       response.delete(:evaluatedAt)
       response.delete(:flagDetails)
+      response.delete(:minimalFlagCalledEvents)
       response
     end
 
@@ -885,7 +930,7 @@ module PostHog
     # separate event for each group a user is evaluated under.
     def _capture_feature_flag_called_if_needed(
       distinct_id: nil, key: nil, response: nil, properties: nil,
-      groups: nil, disable_geoip: nil
+      groups: nil, disable_geoip: nil, minimal: false
     )
       response_repr = response.nil? ? '::null::' : response
       groups_repr =
@@ -915,6 +960,7 @@ module PostHog
       }
       msg[:groups] = groups if groups
       msg[:disable_geoip] = disable_geoip unless disable_geoip.nil?
+      msg[:_minimal_flag_called_event] = true if minimal
 
       capture(msg)
     end
@@ -945,7 +991,7 @@ module PostHog
         groups, person_properties, group_properties
       )
       feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload,
-        has_experiment =
+        has_experiment, minimal_flag_called_events =
         @feature_flags_poller.get_feature_flag(
           key, distinct_id, groups, person_properties, group_properties, only_evaluate_locally
         )
@@ -960,9 +1006,13 @@ module PostHog
         properties['$feature_flag_evaluated_at'] = evaluated_at if evaluated_at
         properties['$feature_flag_error'] = feature_flag_error if feature_flag_error
 
+        # Emit a minimal event only when the server gate is on and the flag is
+        # known to have no linked experiment. Any missing signal fails safe to
+        # the full event.
+        minimal = minimal_flag_called_events == true && has_experiment == false
         _capture_feature_flag_called_if_needed(
           distinct_id: distinct_id, key: key, response: feature_flag_response,
-          properties: properties, groups: groups
+          properties: properties, groups: groups, minimal: minimal
         )
       end
 

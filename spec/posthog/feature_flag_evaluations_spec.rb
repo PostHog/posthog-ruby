@@ -42,6 +42,14 @@ module PostHog
       msgs
     end
 
+    def flag_called_properties(client, key)
+      client.evaluate_flags('user-1').enabled?(key)
+      event = drain_messages(client).find do |m|
+        m[:event] == '$feature_flag_called' && m[:properties]['$feature_flag'] == key
+      end
+      event[:properties]
+    end
+
     def capture_stderr
       original = $stderr
       $stderr = StringIO.new
@@ -325,14 +333,6 @@ module PostHog
         }
       end
 
-      def flag_called_properties(client, key)
-        client.evaluate_flags('user-1').enabled?(key)
-        event = drain_messages(client).find do |m|
-          m[:event] == '$feature_flag_called' && m[:properties]['$feature_flag'] == key
-        end
-        event[:properties]
-      end
-
       it 'is true when the server reports has_experiment' do
         stub_flags(has_experiment_response)
         expect(flag_called_properties(client, 'experiment-flag')['$feature_flag_has_experiment']).to be(true)
@@ -351,6 +351,92 @@ module PostHog
       it 'is omitted for flags missing from the evaluation' do
         stub_flags(has_experiment_response)
         expect(flag_called_properties(client, 'not-a-flag')).not_to have_key('$feature_flag_has_experiment')
+      end
+    end
+
+    describe 'minimal $feature_flag_called events' do
+      let(:gated_response) do
+        {
+          flags: {
+            'plain-flag' => {
+              key: 'plain-flag', enabled: true, variant: nil,
+              reason: { code: 'condition_match', condition_index: 1, description: 'Matched condition set 1' },
+              metadata: { id: 11, version: 2, payload: '{"key": "value"}', has_experiment: false }
+            },
+            'experiment-flag' => {
+              key: 'experiment-flag', enabled: true, variant: nil,
+              metadata: { id: 10, version: 1, has_experiment: true }
+            },
+            'legacy-flag' => {
+              key: 'legacy-flag', enabled: true, variant: nil,
+              metadata: { id: 12, version: 1 }
+            }
+          },
+          requestId: 'request-id-3',
+          minimalFlagCalledEvents: true
+        }
+      end
+
+      it 'sends only the allowlisted properties for a gated flag without an experiment' do
+        stub_flags(gated_response)
+        properties = flag_called_properties(client, 'plain-flag')
+        expect(properties.keys).to match_array(
+          %w[$feature_flag $feature_flag_response $feature_flag_has_experiment $feature_flag_id
+             $feature_flag_version $feature_flag_reason $feature_flag_request_id $groups $is_server
+             locally_evaluated $lib $lib_version]
+        )
+        expect(properties['$feature_flag_has_experiment']).to be(false)
+      end
+
+      it 'sends the full event for a gated flag with an experiment' do
+        stub_flags(gated_response)
+        properties = flag_called_properties(client, 'experiment-flag')
+        expect(properties['$feature_flag_has_experiment']).to be(true)
+        expect(properties['$feature/experiment-flag']).to be(true)
+      end
+
+      it 'sends the full event when the flag does not report has_experiment' do
+        stub_flags(gated_response)
+        expect(flag_called_properties(client, 'legacy-flag')['$feature/legacy-flag']).to be(true)
+      end
+
+      it 'sends the full event when the /flags response omits the gate' do
+        stub_flags(gated_response.except(:minimalFlagCalledEvents))
+        expect(flag_called_properties(client, 'plain-flag')['$feature/plain-flag']).to be(true)
+      end
+
+      it 'reads the gate from the local evaluation definitions payload' do
+        stub_request(:get, 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true')
+          .to_return(status: 200, body: {
+            'flags' => [{
+              'id' => 1, 'key' => 'local-flag', 'active' => true, 'has_experiment' => false,
+              'filters' => { 'groups' => [{ 'rollout_percentage' => 100 }] }
+            }],
+            'minimal_flag_called_events' => true
+          }.to_json)
+        local_client = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        snapshot = local_client.evaluate_flags('user-1', only_evaluate_locally: true)
+        expect(snapshot.enabled?('local-flag')).to be(true)
+
+        event = drain_messages(local_client).find { |m| m[:event] == '$feature_flag_called' }
+        properties = event[:properties]
+        expect(properties.keys).to match_array(
+          %w[$feature_flag $feature_flag_response $feature_flag_has_experiment $feature_flag_id
+             $feature_flag_reason $groups $is_server locally_evaluated $lib $lib_version]
+        )
+        expect(properties['locally_evaluated']).to be(true)
+      end
+
+      it 'does not leak a true poller gate into a mixed snapshot when the /flags response omits it' do
+        stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
+          .to_return(status: 200, body: { 'flags' => [], 'minimal_flag_called_events' => true }.to_json)
+        stub_flags(gated_response.except(:minimalFlagCalledEvents))
+        mixed_client = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+        properties = flag_called_properties(mixed_client, 'plain-flag')
+
+        expect(properties['$feature/plain-flag']).to be(true)
       end
     end
 

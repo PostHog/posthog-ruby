@@ -14,9 +14,11 @@ module PostHog
   #
   # @!method flag_definitions
   #   Retrieve cached flag definitions. Return a Hash with +:flags+,
-  #   +:group_type_mapping+, and +:cohorts+ keys, or +nil+ if the cache
-  #   is empty. Returning +nil+ triggers an API fetch when no flags are
-  #   loaded yet (emergency fallback).
+  #   +:group_type_mapping+, +:cohorts+, and +:minimal_flag_called_events+
+  #   keys, or +nil+ if the cache is empty. Returning +nil+ triggers an API
+  #   fetch when no flags are loaded yet (emergency fallback). Providers
+  #   written before +:minimal_flag_called_events+ existed continue to work;
+  #   a missing key is treated as +false+.
   #   @return [Hash, nil]
   #
   # @!method should_fetch_flag_definitions?
@@ -27,9 +29,9 @@ module PostHog
   #
   # @!method on_flag_definitions_received(data)
   #   Called after successfully fetching new definitions from the API.
-  #   +data+ is a Hash with +:flags+, +:group_type_mapping+, and +:cohorts+
-  #   keys (plain Ruby types, not Concurrent:: wrappers). Store it in your
-  #   external cache.
+  #   +data+ is a Hash with +:flags+, +:group_type_mapping+, +:cohorts+, and
+  #   +:minimal_flag_called_events+ keys (plain Ruby types, not Concurrent::
+  #   wrappers). Store it in your external cache.
   #   @param data [Hash]
   #   @return [void]
   #
