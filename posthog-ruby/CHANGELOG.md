@@ -1,5 +1,15 @@
 # posthog-ruby
 
+## 3.20.0
+
+### Minor Changes
+
+- 4773da3: Add a `feature_flags_async_load` client option that keeps feature flag definition fetches off the calling thread. With it enabled the constructor no longer blocks on the initial `/flags/definitions` request; the poller fetches immediately on boot (the timer's first tick) and, if that fails (e.g. PostHog unreachable), keeps retrying on its regular polling interval instead of re-fetching inline on evaluation calls. Until the first load succeeds, local evaluation treats definitions as absent. Also adds `Client#feature_flags_loaded?` so callers can distinguish "flag is off or unknown" from "definitions not loaded yet". Defaults to off; the existing synchronous behavior is unchanged.
+
+### Patch Changes
+
+- 26142f5: Honor the documented 30s default for `feature_flags_polling_interval`. The resolved default was computed but never passed to the polling timer, so when the option was unset the effective interval was concurrent-ruby's 60s TimerTask default. Definitions now poll every 30s by default as documented; set `feature_flags_polling_interval: 60` to keep the previous effective cadence.
+
 ## 3.19.0
 
 ### Minor Changes
