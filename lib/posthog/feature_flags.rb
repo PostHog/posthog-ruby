@@ -654,6 +654,14 @@ module PostHog
         override_value.to_s.downcase.include?(value.to_s.downcase)
       when 'not_icontains'
         !override_value.to_s.downcase.include?(value.to_s.downcase)
+      when 'starts_with'
+        override_value.to_s.downcase.start_with?(value.to_s.downcase)
+      when 'not_starts_with'
+        !override_value.to_s.downcase.start_with?(value.to_s.downcase)
+      when 'ends_with'
+        override_value.to_s.downcase.end_with?(value.to_s.downcase)
+      when 'not_ends_with'
+        !override_value.to_s.downcase.end_with?(value.to_s.downcase)
       when 'regex'
         PostHog::Utils.is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(override_value.to_s).nil?
       when 'not_regex'

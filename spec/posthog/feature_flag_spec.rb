@@ -1475,6 +1475,77 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'three' })).to be false
     end
 
+    it 'with operator starts_with' do
+      property_a = { 'key' => 'key', 'value' => 'Val', 'operator' => 'starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'VALUE' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'vaLue4' })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'prevalue' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'Alakazam' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 123 })).to be false
+
+      expect do
+        FeatureFlagsPoller.match_property(property_a, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_a, {}) }.to raise_error(InconclusiveMatchError)
+
+      property_b = { 'key' => 'key', 'value' => '3', 'operator' => 'starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 323 })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 123 })).to be false
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'val3' })).to be false
+
+      property_c = { 'key' => 'key', 'value' => 'Val', 'operator' => 'not_starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'VALUE' })).to be false
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'prevalue' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
+    end
+
+    it 'with operator ends_with' do
+      property_a = { 'key' => 'key', 'value' => 'lUe', 'operator' => 'ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'VALUE' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '343tfvalue' })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'Alakazam' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 123 })).to be false
+
+      expect do
+        FeatureFlagsPoller.match_property(property_a, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_a, {}) }.to raise_error(InconclusiveMatchError)
+
+      property_b = { 'key' => 'key', 'value' => '3', 'operator' => 'ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 323 })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 13 })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 321 })).to be false
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3val' })).to be false
+
+      property_c = { 'key' => 'key', 'value' => 'lUe', 'operator' => 'not_ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'VALUE' })).to be false
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value2' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
+    end
+
     it 'with operator regex' do
       property_a = { 'key' => 'key', 'value' => '\.com$', 'operator' => 'regex' }
 
