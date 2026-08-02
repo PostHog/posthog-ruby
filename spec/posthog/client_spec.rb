@@ -255,6 +255,21 @@ module PostHog
         sync_client.flush
       end
 
+      it 'flush accepts and ignores a timeout' do
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+
+        expect(sync_client.flush(timeout: 1)).to eq(true)
+      end
+
+      it 'shutdown accepts a timeout, returns true and closes the connection' do
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+        transport = sync_client.instance_variable_get(:@transport)
+        allow(transport).to receive(:shutdown)
+
+        expect(sync_client.shutdown(timeout: 1)).to eq(true)
+        expect(transport).to have_received(:shutdown)
+      end
+
       it 'calls on_error with status -1 when message serialization fails' do
         error_status = nil
         error_message = nil
@@ -1537,6 +1552,28 @@ module PostHog
         expect(client.queued_messages).to eq(0)
       end
 
+      it 'returns true when the queue drains' do
+        PostHog::Transport.stub = true
+        async_client = Client.new(api_key: API_KEY)
+        async_client.capture Queued::CAPTURE
+
+        expect(async_client.flush(timeout: 5)).to eq(true)
+        expect(async_client.queued_messages).to eq(0)
+      ensure
+        async_client&.shutdown
+        PostHog::Transport.stub = false
+      end
+
+      it 'returns false when the queue does not drain before the timeout' do
+        stuck_worker = instance_spy(PostHog::SendWorker, is_requesting?: false)
+        client.instance_variable_set(:@worker, stuck_worker)
+
+        client.capture Queued::CAPTURE
+
+        expect(client.flush(timeout: 0.2)).to eq(false)
+        expect(client.queued_messages).to eq(1)
+      end
+
       unless defined?(JRUBY_VERSION)
         it 'completes when the process forks' do
           client.identify Queued::IDENTIFY
@@ -1587,6 +1624,26 @@ module PostHog
     end
 
     describe '#shutdown' do
+      it 'returns true when pending events are sent' do
+        PostHog::Transport.stub = true
+        async_client = Client.new(api_key: API_KEY)
+        async_client.capture Queued::CAPTURE
+
+        expect(async_client.shutdown(timeout: 5)).to eq(true)
+        expect(async_client.queued_messages).to eq(0)
+      ensure
+        PostHog::Transport.stub = false
+      end
+
+      it 'returns false when the queue does not drain before the timeout' do
+        stuck_worker = instance_spy(PostHog::SendWorker, is_requesting?: false)
+        client.instance_variable_set(:@worker, stuck_worker)
+
+        client.capture Queued::CAPTURE
+
+        expect(client.shutdown(timeout: 0.2)).to eq(false)
+      end
+
       it 'clears feature flag call dedupe cache' do
         client.instance_variable_get(:@distinct_id_has_sent_flag_calls)['user'] = ['flag_true']
 

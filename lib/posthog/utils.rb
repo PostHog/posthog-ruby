@@ -136,6 +136,12 @@ module PostHog
       end
     end
 
+    # public: Current monotonic clock time in seconds, for measuring durations
+    #
+    def monotonic_time
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
     # Hash that clears itself when it reaches a maximum length.
     #
     # @api private

@@ -47,6 +47,11 @@ module PostHog
     ].flat_map { |key| [key, key.to_sym] }.freeze
     private_constant :MINIMAL_FLAG_CALLED_EVENT_PROPERTIES
 
+    # Slice of a shutdown timeout reserved for joining the worker thread so it
+    # can close the transport connection cleanly.
+    SHUTDOWN_JOIN_RESERVE = 0.25
+    private_constant :SHUTDOWN_JOIN_RESERVE
+
     # Thread-safe tracking of client instances per API key for singleton warnings
     @instances_by_api_key = {}
     @instances_mutex = Mutex.new
@@ -209,29 +214,40 @@ module PostHog
       @deprecation_emitted_for = Concurrent::Set.new
     end
 
-    # Synchronously waits until the worker has cleared the queue.
+    # When sync_mode is enabled, blocks until in-flight requests are complete
+    # and returns true. Timeout parameter has no effect.
     #
-    # Use only for scripts which are not long-running, and will specifically
-    # exit.
+    # Otherwise, waits until the worker has cleared the queue or timeout is hit.
+    # Note: The asynchronous wait polls and can be starved if another thread is
+    # actively continuing to enqueue new events.
     #
-    # @return [void]
-    def flush
+    # @param timeout [Numeric, nil] Maximum seconds to wait for pending events
+    #   to be sent, or +nil+ to wait indefinitely.
+    # @return [Boolean] +true+ if all pending events were sent, +false+ if the
+    #   timeout elapsed first.
+    def flush(timeout: nil)
       if @sync_mode
         # Wait for any in-flight sync send to complete
         @sync_lock.synchronize {} # rubocop:disable Lint/EmptyBlock
-        return
+        return true
       end
 
       if @worker.is_a?(NoopWorker)
         clear
-        return
+        return true
       end
+
+      deadline = timeout && (monotonic_time + timeout)
 
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
         @worker.request_flush
-        sleep(0.1)
+        remaining = deadline && (deadline - monotonic_time)
+        return false if remaining && remaining <= 0
+
+        sleep(remaining ? remaining.clamp(0, 0.1) : 0.1)
       end
+      true
     end
 
     # Clears the queue without waiting.
@@ -862,8 +878,17 @@ module PostHog
 
     # Flush pending events and stop background resources.
     #
-    # @return [void]
-    def shutdown
+    # When sync_mode is not set, this method calls the flush method; see flush
+    # method documentation for timeout semantics. Unlike flush, this method
+    # stops the worker. So any events still queued after the timeout will not be
+    # sent.
+    #
+    # @param timeout [Numeric, nil] Maximum seconds to wait for pending events
+    #   to be sent, or +nil+ to wait indefinitely. Has no effect when sync_mode
+    #   is true.
+    # @return [Boolean] +true+ if all pending events were sent, +false+ if the
+    #   timeout elapsed first.
+    def shutdown(timeout: nil)
       already_shutdown = @shutdown_mutex.synchronize do
         if @shutdown
           true
@@ -872,20 +897,30 @@ module PostHog
           false
         end
       end
-      return if already_shutdown
+      return true if already_shutdown
+
+      deadline = timeout && (monotonic_time + timeout)
 
       self.class._decrement_instance_count(@api_key) unless @disabled
       @feature_flags_poller&.shutdown_poller
-      flush
-      if @sync_mode
-        @sync_lock.synchronize { @transport&.shutdown }
-      else
-        @worker&.shutdown
-        @worker_thread&.join(1)
-      end
+      flushed =
+        if @sync_mode
+          # Waiting for @sync_lock lets any in-flight sync send finish before
+          # the connection is closed.
+          @sync_lock.synchronize { @transport&.shutdown }
+          true
+        else
+          flush_budget = deadline && (deadline - monotonic_time)
+          drained = flush(timeout: flush_budget && [flush_budget - SHUTDOWN_JOIN_RESERVE, 0].max)
+          @worker&.shutdown
+          join_budget = deadline && (deadline - monotonic_time)
+          @worker_thread&.join(join_budget ? join_budget.clamp(0, 1) : 1)
+          drained
+        end
       @distinct_id_has_sent_flag_calls_mutex.synchronize do
         @distinct_id_has_sent_flag_calls.clear
       end
+      flushed
     end
 
     private
