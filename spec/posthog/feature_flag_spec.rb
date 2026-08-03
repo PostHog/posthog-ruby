@@ -1508,6 +1508,12 @@ module PostHog
 
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'prevalue' })).to be true
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+
+      expect do
+        FeatureFlagsPoller.match_property(property_c, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_c, {}) }.to raise_error(InconclusiveMatchError)
     end
 
     it 'with operator ends_with' do
@@ -1544,6 +1550,12 @@ module PostHog
 
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value2' })).to be true
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+
+      expect do
+        FeatureFlagsPoller.match_property(property_c, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_c, {}) }.to raise_error(InconclusiveMatchError)
     end
 
     it 'with operator regex' do
