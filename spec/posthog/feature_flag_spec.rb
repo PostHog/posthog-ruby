@@ -1473,6 +1473,13 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'val3' })).to be true
 
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'three' })).to be false
+
+      # Case folding is ASCII-only, mirroring the flags service: non-ASCII
+      # characters do not match across case.
+      property_c = { 'key' => 'key', 'value' => 'ä', 'operator' => 'icontains' }
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'BÄC' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'bäc' })).to be true
     end
 
     it 'with operator starts_with' do
@@ -1501,6 +1508,13 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 123 })).to be false
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'val3' })).to be false
 
+      # Case folding is ASCII-only, mirroring the flags service: non-ASCII
+      # characters do not match across case.
+      property_unicode = { 'key' => 'key', 'value' => 'ä', 'operator' => 'starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'ÄBC' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'äbc' })).to be true
+
       property_c = { 'key' => 'key', 'value' => 'Val', 'operator' => 'not_starts_with' }
 
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value' })).to be false
@@ -1509,6 +1523,11 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'prevalue' })).to be true
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+
+      property_not_unicode = { 'key' => 'key', 'value' => 'ä', 'operator' => 'not_starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'ÄBC' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'äbc' })).to be false
 
       expect do
         FeatureFlagsPoller.match_property(property_c, { 'key2' => 'value' })
@@ -1543,6 +1562,13 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 321 })).to be false
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3val' })).to be false
 
+      # Case folding is ASCII-only, mirroring the flags service: non-ASCII
+      # characters do not match across case.
+      property_unicode = { 'key' => 'key', 'value' => 'é', 'operator' => 'ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'CAFÉ' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'café' })).to be true
+
       property_c = { 'key' => 'key', 'value' => 'lUe', 'operator' => 'not_ends_with' }
 
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value' })).to be false
@@ -1551,6 +1577,11 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value2' })).to be true
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
       expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+
+      property_not_unicode = { 'key' => 'key', 'value' => 'é', 'operator' => 'not_ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'CAFÉ' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'café' })).to be false
 
       expect do
         FeatureFlagsPoller.match_property(property_c, { 'key2' => 'value' })
