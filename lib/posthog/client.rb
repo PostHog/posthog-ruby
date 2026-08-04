@@ -148,7 +148,10 @@ module PostHog
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
       @worker_mutex = Mutex.new
       @shutdown_mutex = Mutex.new
+      @shutdown_condition = ConditionVariable.new
       @shutdown = false
+      @shutdown_complete = false
+      @shutdown_result = false
       @sync_mode = opts[:sync_mode] == true && !opts[:test_mode] && !@disabled
       @on_error = opts[:on_error] || proc { |status, error| }
       @worker = if opts[:test_mode] || @disabled
@@ -889,38 +892,58 @@ module PostHog
     # @return [Boolean] +true+ if all pending events were sent, +false+ if the
     #   timeout elapsed first.
     def shutdown(timeout: nil)
-      already_shutdown = @shutdown_mutex.synchronize do
+      deadline = timeout && (monotonic_time + timeout)
+      shutdown_result = @shutdown_mutex.synchronize do
         if @shutdown
-          true
+          until @shutdown_complete
+            # Avoid deadlocking when an in-flight send's on_error callback
+            # re-enters shutdown while the original caller is waiting for it.
+            break if Thread.current == @worker_thread || (@sync_mode && @sync_lock.owned?)
+
+            remaining = deadline && (deadline - monotonic_time)
+            break if remaining && remaining <= 0
+
+            @shutdown_condition.wait(@shutdown_mutex, remaining)
+          end
+          @shutdown_complete ? @shutdown_result : false
         else
           @shutdown = true
-          false
+          nil
         end
       end
-      return true if already_shutdown
+      return shutdown_result unless shutdown_result.nil?
 
-      deadline = timeout && (monotonic_time + timeout)
-
-      self.class._decrement_instance_count(@api_key) unless @disabled
-      @feature_flags_poller&.shutdown_poller
-      flushed =
-        if @sync_mode
-          # Waiting for @sync_lock lets any in-flight sync send finish before
-          # the connection is closed.
-          @sync_lock.synchronize { @transport&.shutdown }
-          true
-        else
-          flush_budget = deadline && (deadline - monotonic_time)
-          drained = flush(timeout: flush_budget && [flush_budget - SHUTDOWN_JOIN_RESERVE, 0].max)
-          @worker&.shutdown
-          join_budget = deadline && (deadline - monotonic_time)
-          @worker_thread&.join(join_budget ? join_budget.clamp(0, 1) : 1)
-          drained
+      flushed = false
+      begin
+        self.class._decrement_instance_count(@api_key) unless @disabled
+        @feature_flags_poller&.shutdown_poller
+        flushed =
+          if @sync_mode
+            # Waiting for @sync_lock lets any in-flight sync send finish before
+            # the connection is closed.
+            @sync_lock.synchronize { @transport&.shutdown }
+            true
+          else
+            flush_budget = deadline && (deadline - monotonic_time)
+            drained = flush(timeout: flush_budget && [flush_budget - SHUTDOWN_JOIN_RESERVE, 0].max)
+            @worker&.shutdown
+            join_budget = deadline && (deadline - monotonic_time)
+            worker_thread = @worker_thread
+            join_timeout = join_budget ? join_budget.clamp(0, 1) : 1
+            worker_stopped = worker_thread.nil? || worker_thread.join(join_timeout) == worker_thread
+            drained || (worker_stopped && @queue.empty? && !@worker.is_requesting?)
+          end
+        @distinct_id_has_sent_flag_calls_mutex.synchronize do
+          @distinct_id_has_sent_flag_calls.clear
         end
-      @distinct_id_has_sent_flag_calls_mutex.synchronize do
-        @distinct_id_has_sent_flag_calls.clear
+        flushed
+      ensure
+        @shutdown_mutex.synchronize do
+          @shutdown_result = flushed
+          @shutdown_complete = true
+          @shutdown_condition.broadcast
+        end
       end
-      flushed
     end
 
     private
