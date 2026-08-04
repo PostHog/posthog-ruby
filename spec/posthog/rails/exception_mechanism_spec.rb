@@ -39,6 +39,40 @@ RSpec.describe 'automatic exception capture mechanisms' do
         mechanism: { 'type' => 'rails', 'handled' => false }
       )
     end
+
+    it 'prevents the Rails error subscriber from capturing the same web exception again' do
+      app = ->(_env) { raise StandardError, 'boom' }
+      middleware = described_class.new(app)
+      env = Rack::MockRequest.env_for('/api/test')
+      error = nil
+
+      begin
+        middleware.call(env)
+      rescue StandardError => e
+        error = e
+      end
+
+      # ActionDispatch::Executor sits above this middleware and reports to
+      # Rails.error only after the response has unwound past it, so the
+      # in-web-request flag is already cleared by the time the report lands.
+      expect(PostHog::Rails.in_web_request?).to be(false)
+
+      PostHog::Rails::ErrorSubscriber.new.report(
+        error,
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.action_dispatch'
+      )
+
+      expect(PostHog).to have_received(:capture_exception).once
+      expect(PostHog).to have_received(:capture_exception).with(
+        an_instance_of(StandardError),
+        anything,
+        hash_including('$exception_source' => 'rails'),
+        mechanism: { 'type' => 'rails', 'handled' => false }
+      )
+    end
   end
 
   describe PostHog::Rails::ErrorSubscriber do
@@ -74,6 +108,47 @@ RSpec.describe 'automatic exception capture mechanisms' do
         severity: :error,
         context: {},
         source: 'application.active_support'
+      )
+
+      expect(PostHog).not_to have_received(:capture_exception)
+    end
+
+    it 'skips exceptions already captured by CaptureExceptions' do
+      error = StandardError.new('boom')
+      PostHog::Rails.mark_web_exception_captured(error)
+
+      described_class.new.report(
+        error,
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.action_dispatch'
+      )
+
+      expect(PostHog).not_to have_received(:capture_exception)
+    end
+
+    it 'skips the unwrapped cause of an exception already captured by CaptureExceptions' do
+      wrapped = begin
+        raise 'original'
+      rescue StandardError
+        begin
+          raise 'wrapped'
+        rescue StandardError => e
+          e
+        end
+      end
+
+      PostHog::Rails.mark_web_exception_captured(wrapped)
+
+      # ActionDispatch::ExceptionWrapper unwraps ActionView::Template::Error to
+      # its cause, so Rails reports a different object than the one captured.
+      described_class.new.report(
+        wrapped.cause,
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.action_dispatch'
       )
 
       expect(PostHog).not_to have_received(:capture_exception)

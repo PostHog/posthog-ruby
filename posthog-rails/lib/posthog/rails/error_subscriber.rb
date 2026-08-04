@@ -23,6 +23,10 @@ module PostHog
         # Skip if in a web request - CaptureExceptions middleware will handle it
         # with richer context (URL, params, controller, etc.)
         return if PostHog::Rails.in_web_request?
+        # ActionDispatch::Executor reports the exception once the response has
+        # unwound past our middleware, so the flag above is already cleared.
+        # CaptureExceptions marks what it captured to catch that late report.
+        return if PostHog::Rails.web_exception_captured?(error)
         return if PostHog::Rails.config&.auto_instrument_active_job &&
                   PostHog::Rails.active_job_exception_captured?(error)
 

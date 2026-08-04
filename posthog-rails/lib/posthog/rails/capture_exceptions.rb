@@ -66,6 +66,7 @@ module PostHog
           additional_properties,
           mechanism: { 'type' => 'rails', 'handled' => false }
         )
+        PostHog::Rails.mark_web_exception_captured(exception)
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to capture exception: #{e.message}")
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
