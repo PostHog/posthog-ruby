@@ -60,12 +60,13 @@ module PostHog
         distinct_id = extract_distinct_id(env)
         additional_properties = build_properties(request, env)
 
-        PostHog.capture_exception(
+        captured = PostHog.capture_exception(
           exception,
           distinct_id,
           additional_properties,
           mechanism: { 'type' => 'rails', 'handled' => false }
         )
+        PostHog::Rails.mark_web_exception_captured(exception) if captured
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to capture exception: #{e.message}")
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
