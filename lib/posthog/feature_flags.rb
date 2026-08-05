@@ -651,9 +651,17 @@ module PostHog
       when 'is_set'
         property_values.key?(key)
       when 'icontains'
-        override_value.to_s.downcase.include?(value.to_s.downcase)
+        override_value.to_s.downcase(:ascii).include?(value.to_s.downcase(:ascii))
       when 'not_icontains'
-        !override_value.to_s.downcase.include?(value.to_s.downcase)
+        !override_value.to_s.downcase(:ascii).include?(value.to_s.downcase(:ascii))
+      when 'starts_with'
+        override_value.to_s.downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
+      when 'not_starts_with'
+        !override_value.to_s.downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
+      when 'ends_with'
+        override_value.to_s.downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
+      when 'not_ends_with'
+        !override_value.to_s.downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
       when 'regex'
         PostHog::Utils.is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(override_value.to_s).nil?
       when 'not_regex'

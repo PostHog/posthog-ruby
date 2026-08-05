@@ -1473,6 +1473,120 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'val3' })).to be true
 
       expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'three' })).to be false
+
+      # Case folding is ASCII-only, mirroring the flags service: non-ASCII
+      # characters do not match across case.
+      property_c = { 'key' => 'key', 'value' => 'ä', 'operator' => 'icontains' }
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'BÄC' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'bäc' })).to be true
+    end
+
+    it 'with operator starts_with' do
+      property_a = { 'key' => 'key', 'value' => 'Val', 'operator' => 'starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'VALUE' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'vaLue4' })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'prevalue' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'Alakazam' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 123 })).to be false
+
+      expect do
+        FeatureFlagsPoller.match_property(property_a, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_a, {}) }.to raise_error(InconclusiveMatchError)
+
+      property_b = { 'key' => 'key', 'value' => '3', 'operator' => 'starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 323 })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 123 })).to be false
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 'val3' })).to be false
+
+      # Case folding is ASCII-only, mirroring the flags service: non-ASCII
+      # characters do not match across case.
+      property_unicode = { 'key' => 'key', 'value' => 'ä', 'operator' => 'starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'ÄBC' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'äbc' })).to be true
+
+      property_c = { 'key' => 'key', 'value' => 'Val', 'operator' => 'not_starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'VALUE' })).to be false
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'prevalue' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+
+      property_not_unicode = { 'key' => 'key', 'value' => 'ä', 'operator' => 'not_starts_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'ÄBC' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'äbc' })).to be false
+
+      expect do
+        FeatureFlagsPoller.match_property(property_c, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_c, {}) }.to raise_error(InconclusiveMatchError)
+    end
+
+    it 'with operator ends_with' do
+      property_a = { 'key' => 'key', 'value' => 'lUe', 'operator' => 'ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'VALUE' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '343tfvalue' })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value2' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'Alakazam' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 123 })).to be false
+
+      expect do
+        FeatureFlagsPoller.match_property(property_a, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_a, {}) }.to raise_error(InconclusiveMatchError)
+
+      property_b = { 'key' => 'key', 'value' => '3', 'operator' => 'ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 323 })).to be true
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 13 })).to be true
+
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => 321 })).to be false
+      expect(FeatureFlagsPoller.match_property(property_b, { 'key' => '3val' })).to be false
+
+      # Case folding is ASCII-only, mirroring the flags service: non-ASCII
+      # characters do not match across case.
+      property_unicode = { 'key' => 'key', 'value' => 'é', 'operator' => 'ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'CAFÉ' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_unicode, { 'key' => 'café' })).to be true
+
+      property_c = { 'key' => 'key', 'value' => 'lUe', 'operator' => 'not_ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'VALUE' })).to be false
+
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'value2' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => 'Alakazam' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_c, { 'key' => nil })).to be true
+
+      property_not_unicode = { 'key' => 'key', 'value' => 'é', 'operator' => 'not_ends_with' }
+
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'CAFÉ' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_not_unicode, { 'key' => 'café' })).to be false
+
+      expect do
+        FeatureFlagsPoller.match_property(property_c, { 'key2' => 'value' })
+      end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_c, {}) }.to raise_error(InconclusiveMatchError)
     end
 
     it 'with operator regex' do
