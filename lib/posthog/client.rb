@@ -47,11 +47,6 @@ module PostHog
     ].flat_map { |key| [key, key.to_sym] }.freeze
     private_constant :MINIMAL_FLAG_CALLED_EVENT_PROPERTIES
 
-    # Slice of a shutdown timeout reserved for joining the worker thread so it
-    # can close the transport connection cleanly.
-    SHUTDOWN_JOIN_RESERVE = 0.25
-    private_constant :SHUTDOWN_JOIN_RESERVE
-
     # Thread-safe tracking of client instances per API key for singleton warnings
     @instances_by_api_key = {}
     @instances_mutex = Mutex.new
@@ -884,7 +879,8 @@ module PostHog
     # When sync_mode is not set, this method calls the flush method; see flush
     # method documentation for timeout semantics. Unlike flush, this method
     # stops the worker. So any events still queued after the timeout will not be
-    # sent.
+    # sent. After the timeout, this method may wait up to one additional second
+    # for worker and transport cleanup, which may continue after it returns.
     #
     # @param timeout [Numeric, nil] Maximum seconds to wait for pending events
     #   to be sent, or +nil+ to wait indefinitely. Has no effect when sync_mode
@@ -924,14 +920,10 @@ module PostHog
             @sync_lock.synchronize { @transport&.shutdown }
             true
           else
-            flush_budget = deadline && (deadline - monotonic_time)
-            drained = flush(timeout: flush_budget && [flush_budget - SHUTDOWN_JOIN_RESERVE, 0].max)
+            drained = flush(timeout: timeout)
             @worker&.shutdown
-            join_budget = deadline && (deadline - monotonic_time)
-            worker_thread = @worker_thread
-            join_timeout = join_budget ? join_budget.clamp(0, 1) : 1
-            worker_stopped = worker_thread.nil? || worker_thread.join(join_timeout) == worker_thread
-            drained || (worker_stopped && @queue.empty? && !@worker.is_requesting?)
+            @worker_thread&.join(1)
+            drained
           end
         @distinct_id_has_sent_flag_calls_mutex.synchronize do
           @distinct_id_has_sent_flag_calls.clear

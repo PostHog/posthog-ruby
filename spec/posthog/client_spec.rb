@@ -19,6 +19,7 @@ module PostHog
 
         def run
           @stop.pop
+          sleep(0.01)
         end
 
         def is_requesting?
@@ -1660,7 +1661,7 @@ module PostHog
         PostHog::Transport.stub = false
       end
 
-      it 'returns true when an in-flight request completes during the join reserve' do
+      it 'returns true when an in-flight request completes before the timeout' do
         async_client = Client.new(api_key: API_KEY, batch_size: 1)
         worker = async_client.instance_variable_get(:@worker)
         transport = worker.instance_variable_get(:@transport)
@@ -1687,17 +1688,21 @@ module PostHog
             @flush_requested = Queue.new
             @dequeued = Queue.new
             @release = Queue.new
+            @state_mutex = Mutex.new
+            @requesting = false
           end
 
           def run
             @flush_requested.pop
+            @state_mutex.synchronize { @requesting = true }
             @queue.pop
             @dequeued << true
             @release.pop
+            @state_mutex.synchronize { @requesting = false }
           end
 
           def is_requesting?
-            false
+            @state_mutex.synchronize { @requesting }
           end
 
           def request_flush
@@ -1768,6 +1773,7 @@ module PostHog
         client.capture Queued::CAPTURE
 
         expect(client.shutdown(timeout: 0.2)).to eq(false)
+        expect(client.instance_variable_get(:@worker_thread)).not_to be_alive
         expect(client.shutdown).to eq(false)
         expect(client.queued_messages).to eq(1)
       end
