@@ -11,6 +11,30 @@ module PostHog
     let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
     let(:context_class) { PostHog.const_get(:Internal).const_get(:Context) }
     let(:logger) { instance_double(Logger) }
+    let(:stuck_worker) do
+      Class.new do
+        def initialize
+          @stop = Queue.new
+        end
+
+        def run
+          @stop.pop
+          sleep(0.01)
+        end
+
+        def is_requesting?
+          false
+        end
+
+        def request_flush; end
+
+        def notify; end
+
+        def shutdown
+          @stop << true
+        end
+      end.new
+    end
 
     before do
       allow(PostHog::Logging).to receive(:logger).and_return(logger)
@@ -253,6 +277,21 @@ module PostHog
         sync_client = Client.new(api_key: API_KEY, sync_mode: true)
         expect(sync_client).not_to receive(:ensure_worker_running)
         sync_client.flush
+      end
+
+      it 'flush accepts and ignores a timeout' do
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+
+        expect(sync_client.flush(timeout: 1)).to eq(true)
+      end
+
+      it 'shutdown accepts a timeout, returns true and closes the connection' do
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+        transport = sync_client.instance_variable_get(:@transport)
+        allow(transport).to receive(:shutdown)
+
+        expect(sync_client.shutdown(timeout: 1)).to eq(true)
+        expect(transport).to have_received(:shutdown)
       end
 
       it 'calls on_error with status -1 when message serialization fails' do
@@ -1537,6 +1576,30 @@ module PostHog
         expect(client.queued_messages).to eq(0)
       end
 
+      it 'returns true when the queue drains' do
+        PostHog::Transport.stub = true
+        async_client = Client.new(api_key: API_KEY)
+        async_client.capture Queued::CAPTURE
+
+        expect(async_client.flush(timeout: 5)).to eq(true)
+        expect(async_client.queued_messages).to eq(0)
+      ensure
+        async_client&.shutdown
+        PostHog::Transport.stub = false
+      end
+
+      it 'returns false when the queue does not drain before the timeout' do
+        client.instance_variable_set(:@worker, stuck_worker)
+
+        client.capture Queued::CAPTURE
+
+        expect(client.flush(timeout: 0.2)).to eq(false)
+        expect(client.queued_messages).to eq(1)
+      ensure
+        stuck_worker.shutdown
+        client.instance_variable_get(:@worker_thread)&.join
+      end
+
       unless defined?(JRUBY_VERSION)
         it 'completes when the process forks' do
           client.identify Queued::IDENTIFY
@@ -1587,6 +1650,134 @@ module PostHog
     end
 
     describe '#shutdown' do
+      it 'returns true when pending events are sent' do
+        PostHog::Transport.stub = true
+        async_client = Client.new(api_key: API_KEY)
+        async_client.capture Queued::CAPTURE
+
+        expect(async_client.shutdown(timeout: 5)).to eq(true)
+        expect(async_client.queued_messages).to eq(0)
+      ensure
+        PostHog::Transport.stub = false
+      end
+
+      it 'returns true when an in-flight request completes before the timeout' do
+        async_client = Client.new(api_key: API_KEY, batch_size: 1)
+        worker = async_client.instance_variable_get(:@worker)
+        transport = worker.instance_variable_get(:@transport)
+        sending = Queue.new
+        allow(transport).to receive(:send) do
+          sending << true
+          sleep(0.05)
+          PostHog::Response.new(200, nil)
+        end
+
+        async_client.capture Queued::CAPTURE
+        sending.pop
+
+        expect(async_client.shutdown(timeout: 0.2)).to eq(true)
+      ensure
+        async_client&.shutdown
+      end
+
+      it 'returns false while a dequeued event is still being processed' do
+        queue = client.instance_variable_get(:@queue)
+        worker = Class.new do
+          def initialize(queue)
+            @queue = queue
+            @flush_requested = Queue.new
+            @dequeued = Queue.new
+            @release = Queue.new
+            @state_mutex = Mutex.new
+            @requesting = false
+          end
+
+          def run
+            @flush_requested.pop
+            @state_mutex.synchronize { @requesting = true }
+            @queue.pop
+            @dequeued << true
+            @release.pop
+            @state_mutex.synchronize { @requesting = false }
+          end
+
+          def is_requesting?
+            @state_mutex.synchronize { @requesting }
+          end
+
+          def request_flush
+            @flush_requested << true
+          end
+
+          def notify; end
+
+          def shutdown
+            @dequeued.pop
+          end
+
+          def release
+            @release << true
+          end
+        end.new(queue)
+        client.instance_variable_set(:@worker, worker)
+
+        client.capture Queued::CAPTURE
+
+        expect(client.shutdown(timeout: 0.01)).to eq(false)
+      ensure
+        worker&.release
+        client.instance_variable_get(:@worker_thread)&.join
+      end
+
+      it 'returns the completed result to concurrent callers' do
+        async_client = Client.new(api_key: API_KEY, batch_size: 1)
+        worker = async_client.instance_variable_get(:@worker)
+        transport = worker.instance_variable_get(:@transport)
+        sending = Queue.new
+        release_send = Queue.new
+        allow(transport).to receive(:send) do
+          sending << true
+          release_send.pop
+          PostHog::Response.new(200, nil)
+        end
+
+        async_client.capture Queued::CAPTURE
+        sending.pop
+        first_shutdown = Thread.new { async_client.shutdown(timeout: 0.5) }
+        shutdown_mutex = async_client.instance_variable_get(:@shutdown_mutex)
+        loop do
+          shutdown_started = shutdown_mutex.synchronize do
+            async_client.instance_variable_get(:@shutdown)
+          end
+          break if shutdown_started
+
+          Thread.pass
+        end
+        second_shutdown = Thread.new { async_client.shutdown(timeout: 0.5) }
+        eventually { expect(second_shutdown.status).to eq('sleep') }
+
+        release_send << true
+
+        expect(first_shutdown.value).to eq(true)
+        expect(second_shutdown.value).to eq(true)
+      ensure
+        release_send&.push(true) if first_shutdown&.alive?
+        first_shutdown&.join
+        second_shutdown&.join
+        async_client&.shutdown
+      end
+
+      it 'returns false when the queue does not drain before the timeout' do
+        client.instance_variable_set(:@worker, stuck_worker)
+
+        client.capture Queued::CAPTURE
+
+        expect(client.shutdown(timeout: 0.2)).to eq(false)
+        expect(client.instance_variable_get(:@worker_thread)).not_to be_alive
+        expect(client.shutdown).to eq(false)
+        expect(client.queued_messages).to eq(1)
+      end
+
       it 'clears feature flag call dedupe cache' do
         client.instance_variable_get(:@distinct_id_has_sent_flag_calls)['user'] = ['flag_true']
 

@@ -213,9 +213,5 @@ module PostHog
     rescue StandardError => e
       logger.error("Error shutting down transport: #{e.message}")
     end
-
-    def monotonic_time
-      Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    end
   end
 end
