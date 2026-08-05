@@ -41,6 +41,7 @@ RSpec.describe 'automatic exception capture mechanisms' do
     end
 
     it 'prevents the Rails error subscriber from capturing the same web exception again' do
+      allow(PostHog).to receive(:capture_exception).and_return(true)
       app = ->(_env) { raise StandardError, 'boom' }
       middleware = described_class.new(app)
       env = Rack::MockRequest.env_for('/api/test')
@@ -71,6 +72,36 @@ RSpec.describe 'automatic exception capture mechanisms' do
         anything,
         hash_including('$exception_source' => 'rails'),
         mechanism: { 'type' => 'rails', 'handled' => false }
+      )
+    end
+
+    it 'allows the Rails error subscriber to retry when the web capture was not queued' do
+      allow(PostHog).to receive(:capture_exception).and_return(false, true)
+      app = ->(_env) { raise StandardError, 'boom' }
+      middleware = described_class.new(app)
+      env = Rack::MockRequest.env_for('/api/test')
+      error = nil
+
+      begin
+        middleware.call(env)
+      rescue StandardError => e
+        error = e
+      end
+
+      PostHog::Rails::ErrorSubscriber.new.report(
+        error,
+        handled: false,
+        severity: :error,
+        context: {},
+        source: 'application.action_dispatch'
+      )
+
+      expect(PostHog).to have_received(:capture_exception).twice
+      expect(PostHog).to have_received(:capture_exception).with(
+        error,
+        anything,
+        hash_including('$exception_source' => 'application.action_dispatch'),
+        mechanism: { 'type' => 'rails_error_reporter', 'handled' => false }
       )
     end
   end
