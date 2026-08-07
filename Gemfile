@@ -19,7 +19,7 @@ group :development, :test do
   gem 'railties', '~> 7.1'
   gem 'rake', '~> 13.4.2'
   gem 'rspec', '~> 3.13'
-  gem 'rubocop', '~> 1.75.6'
+  gem 'rubocop', '~> 1.88.2'
   gem 'timecop'
   gem 'tzinfo', '~> 2.0'
   gem 'webmock'
