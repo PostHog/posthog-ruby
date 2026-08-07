@@ -115,7 +115,7 @@ jobs:
         run: ./scripts/bump-version.sh
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ruby
           bundler: 4.0.13
@@ -296,7 +296,7 @@ jobs:
           node-version: 24
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ruby
           bundler: 4.0.13
