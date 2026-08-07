@@ -17,7 +17,7 @@ module PostHog
 
     # @return [Boolean]
     # TODO: Rename to `requesting?` in future version
-    def is_requesting? # rubocop:disable Naming/PredicateName
+    def is_requesting? # rubocop:disable Naming/PredicatePrefix
       false
     end
 
