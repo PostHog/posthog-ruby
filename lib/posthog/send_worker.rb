@@ -113,7 +113,7 @@ module PostHog
     #
     # @return [Boolean] Whether the worker has outstanding requests.
     # TODO: Rename to `requesting?` in future version
-    def is_requesting? # rubocop:disable Naming/PredicateName
+    def is_requesting? # rubocop:disable Naming/PredicatePrefix
       ensure_current_process!
 
       @lock.synchronize { !@batch.empty? }

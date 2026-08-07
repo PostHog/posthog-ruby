@@ -9,6 +9,21 @@ Naming/FileName:
   Exclude:
     - "posthog-rails/lib/posthog-rails.rb"
 
+Naming/PredicateMethod:
+  AllowedMethods:
+    - call
+    - check
+    - condition_match
+    - enqueue
+    - flush
+    - match_regular_property_group
+
+Style/OneClassPerFile:
+  Exclude:
+    - "sdk_compliance_adapter/adapter.rb"
+    - "spec/**/*"
+    - "test/**/*"
+
 # Modern Ruby 3.0+ specific cops
 Style/HashTransformKeys:
   Enabled: true
