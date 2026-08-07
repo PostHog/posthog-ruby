@@ -17,7 +17,7 @@ group :development, :test do
   gem 'oj', '~> 3.17.3'
   gem 'prettier'
   gem 'railties', '~> 7.1'
-  gem 'rake', '~> 13.2.1'
+  gem 'rake', '~> 13.4.2'
   gem 'rspec', '~> 3.13'
   gem 'rubocop', '~> 1.75.6'
   gem 'timecop'
