@@ -111,7 +111,7 @@ module PostHog
     UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
 
     # TODO: Rename to `valid_regex?` in future version
-    def is_valid_regex(regex) # rubocop:disable Naming/PredicateName
+    def is_valid_regex(regex) # rubocop:disable Naming/PredicatePrefix
       Regexp.new(regex)
       true
     rescue RegexpError

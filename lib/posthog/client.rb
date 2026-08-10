@@ -472,7 +472,7 @@ module PostHog
     # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
     # @return [Boolean, nil] Whether the flag is enabled, or nil when the flag could not be evaluated.
     # TODO: In future version, rename to `feature_flag_enabled?`
-    def is_feature_enabled( # rubocop:disable Naming/PredicateName
+    def is_feature_enabled( # rubocop:disable Naming/PredicatePrefix
       flag_key,
       distinct_id,
       groups: {},
@@ -712,8 +712,8 @@ module PostHog
               enabled: ff.enabled ? true : false,
               variant: ff.variant,
               payload: FeatureFlagResult.parse_payload(ff.payload),
-              id: metadata ? metadata.id : nil,
-              version: metadata ? metadata.version : nil,
+              id: metadata&.id,
+              version: metadata&.version,
               reason: reason ? (reason.description || reason.code) : nil,
               locally_evaluated: false,
               has_experiment: metadata&.has_experiment
