@@ -136,7 +136,7 @@ jobs:
       - name: Commit version bump
         id: commit-version-bump
         if: steps.check-changes.outputs.has-changes == 'true'
-        uses: planetscale/ghcommit-action@25309d8005ac7c3bcd61d3fe19b69e0fe47dbdde # v0.2.20
+        uses: planetscale/ghcommit-action@a6b150b81dca5dd027baa898604418eec9e11465 # v0.2.22
         with:
           commit_message: "chore: update package versions [version bump] [skip ci]"
           repo: ${{ github.repository }}
@@ -303,7 +303,7 @@ jobs:
           bundler-cache: true
 
       - name: Configure trusted publishing credentials
-        uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
+        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
 
       - name: Detect version change for ${{ matrix.package.name }}
         id: detect-version
