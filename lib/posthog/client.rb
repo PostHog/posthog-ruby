@@ -262,7 +262,8 @@ module PostHog
     #     invalid and `:message_id` is a valid UUID, it is sent as `uuid` for backwards compatibility.
     #     If neither value is valid, the SDK generates a `uuid`. SDK metadata is sent as `$lib` and
     #     `$lib_version` properties.
-    #   @option attrs [Time] :timestamp When the event occurred (optional)
+    #   @option attrs [Time] :timestamp When the event occurred (optional). UTC is preferred;
+    #     non-UTC values are converted to the equivalent UTC instant before serialization.
     #   @option attrs [String] :distinct_id The ID for this user in your database
 
     # Captures an event
