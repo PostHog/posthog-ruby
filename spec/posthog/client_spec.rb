@@ -400,6 +400,51 @@ module PostHog
         expect(Time.parse(client.dequeue_last_message[:timestamp])).to eq(time)
       end
 
+      it 'converts a non-UTC timestamp override to the equivalent UTC wire value' do
+        wire_payload = nil
+        stub_request(:post, 'https://us.i.posthog.com/batch/')
+          .with do |request|
+            wire_payload = JSON.parse(Zlib.gunzip(request.body))
+            true
+          end
+          .to_return(status: 200, body: '{}')
+        sync_client = Client.new(api_key: API_KEY, sync_mode: true)
+
+        sync_client.capture(
+          event: 'testing UTC timestamp normalization',
+          distinct_id: 'joe',
+          timestamp: Time.new(2024, 7, 16, 13, 30, Rational(123, 1000), '+09:30')
+        )
+
+        expect(wire_payload['batch'].first['timestamp']).to eq('2024-07-16T04:00:00.123Z')
+      ensure
+        sync_client&.shutdown
+      end
+
+      it 'emits an exact UTC default timestamp when the process timezone is non-UTC' do
+        previous_tz = ENV.fetch('TZ', nil)
+        ENV['TZ'] = 'America/Los_Angeles'
+        allow(Time).to receive(:new).and_return(Time.local(2024, 1, 2, 3, 4, 5, 123_000))
+
+        client.capture(event: 'testing the default timestamp', distinct_id: 'joe')
+
+        expect(client.dequeue_last_message[:timestamp]).to eq('2024-01-02T11:04:05.123Z')
+      ensure
+        ENV['TZ'] = previous_tz
+      end
+
+      it 'does not normalize arbitrary Time properties to UTC' do
+        property_time = Time.new(2024, 7, 16, 13, 30, Rational(123, 1000), '+09:30')
+
+        client.capture(
+          event: 'testing a Time property',
+          distinct_id: 'joe',
+          properties: { caller_time: property_time }
+        )
+
+        expect(client.dequeue_last_message[:properties][:caller_time]).to eq('2024-07-16T13:30:00.123+09:30')
+      end
+
       it 'does not error with the required options' do
         expect do
           client.capture Queued::CAPTURE
@@ -2034,6 +2079,14 @@ module PostHog
 
         expect(message[:properties]['user_agent']).to eq('Test Agent')
         expect(message[:properties]['request_id']).to eq('req-123')
+      end
+
+      it 'emits the SDK-generated exception timestamp in UTC' do
+        allow(Time).to receive(:now).and_return(Time.new(2024, 7, 16, 13, 30, Rational(123, 1000), '+09:30'))
+
+        client.capture_exception(StandardError.new('Test exception'), 'user-123')
+
+        expect(client.dequeue_last_message[:timestamp]).to eq('2024-07-16T04:00:00.123Z')
       end
 
       it 'captures the full cause chain outermost-first' do

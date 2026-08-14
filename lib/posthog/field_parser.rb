@@ -150,7 +150,7 @@ module PostHog
         properties['$is_server'] = true if is_server
 
         parsed = {
-          timestamp: datetime_in_iso8601(timestamp),
+          timestamp: time_in_iso8601(timestamp.getutc),
           distinct_id: distinct_id,
           properties: properties
         }
