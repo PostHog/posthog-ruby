@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.1
+
+### Patch Changes
+
+- 18dba36: Normalize event timestamps to the equivalent UTC instant before serialization.
+
 ## 3.23.0
 
 ### Minor Changes
