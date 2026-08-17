@@ -1,0 +1,20 @@
+{
+  "distinct_id": "rails-user-123",
+  "event": "rails request",
+  "properties": {
+    "$current_url": "http://example.org/private",
+    "$ip": "203.0.113.10",
+    "$is_server": true,
+    "$lib": "posthog-ruby",
+    "$lib_version": "0.0.0-snapshot",
+    "$raw_user_agent": "Snapshot Browser",
+    "$request_method": "GET",
+    "$request_path": "/private",
+    "$session_id": "rails-session-456",
+    "$user_agent": "Snapshot Browser",
+    "source": "controller"
+  },
+  "timestamp": "2025-01-02T03:04:05.678Z",
+  "type": "capture",
+  "uuid": "00000000-0000-4000-8000-000000000006"
+}
