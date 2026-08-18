@@ -1,0 +1,104 @@
+{
+  "body": {
+    "api_key": "testsecret",
+    "batch": [
+      {
+        "distinct_id": "user-123",
+        "event": "checkout completed",
+        "properties": {
+          "$groups": {
+            "company": "company-123"
+          },
+          "$is_server": true,
+          "$lib": "posthog-ruby",
+          "$lib_version": "0.0.0-snapshot",
+          "attempted_at": "2025-01-02T03:04:05.678Z",
+          "line_items": [
+            {
+              "quantity": 2,
+              "sku": "ruby-book"
+            }
+          ],
+          "plan": "enterprise"
+        },
+        "timestamp": "2025-01-02T03:04:05.678Z",
+        "type": "capture",
+        "uuid": "00000000-0000-4000-8000-000000000001"
+      },
+      {
+        "$set": {
+          "email": "person@example.test",
+          "profile": {
+            "active": true,
+            "role": "admin"
+          }
+        },
+        "distinct_id": "user-123",
+        "event": "$identify",
+        "properties": {
+          "$is_server": true,
+          "$lib": "posthog-ruby",
+          "$lib_version": "0.0.0-snapshot",
+          "email": "person@example.test",
+          "profile": {
+            "active": true,
+            "role": "admin"
+          }
+        },
+        "timestamp": "2025-01-02T03:04:05.678Z",
+        "type": "identify",
+        "uuid": "00000000-0000-4000-8000-000000000002"
+      },
+      {
+        "distinct_id": "user-123",
+        "event": "$create_alias",
+        "properties": {
+          "$is_server": true,
+          "$lib": "posthog-ruby",
+          "$lib_version": "0.0.0-snapshot",
+          "alias": "anonymous-456",
+          "distinct_id": "user-123"
+        },
+        "timestamp": "2025-01-02T03:04:05.678Z",
+        "type": "alias",
+        "uuid": "00000000-0000-4000-8000-000000000003"
+      },
+      {
+        "distinct_id": "user-123",
+        "event": "$groupidentify",
+        "properties": {
+          "$group_key": "company-123",
+          "$group_set": {
+            "name": "Snapshot Industries",
+            "settings": {
+              "data_region": "us",
+              "seats": 42
+            }
+          },
+          "$group_type": "company",
+          "$is_server": true,
+          "$lib": "posthog-ruby",
+          "$lib_version": "0.0.0-snapshot"
+        },
+        "timestamp": "2025-01-02T03:04:05.678Z",
+        "uuid": "00000000-0000-4000-8000-000000000004"
+      }
+    ]
+  },
+  "headers": {
+    "accept": [
+      "application/json"
+    ],
+    "accept-encoding": [
+      "gzip;q=1.0,deflate;q=0.6,identity;q=0.3"
+    ],
+    "content-type": [
+      "application/json"
+    ],
+    "user-agent": [
+      "posthog-ruby/0.0.0-snapshot"
+    ]
+  },
+  "method": "POST",
+  "path": "/batch/"
+}

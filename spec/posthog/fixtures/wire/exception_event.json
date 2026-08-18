@@ -1,0 +1,78 @@
+{
+  "distinct_id": "user-123",
+  "event": "$exception",
+  "properties": {
+    "$exception_list": [
+      {
+        "mechanism": {
+          "exception_id": 0,
+          "handled": false,
+          "type": "snapshot"
+        },
+        "stacktrace": {
+          "frames": [
+            {
+              "abs_path": "/snapshot/app/controllers/checkouts_controller.rb",
+              "filename": "controllers/checkouts_controller.rb",
+              "function": "create",
+              "in_app": true,
+              "lineno": 12,
+              "platform": "ruby"
+            },
+            {
+              "abs_path": "/snapshot/app/services/checkout.rb",
+              "filename": "services/checkout.rb",
+              "function": "submit",
+              "in_app": true,
+              "lineno": 31,
+              "platform": "ruby"
+            }
+          ],
+          "type": "raw"
+        },
+        "type": "SnapshotWrapperError",
+        "value": "request failed"
+      },
+      {
+        "mechanism": {
+          "exception_id": 1,
+          "handled": false,
+          "parent_id": 0,
+          "source": "cause",
+          "type": "chained"
+        },
+        "stacktrace": {
+          "frames": [
+            {
+              "abs_path": "/snapshot/vendor/bundle/gems/framework/lib/framework.rb",
+              "filename": "framework.rb",
+              "function": "call",
+              "in_app": false,
+              "lineno": 88,
+              "platform": "ruby"
+            },
+            {
+              "abs_path": "/snapshot/app/lib/database.rb",
+              "filename": "lib/database.rb",
+              "function": "query",
+              "in_app": true,
+              "lineno": 17,
+              "platform": "ruby"
+            }
+          ],
+          "type": "raw"
+        },
+        "type": "SnapshotRootError",
+        "value": "database unavailable"
+      }
+    ],
+    "$is_server": true,
+    "$lib": "posthog-ruby",
+    "$lib_version": "0.0.0-snapshot",
+    "request_id": "request-789",
+    "severity": "error"
+  },
+  "timestamp": "2025-01-02T03:04:05.678Z",
+  "type": "capture",
+  "uuid": "00000000-0000-4000-8000-000000000005"
+}

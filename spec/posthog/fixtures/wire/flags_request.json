@@ -1,0 +1,30 @@
+{
+  "distinct_id": "user-123",
+  "flag_keys_to_evaluate": [
+    "checkout-redesign",
+    "recommendations"
+  ],
+  "geoip_disable": true,
+  "group_properties": {
+    "company": {
+      "$group_key": "company-123",
+      "name": "Snapshot Industries",
+      "seats": 42
+    },
+    "project": {
+      "$group_key": "project-456",
+      "archived": false,
+      "name": "Golden Tests"
+    }
+  },
+  "groups": {
+    "company": "company-123",
+    "project": "project-456"
+  },
+  "person_properties": {
+    "email": "person@example.test",
+    "plan": "enterprise",
+    "signed_up_at": "2025-01-01T00:00:00Z"
+  },
+  "token": "testsecret"
+}
