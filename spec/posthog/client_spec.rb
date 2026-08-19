@@ -273,6 +273,20 @@ module PostHog
         expect(error_status).to eq(400)
       end
 
+      [201, 202, 204].each do |status|
+        it "does not call on_error for a #{status} response" do
+          on_error = proc {}
+          expect(on_error).to_not receive(:call)
+
+          allow_any_instance_of(PostHog::Transport).to(
+            receive(:send).and_return(PostHog::Response.new(status))
+          )
+
+          sync_client = Client.new(api_key: API_KEY, sync_mode: true, on_error: on_error)
+          sync_client.capture(Queued::CAPTURE)
+        end
+      end
+
       it 'flush does not attempt to run a worker' do
         sync_client = Client.new(api_key: API_KEY, sync_mode: true)
         expect(sync_client).not_to receive(:ensure_worker_running)

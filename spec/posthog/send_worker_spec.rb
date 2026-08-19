@@ -168,6 +168,23 @@ module PostHog
         expect(queue).to be_empty
       end
 
+      [201, 202, 204].each do |status|
+        it "does not call on_error for a #{status} response" do
+          allow_any_instance_of(PostHog::Transport).to(
+            receive(:send).and_return(PostHog::Response.new(status))
+          )
+          on_error = proc {}
+          expect(on_error).to_not receive(:call)
+
+          queue = Queue.new
+          queue << Requested::CAPTURE
+          worker = described_class.new(queue, 'testsecret', on_error: on_error, flush_interval_seconds: 0)
+          run_worker_until_idle(worker, queue)
+
+          expect(queue).to be_empty
+        end
+      end
+
       it 'calls on_error for bad json' do
         bad_message = Requested::CAPTURE.dup
         def bad_message.to_json(*_args)
