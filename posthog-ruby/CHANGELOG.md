@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.2
+
+### Patch Changes
+
+- 0b0ee5d: Drop events when before_send callbacks raise exceptions.
+
 ## 3.23.1
 
 ### Patch Changes

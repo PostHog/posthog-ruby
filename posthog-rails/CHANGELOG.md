@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.18.3
+
+### Patch Changes
+
+- 0b0ee5d: Drop events when before_send callbacks raise exceptions.
+
 ## 3.18.2
 
 ### Patch Changes
