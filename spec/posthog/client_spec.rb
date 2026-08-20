@@ -1275,24 +1275,50 @@ module PostHog
         expect(logger).to have_received(:warn).with(warning_message)
       end
 
-      it 'does not explode if before_send throws an error' do
-        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |_message|
+      it 'drops queued events when before_send mutates and then raises without raising to the caller' do
+        client = Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |message|
+          message[:event] = 'mutated_event'
           raise 'e by gum'
         })
+        queue = client.instance_variable_get(:@queue)
+        allow(queue).to receive(:<<)
 
-        allow(logger).to receive(:error)
+        result = nil
+        expect do
+          result = client.capture(
+            {
+              distinct_id: 'distinct_id',
+              event: 'test_event'
+            }
+          )
+        end.not_to raise_error
 
-        client.capture(
-          {
-            distinct_id: 'distinct_id',
-            event: 'test_event'
-          }
-        )
+        expect(result).to be(false)
+        expect(queue).not_to have_received(:<<)
+        expect(client.queued_messages).to eq(0)
+        expect(logger).to have_received(:error).with('Error in beforeSend function - dropping event: e by gum')
+      end
 
-        expect(logger).to have_received(:error).with('Error in beforeSend function - using original event: e by gum')
+      it 'drops synchronous events when before_send mutates and then raises without raising to the caller' do
+        client = Client.new(api_key: API_KEY, sync_mode: true, before_send: lambda { |message|
+          message[:event] = 'mutated_event'
+          raise 'e by gum'
+        })
+        expect(client).not_to receive(:send_sync)
 
-        last_message = client.dequeue_last_message
-        expect(last_message[:event]).to eq('test_event')
+        result = nil
+        expect do
+          result = client.capture(
+            {
+              distinct_id: 'distinct_id',
+              event: 'test_event'
+            }
+          )
+        end.not_to raise_error
+
+        expect(result).to be(false)
+        expect(client.queued_messages).to eq(0)
+        expect(logger).to have_received(:error).with('Error in beforeSend function - dropping event: e by gum')
       end
     end
 
