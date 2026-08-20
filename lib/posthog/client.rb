@@ -1099,8 +1099,8 @@ module PostHog
 
         processed_action
       rescue StandardError => e
-        logger.error("Error in beforeSend function - using original event: #{e.message}")
-        action
+        logger.error("Error in beforeSend function - dropping event: #{e.message}")
+        nil
       end
     end
 

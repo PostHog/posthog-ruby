@@ -166,10 +166,9 @@ module PostHog
         # before_send that drops noisy logs must not starve the legitimate
         # records behind them.
         #
-        # Unlike the events before_send (which sends the original event when the
-        # callback raises), a failing callback drops the record: the likeliest
-        # use is PII scrubbing, where shipping the unscrubbed original is worse
-        # than losing the line.
+        # A failing callback drops the record: the likeliest use is PII
+        # scrubbing, where shipping the unscrubbed original is worse than losing
+        # the line.
         def apply_before_send(record)
           return record unless @before_send
 
