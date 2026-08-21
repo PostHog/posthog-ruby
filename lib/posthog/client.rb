@@ -1179,7 +1179,7 @@ module PostHog
 
       @sync_lock.synchronize do
         res = @transport.send(@api_key, batch)
-        @on_error.call(res.status, res.error) unless res.status == 200
+        @on_error.call(res.status, res.error) unless res.status.between?(200, 299)
       end
     end
 
