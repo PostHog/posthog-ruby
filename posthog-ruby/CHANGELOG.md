@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.3
+
+### Patch Changes
+
+- 4de0303: Treat all successful HTTP responses as successful, including responses without a body.
+
 ## 3.23.2
 
 ### Patch Changes
