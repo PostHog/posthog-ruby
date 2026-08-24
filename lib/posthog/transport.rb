@@ -73,7 +73,7 @@ module PostHog
           status_code, body = send_request(api_key, batch)
           error =
             begin
-              JSON.parse(body)['error']
+              body && JSON.parse(body)['error']
             rescue JSON::ParserError
               body
             end

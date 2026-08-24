@@ -154,7 +154,7 @@ module PostHog
 
     def send_batch
       res = @transport.send @api_key, @batch
-      handle_error(res.status, res.error) unless res.status == 200
+      handle_error(res.status, res.error) unless res.status.between?(200, 299)
     end
 
     def consume_message_from_queue!

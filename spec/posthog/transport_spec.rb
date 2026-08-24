@@ -219,12 +219,25 @@ module PostHog
 
         context 'request is successful' do
           let(:status_code) { 201 }
+
           it 'returns a response code' do
             expect(subject.send(api_key, batch).status).to eq(status_code)
           end
 
           it 'returns a nil error' do
             expect(subject.send(api_key, batch).error).to be_nil
+          end
+        end
+
+        context 'request returns no content' do
+          let(:response) { Net::HTTPNoContent.new(http_version, 204, 'No Content') }
+          let(:response_body) { nil }
+
+          it 'returns a successful response' do
+            result = subject.send(api_key, batch)
+
+            expect(result.status).to eq(204)
+            expect(result.error).to be_nil
           end
         end
 
