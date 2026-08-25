@@ -182,6 +182,34 @@ module PostHog
         )
       end
 
+      it 'returns an empty snapshot for empty flag_keys without poller or remote work' do
+        stub_flags(flags_response)
+        poller = client.instance_variable_get(:@feature_flags_poller)
+        expect(poller).not_to receive(:load_feature_flags)
+        expect(poller).not_to receive(:feature_flags_by_key)
+        expect(poller).not_to receive(:_compute_flag_locally)
+        expect(poller).not_to receive(:get_flags)
+
+        snapshot = client.evaluate_flags('user-1', flag_keys: [])
+
+        expect(snapshot).to be_a(FeatureFlagEvaluations)
+        expect(snapshot.keys).to eq([])
+        expect(snapshot.enabled?('missing-flag')).to be(false)
+        expect(snapshot.get_flag('missing-flag')).to be_nil
+
+        events = drain_messages(client).select { |message| message[:event] == '$feature_flag_called' }
+        expect(events.length).to eq(1)
+        expect(events.first[:properties]['$feature_flag_error']).to eq('flag_missing')
+        expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+      end
+
+      it 'treats nil flag_keys as an unscoped evaluation' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1', flag_keys: nil)
+        expect(snapshot.keys).to match_array(%w[variant-flag boolean-flag disabled-flag])
+        expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
+      end
+
       it 'returns a usable empty snapshot for empty distinct_id and does not call /flags' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('')
