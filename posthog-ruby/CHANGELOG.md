@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.4
+
+### Patch Changes
+
+- e7a6f12: Return an empty feature flag snapshot without evaluation when `flag_keys` is empty.
+
 ## 3.23.3
 
 ### Patch Changes
