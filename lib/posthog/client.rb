@@ -607,10 +607,9 @@ module PostHog
     # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely
     # @param [Boolean, nil] disable_geoip When true, disables GeoIP lookup for remote evaluation and stamps captured
     #   access events.
-    # @param [Array<String, Symbol>] flag_keys When set, scopes the underlying /flags
-    #   request to only these flag keys (sent as `flag_keys_to_evaluate`).
-    #   Distinct from {FeatureFlagEvaluations#only}, which filters the
-    #   already-fetched snapshot in memory.
+    # @param [Array<String, Symbol>, nil] flag_keys When set, scopes evaluation to only these flag keys.
+    #   An empty array returns an empty snapshot without evaluating flags; +nil+ evaluates all flags.
+    #   Distinct from {FeatureFlagEvaluations#only}, which filters the already-fetched snapshot in memory.
     # @return [PostHog::FeatureFlagEvaluations]
     def evaluate_flags(
       distinct_id,
@@ -628,6 +627,12 @@ module PostHog
       end
 
       return FeatureFlagEvaluations.new(host: host, distinct_id: distinct_id, flags: {}, groups: groups) if @disabled
+
+      if flag_keys && flag_keys.empty?
+        return FeatureFlagEvaluations.new(
+          host: host, distinct_id: distinct_id, flags: {}, groups: groups, disable_geoip: disable_geoip
+        )
+      end
 
       person_properties, group_properties = add_local_person_and_group_properties(
         groups, person_properties, group_properties
