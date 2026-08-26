@@ -614,7 +614,6 @@ module PostHog
 
     def self.match_property(property, property_values, cohort_properties = {})
       # only looks for matches where key exists in property_values
-      # doesn't support operator is_not_set
 
       PostHog::Utils.symbolize_keys! property
       PostHog::Utils.symbolize_keys! property_values
@@ -629,7 +628,7 @@ module PostHog
       if !property_values.key?(key)
         raise InconclusiveMatchError, "Property #{key} not found in property_values"
       elsif operator == 'is_not_set'
-        raise InconclusiveMatchError, 'Operator is_not_set not supported'
+        return false
       end
 
       override_value = property_values[key]
