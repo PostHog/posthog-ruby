@@ -33,9 +33,8 @@ module PostHog
         distinct_id = context[:user_id] || context[:distinct_id]
 
         properties = {
-          '$exception_source' => source || 'rails_error_reporter',
-          '$exception_handled' => handled,
-          '$exception_severity' => severity.to_s
+          '$rails_error_source' => source,
+          '$rails_error_severity' => severity.to_s
         }
 
         # Add context information (safely serialized to avoid circular references)
@@ -51,7 +50,9 @@ module PostHog
           error,
           distinct_id,
           properties,
-          mechanism: { 'type' => 'rails_error_reporter', 'handled' => handled }
+          mechanism: { 'type' => 'error_reporter', 'handled' => handled },
+          level: severity,
+          source: 'rails.error_reporter'
         )
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to report error via subscriber: #{e.message}")

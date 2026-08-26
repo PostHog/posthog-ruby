@@ -26,6 +26,12 @@ module PostHog
     MAX_CHAINED_EXCEPTIONS = 50
 
     DEFAULT_MECHANISM = { 'type' => 'generic', 'handled' => true }.freeze
+    RESERVED_EXCEPTION_PROPERTIES = %w[
+      $exception_list $exception_level $exception_source $debug_images
+      $exception_handled $exception_types $exception_values $exception_sources
+      $exception_functions $exception_fingerprint_version $exception_fingerprint_record
+      $exception_issue_id $exception_release $cymbal_errors
+    ].freeze
 
     # Builds the `$exception_list` payload for an exception, walking its
     # `cause` chain outermost-first (wrapper first, root cause last).
@@ -36,7 +42,7 @@ module PostHog
     #   tagged with `{ 'type' => 'chained', ... }` and parent linkage.
     # @return [Array<Hash>, nil] Parsed exception payloads, or nil when the input is unsupported.
     def self.build_exception_list(value, mechanism: nil)
-      root_mechanism = DEFAULT_MECHANISM.merge(mechanism || {})
+      root_mechanism = DEFAULT_MECHANISM.merge(valid_mechanism(mechanism))
 
       exceptions = []
       seen = {}.compare_by_identity
@@ -58,14 +64,15 @@ module PostHog
     # @param exception_id [Integer] Zero-based position in the cause chain.
     # @return [Hash]
     def self.chain_mechanism(root_mechanism, exception_id)
-      mechanism = root_mechanism.merge('exception_id' => exception_id)
-      return mechanism if exception_id.zero?
+      return root_mechanism.merge('exception_id' => exception_id) if exception_id.zero?
 
-      mechanism.merge(
+      {
         'type' => 'chained',
         'source' => 'cause',
+        'synthetic' => false,
+        'exception_id' => exception_id,
         'parent_id' => exception_id - 1
-      )
+      }
     end
 
     # @param value [Exception, String, Object] Exception input to parse.
@@ -75,7 +82,13 @@ module PostHog
       title, message, backtrace = coerce_exception_input(value)
       return nil if title.nil?
 
-      build_single_exception_from_data(title, message, backtrace, mechanism: mechanism)
+      build_single_exception_from_data(
+        title,
+        message,
+        backtrace,
+        mechanism: mechanism,
+        synthetic: !value.is_a?(Exception)
+      )
     end
 
     # @param title [String]
@@ -83,13 +96,45 @@ module PostHog
     # @param backtrace [Array<String>, nil]
     # @param mechanism [Hash, nil]
     # @return [Hash]
-    def self.build_single_exception_from_data(title, message, backtrace, mechanism: nil)
+    def self.build_single_exception_from_data(title, message, backtrace, mechanism: nil, synthetic: false)
+      valid = valid_mechanism(mechanism)
+      resolved_mechanism = DEFAULT_MECHANISM.merge(valid).merge('synthetic' => synthetic)
+      resolved_mechanism.delete('handled') if resolved_mechanism['type'] == 'chained' && !valid.key?('handled')
       {
         'type' => title,
         'value' => message || '',
-        'mechanism' => DEFAULT_MECHANISM.merge(mechanism || {}),
+        'mechanism' => resolved_mechanism,
         'stacktrace' => build_stacktrace(backtrace)
       }
+    end
+
+    def self.valid_mechanism(mechanism)
+      return {} unless mechanism.is_a?(Hash)
+
+      result = mechanism.reject do |key, _value|
+        %w[type handled source synthetic exception_id parent_id].include?(key.to_s)
+      end.transform_keys(&:to_s)
+      type = mechanism['type'] || mechanism[:type]
+      handled = mechanism['handled'].nil? ? mechanism[:handled] : mechanism['handled']
+      source = mechanism['source'] || mechanism[:source]
+      synthetic = mechanism['synthetic'].nil? ? mechanism[:synthetic] : mechanism['synthetic']
+      exception_id = mechanism['exception_id'] || mechanism[:exception_id]
+      parent_id = mechanism['parent_id'] || mechanism[:parent_id]
+      result['type'] = type if type.is_a?(String) && !type.empty?
+      result['handled'] = handled if [true, false].include?(handled)
+      result['source'] = source if source.is_a?(String) && !source.empty?
+      result['synthetic'] = synthetic if [true, false].include?(synthetic)
+      result['exception_id'] = exception_id if exception_id.is_a?(Integer) && exception_id >= 0
+      result['parent_id'] = parent_id if parent_id.is_a?(Integer) && parent_id >= 0
+      result
+    end
+
+    def self.normalize_level(level)
+      {
+        'fatal' => 'fatal', 'critical' => 'fatal', 'alert' => 'fatal', 'emergency' => 'fatal',
+        'error' => 'error', 'warning' => 'warning', 'warn' => 'warning', 'log' => 'log',
+        'notice' => 'info', 'info' => 'info', 'trace' => 'debug', 'debug' => 'debug'
+      }[level.to_s.downcase]
     end
 
     # @param backtrace [Array<String>, nil]

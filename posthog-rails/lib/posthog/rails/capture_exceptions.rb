@@ -28,12 +28,12 @@ module PostHog
         # Check if there was an exception that Rails handled
         exception = collect_exception(env)
 
-        capture_exception(exception, env) if exception && should_capture?(exception)
+        capture_exception(exception, env, handled: true) if exception && should_capture?(exception)
 
         response
       rescue StandardError => e
         # Capture unhandled exceptions
-        capture_exception(e, env) if should_capture?(e)
+        capture_exception(e, env, handled: false) if should_capture?(e)
         raise
       ensure
         PostHog::Rails.exit_web_request
@@ -55,7 +55,7 @@ module PostHog
         true
       end
 
-      def capture_exception(exception, env)
+      def capture_exception(exception, env, handled:)
         request = ActionDispatch::Request.new(env)
         distinct_id = extract_distinct_id(env)
         additional_properties = build_properties(request, env)
@@ -64,7 +64,9 @@ module PostHog
           exception,
           distinct_id,
           additional_properties,
-          mechanism: { 'type' => 'rails', 'handled' => false }
+          mechanism: { 'type' => 'middleware', 'handled' => handled },
+          level: 'error',
+          source: 'rails.middleware'
         )
         PostHog::Rails.mark_web_exception_captured(exception) if captured
       rescue StandardError => e
@@ -130,9 +132,7 @@ module PostHog
       end
 
       def build_properties(request, env)
-        properties = {
-          '$exception_source' => 'rails'
-        }
+        properties = {}
 
         # Add controller and action if available
         if env['action_controller.instance']

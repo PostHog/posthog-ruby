@@ -53,7 +53,6 @@ module PostHog
         distinct_id = extract_distinct_id_from_job
 
         properties = {
-          '$exception_source' => 'active_job',
           '$job_class' => self.class.name,
           '$job_id' => job_id,
           '$queue_name' => queue_name,
@@ -68,7 +67,9 @@ module PostHog
           exception,
           distinct_id,
           properties,
-          mechanism: { 'type' => 'active_job', 'handled' => false }
+          mechanism: { 'type' => 'task', 'handled' => false },
+          level: 'error',
+          source: 'rails.active_job'
         )
         PostHog::Rails.mark_active_job_exception_captured(exception)
       rescue StandardError => e

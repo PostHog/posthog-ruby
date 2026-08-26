@@ -258,6 +258,7 @@ module PostHog
         expect(exception_list.first['mechanism']).to eq(
           'type' => 'generic',
           'handled' => true,
+          'synthetic' => false,
           'exception_id' => 0
         )
       end
@@ -279,18 +280,19 @@ module PostHog
         expect(exception_list[0]['mechanism']).to eq(
           'type' => 'generic',
           'handled' => true,
+          'synthetic' => false,
           'exception_id' => 0
         )
         expect(exception_list[1]['mechanism']).to eq(
           'type' => 'chained',
-          'handled' => true,
+          'synthetic' => false,
           'source' => 'cause',
           'exception_id' => 1,
           'parent_id' => 0
         )
         expect(exception_list[2]['mechanism']).to eq(
           'type' => 'chained',
-          'handled' => true,
+          'synthetic' => false,
           'source' => 'cause',
           'exception_id' => 2,
           'parent_id' => 1
@@ -305,7 +307,7 @@ module PostHog
         expect(exception_list[0]['mechanism']['type']).to eq('rails')
         expect(exception_list[0]['mechanism']['handled']).to be false
         expect(exception_list[1]['mechanism']['type']).to eq('chained')
-        expect(exception_list[1]['mechanism']['handled']).to be false
+        expect(exception_list[1]['mechanism']).not_to have_key('handled')
       end
 
       it 'guards against cycles in the cause chain' do

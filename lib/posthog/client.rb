@@ -384,15 +384,31 @@ module PostHog
     #   `{ 'type' => 'rails', 'handled' => false }` for automatic integrations.
     #   Defaults to `{ 'type' => 'generic', 'handled' => true }` for manual captures.
     # @return [Boolean, nil] Whether the exception event was queued or sent, or nil if the input could not be parsed.
-    def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)
+    def capture_exception(
+      exception,
+      distinct_id = nil,
+      additional_properties = {},
+      flags: nil,
+      mechanism: nil,
+      level: nil,
+      source: nil
+    )
       return false if @disabled
 
       exception_list = ExceptionCapture.build_exception_list(exception, mechanism: mechanism)
 
       return if exception_list.nil?
 
-      properties = { '$exception_list' => exception_list }
-      properties.merge!(additional_properties) if additional_properties && !additional_properties.empty?
+      properties = if additional_properties
+                     additional_properties.reject do |key, _value|
+                       ExceptionCapture::RESERVED_EXCEPTION_PROPERTIES.include?(key.to_s)
+                     end
+                   else
+                     {}
+                   end
+      properties['$exception_list'] = exception_list
+      properties['$exception_level'] = ExceptionCapture.normalize_level(level) || 'error'
+      properties['$exception_source'] = source if source.is_a?(String) && !source.empty?
 
       event_data = {
         distinct_id: distinct_id,

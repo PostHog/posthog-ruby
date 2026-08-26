@@ -36,7 +36,9 @@ RSpec.describe 'automatic exception capture mechanisms' do
         an_instance_of(StandardError),
         anything,
         an_instance_of(Hash),
-        mechanism: { 'type' => 'rails', 'handled' => false }
+        mechanism: { 'type' => 'middleware', 'handled' => false },
+        level: 'error',
+        source: 'rails.middleware'
       )
     end
 
@@ -70,8 +72,10 @@ RSpec.describe 'automatic exception capture mechanisms' do
       expect(PostHog).to have_received(:capture_exception).with(
         an_instance_of(StandardError),
         anything,
-        hash_including('$exception_source' => 'rails'),
-        mechanism: { 'type' => 'rails', 'handled' => false }
+        an_instance_of(Hash),
+        mechanism: { 'type' => 'middleware', 'handled' => false },
+        level: 'error',
+        source: 'rails.middleware'
       )
     end
 
@@ -100,8 +104,10 @@ RSpec.describe 'automatic exception capture mechanisms' do
       expect(PostHog).to have_received(:capture_exception).with(
         error,
         anything,
-        hash_including('$exception_source' => 'application.action_dispatch'),
-        mechanism: { 'type' => 'rails_error_reporter', 'handled' => false }
+        hash_including('$rails_error_source' => 'application.action_dispatch'),
+        mechanism: { 'type' => 'error_reporter', 'handled' => false },
+        level: :error,
+        source: 'rails.error_reporter'
       )
     end
   end
@@ -123,7 +129,9 @@ RSpec.describe 'automatic exception capture mechanisms' do
           an_instance_of(StandardError),
           anything,
           an_instance_of(Hash),
-          mechanism: { 'type' => 'rails_error_reporter', 'handled' => scenario[:handled] }
+          mechanism: { 'type' => 'error_reporter', 'handled' => scenario[:handled] },
+          level: scenario[:severity],
+          source: 'rails.error_reporter'
         )
       end
     end
@@ -199,8 +207,10 @@ RSpec.describe 'automatic exception capture mechanisms' do
       expect(PostHog).to have_received(:capture_exception).with(
         an_instance_of(StandardError),
         anything,
-        hash_including('$exception_source' => 'application.active_support'),
-        mechanism: { 'type' => 'rails_error_reporter', 'handled' => false }
+        hash_including('$rails_error_source' => 'application.active_support'),
+        mechanism: { 'type' => 'error_reporter', 'handled' => false },
+        level: :error,
+        source: 'rails.error_reporter'
       )
     end
   end
@@ -250,7 +260,9 @@ RSpec.describe 'automatic exception capture mechanisms' do
         an_instance_of(StandardError),
         anything,
         an_instance_of(Hash),
-        mechanism: { 'type' => 'active_job', 'handled' => false }
+        mechanism: { 'type' => 'task', 'handled' => false },
+        level: 'error',
+        source: 'rails.active_job'
       )
     end
 
@@ -276,8 +288,10 @@ RSpec.describe 'automatic exception capture mechanisms' do
       expect(PostHog).to have_received(:capture_exception).with(
         an_instance_of(StandardError),
         anything,
-        hash_including('$exception_source' => 'active_job'),
-        mechanism: { 'type' => 'active_job', 'handled' => false }
+        an_instance_of(Hash),
+        mechanism: { 'type' => 'task', 'handled' => false },
+        level: 'error',
+        source: 'rails.active_job'
       )
     end
   end
