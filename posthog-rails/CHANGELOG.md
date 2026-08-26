@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.18.4
+
+### Patch Changes
+
+- 603bcbd: Align local `is_set` and `is_not_set` evaluation with partial property context.
+
 ## 3.18.3
 
 ### Patch Changes

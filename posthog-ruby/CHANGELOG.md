@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.5
+
+### Patch Changes
+
+- 603bcbd: Align local `is_set` and `is_not_set` evaluation with partial property context.
+
 ## 3.23.4
 
 ### Patch Changes
