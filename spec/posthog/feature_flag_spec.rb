@@ -1439,12 +1439,29 @@ module PostHog
 
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value' })).to be true
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 'value2' })).to be true
-      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be true
       expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => false })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 0 })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => [] })).to be true
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => {} })).to be true
 
       expect do
         FeatureFlagsPoller.match_property(property_a, { 'key2' => 'value' })
       end.to raise_error(InconclusiveMatchError)
+      expect { FeatureFlagsPoller.match_property(property_a, {}) }.to raise_error(InconclusiveMatchError)
+    end
+
+    it 'with operator is_not_set' do
+      property_a = { 'key' => 'key', 'value' => 'is_not_set', 'operator' => 'is_not_set' }
+
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => nil })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => false })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => 0 })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => '' })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => [] })).to be false
+      expect(FeatureFlagsPoller.match_property(property_a, { 'key' => {} })).to be false
+
       expect { FeatureFlagsPoller.match_property(property_a, {}) }.to raise_error(InconclusiveMatchError)
     end
 
