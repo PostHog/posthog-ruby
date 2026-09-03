@@ -228,6 +228,23 @@ RSpec.describe PostHog::Rails::Railtie do
         expect(PostHog::Rails::Logs::Setup).to have_received(:remember_client_options)
           .with(hash_including(api_key: 'phc_test', host: 'https://eu.i.posthog.com'))
       end
+
+      it 'attributes every event type to the Rails integration' do
+        PostHog.init(api_key: 'phc_test', test_mode: true)
+
+        PostHog.capture(event: 'event', distinct_id: 'user')
+        PostHog.identify(distinct_id: 'user')
+        PostHog.alias(alias: 'anonymous', distinct_id: 'user')
+        PostHog.group_identify(group_type: 'organization', group_key: '5')
+
+        properties = 4.times.map { PostHog.client.dequeue_last_message[:properties] }
+        expect(properties).to all(
+          include(
+            '$lib' => 'posthog-rails',
+            '$lib_version' => PostHog::Rails::VERSION
+          )
+        )
+      end
     end
 
     describe '.install_posthog_logs' do

@@ -209,6 +209,8 @@ module PostHog
 
       @before_send = opts[:before_send]
       @is_server = opts.fetch(:is_server, true) != false
+      @lib = opts[:_lib] || 'posthog-ruby'
+      @lib_version = (opts[:_lib_version] || PostHog::VERSION).to_s
       @deprecation_emitted_for = Concurrent::Set.new
     end
 
@@ -362,6 +364,8 @@ module PostHog
       end
 
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       message = FieldParser.parse_for_capture(attrs)
       # Minimal events are built from the allowlist after full assembly so
       # context properties and parser-added metadata can never leak in.
@@ -417,6 +421,8 @@ module PostHog
 
       symbolize_keys! attrs
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       enqueue(FieldParser.parse_for_identify(attrs))
     end
 
@@ -435,6 +441,8 @@ module PostHog
 
       symbolize_keys! attrs
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       enqueue(FieldParser.parse_for_group_identify(attrs))
     end
 
@@ -450,6 +458,8 @@ module PostHog
 
       symbolize_keys! attrs
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       enqueue(FieldParser.parse_for_alias(attrs))
     end
 
