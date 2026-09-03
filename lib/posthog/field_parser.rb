@@ -134,7 +134,7 @@ module PostHog
       #
       # A new "uuid" is generated when neither "uuid" nor "message_id" is valid.
       def parse_common_fields(fields)
-        timestamp = fields[:timestamp] || Time.now
+        timestamp = fields[:timestamp] || Time.new
         distinct_id = fields[:distinct_id]
         send_feature_flags = fields[:send_feature_flags]
 

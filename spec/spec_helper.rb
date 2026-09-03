@@ -22,7 +22,7 @@ CAPTURE = {
     type: 'Chocolate',
     is_a_lie: true,
     layers: 20,
-    timestamp: Time.now
+    timestamp: Time.new
   }
 }.freeze
 
