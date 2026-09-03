@@ -245,6 +245,20 @@ RSpec.describe PostHog::Rails::Railtie do
           )
         )
       end
+
+      it 'uses the Rails user agent for event and feature flag requests' do
+        batch_request = stub_request(:post, 'https://us.i.posthog.com/batch/').to_return(status: 200, body: '{}')
+        flags_request = stub_request(:post, 'https://us.i.posthog.com/flags/?v=2')
+                        .to_return(status: 200, body: { flags: {} }.to_json)
+
+        PostHog.init(api_key: 'phc_test', sync_mode: true)
+        PostHog.capture(event: 'event', distinct_id: 'user')
+        PostHog.get_all_flags('user')
+
+        expected_user_agent = "posthog-rails/#{PostHog::Rails::VERSION}"
+        expect(batch_request.with(headers: { 'User-Agent' => expected_user_agent })).to have_been_requested
+        expect(flags_request.with(headers: { 'User-Agent' => expected_user_agent })).to have_been_requested
+      end
     end
 
     describe '.install_posthog_logs' do

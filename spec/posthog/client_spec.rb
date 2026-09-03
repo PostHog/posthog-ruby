@@ -126,16 +126,22 @@ module PostHog
       end
 
       it 'handles skip_ssl_verification' do
-        expect(PostHog::Transport).to receive(:new).with({ api_host: 'https://us.i.posthog.com',
+        expect(PostHog::Transport).to receive(:new).with({
+                                                           api_host: 'https://us.i.posthog.com',
+                                                           headers: PostHog::Defaults::Request::HEADERS,
                                                            skip_ssl_verification: true,
-                                                           compress_request: nil })
+                                                           compress_request: nil
+                                                         })
         expect { Client.new api_key: API_KEY, skip_ssl_verification: true }.to_not raise_error
       end
 
       it 'passes compress_request false to the transport' do
-        expect(PostHog::Transport).to receive(:new).with({ api_host: 'https://us.i.posthog.com',
+        expect(PostHog::Transport).to receive(:new).with({
+                                                           api_host: 'https://us.i.posthog.com',
+                                                           headers: PostHog::Defaults::Request::HEADERS,
                                                            skip_ssl_verification: nil,
-                                                           compress_request: false })
+                                                           compress_request: false
+                                                         })
         expect { Client.new api_key: API_KEY, compress_request: false }.to_not raise_error
       end
 

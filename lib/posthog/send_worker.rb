@@ -45,6 +45,7 @@ module PostHog
       @pid = Process.pid
       @transport_options = {
         api_host: options[:host],
+        headers: options[:headers],
         skip_ssl_verification: options[:skip_ssl_verification],
         compress_request: options[:compress_request]
       }

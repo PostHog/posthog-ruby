@@ -44,6 +44,7 @@ module PostHog
     # @param async_load [Boolean] When true, flag definitions are fetched only on the poller thread: an
     #   immediate first tick at construction, then the regular polling cadence, which keeps retrying until a
     #   load succeeds.
+    # @param user_agent [String] User-Agent header sent with feature flag requests.
     def initialize(
       polling_interval,
       secret_key,
@@ -53,7 +54,8 @@ module PostHog
       on_error = nil,
       flag_definition_cache_provider: nil,
       feature_flag_request_max_retries: nil,
-      async_load: false
+      async_load: false,
+      user_agent: "posthog-ruby/#{PostHog::VERSION}"
     )
       @polling_interval = polling_interval || Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS
       @secret_key = secret_key
@@ -72,6 +74,7 @@ module PostHog
       @flags_etag = Concurrent::AtomicReference.new(nil)
       @flag_definitions_loaded_at = Concurrent::AtomicReference.new(nil)
       @async_load = async_load
+      @user_agent = user_agent
       # Server-controlled gate for minimal `$feature_flag_called` events, read
       # from the top-level `minimal_flag_called_events` key of the local
       # evaluation definitions payload. false when the server does not send it.
@@ -1326,7 +1329,7 @@ module PostHog
     RETRYABLE_FLAGS_REQUEST_STATUS_CODES = [502, 504].freeze
 
     def _request(uri, request_object, timeout = nil, include_etag: false, retry_status_codes: [])
-      request_object['User-Agent'] = "posthog-ruby/#{PostHog::VERSION}"
+      request_object['User-Agent'] = @user_agent
       request_timeout = timeout || 10
       backoff_policy = nil
       attempts = 0
