@@ -438,7 +438,7 @@ module PostHog
       it 'emits an exact UTC default timestamp when the process timezone is non-UTC' do
         previous_tz = ENV.fetch('TZ', nil)
         ENV['TZ'] = 'America/Los_Angeles'
-        allow(Time).to receive(:new).and_return(Time.local(2024, 1, 2, 3, 4, 5, 123_000))
+        allow(Time).to receive(:now).and_return(Time.local(2024, 1, 2, 3, 4, 5, 123_000))
 
         client.capture(event: 'testing the default timestamp', distinct_id: 'joe')
 
