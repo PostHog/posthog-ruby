@@ -141,6 +141,9 @@ module PostHog
       @api_key = opts[:api_key]
       @disabled = @api_key.nil? || @api_key.empty?
       @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
+      @lib = opts[:_lib] || 'posthog-ruby'
+      @lib_version = (opts[:_lib_version] || PostHog::VERSION).to_s
+      @headers = Defaults::Request::HEADERS.merge('User-Agent' => "#{@lib}/#{@lib_version}")
       @worker_mutex = Mutex.new
       @shutdown_mutex = Mutex.new
       @shutdown_condition = ConditionVariable.new
@@ -154,11 +157,12 @@ module PostHog
                 elsif @sync_mode
                   nil
                 else
-                  SendWorker.new(@queue, @api_key, opts)
+                  SendWorker.new(@queue, @api_key, opts.merge(headers: @headers))
                 end
       if @sync_mode
         @transport = Transport.new(
           api_host: opts[:host],
+          headers: @headers,
           skip_ssl_verification: opts[:skip_ssl_verification],
           retries: opts.key?(:max_retries) ? opts[:max_retries].to_i + 1 : 3,
           compress_request: opts[:compress_request]
@@ -198,7 +202,8 @@ module PostHog
             opts[:on_error],
             flag_definition_cache_provider: opts[:flag_definition_cache_provider],
             feature_flag_request_max_retries: opts[:feature_flag_request_max_retries],
-            async_load: opts[:feature_flags_async_load] == true
+            async_load: opts[:feature_flags_async_load] == true,
+            user_agent: @headers['User-Agent']
           )
       end
 
@@ -362,6 +367,8 @@ module PostHog
       end
 
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       message = FieldParser.parse_for_capture(attrs)
       # Minimal events are built from the allowlist after full assembly so
       # context properties and parser-added metadata can never leak in.
@@ -417,6 +424,8 @@ module PostHog
 
       symbolize_keys! attrs
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       enqueue(FieldParser.parse_for_identify(attrs))
     end
 
@@ -435,6 +444,8 @@ module PostHog
 
       symbolize_keys! attrs
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       enqueue(FieldParser.parse_for_group_identify(attrs))
     end
 
@@ -450,6 +461,8 @@ module PostHog
 
       symbolize_keys! attrs
       attrs[:is_server] = @is_server
+      attrs[:lib] = @lib
+      attrs[:lib_version] = @lib_version
       enqueue(FieldParser.parse_for_alias(attrs))
     end
 

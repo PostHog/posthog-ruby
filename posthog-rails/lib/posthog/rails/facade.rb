@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'posthog/rails/version'
+
 module PostHog
   module Rails
     # Install the Rails singleton-style PostHog facade at load time so Rails app
@@ -35,7 +37,9 @@ module PostHog
             # after replacement so repeated init calls do not leave background
             # resources from the previous instance running.
             previous_client = @client
-            @client = PostHog::Client.new(options)
+            @client = PostHog::Client.new(
+              options.merge(_lib: 'posthog-rails', _lib_version: PostHog::Rails::VERSION)
+            )
             begin
               previous_client&.shutdown
             rescue StandardError => e

@@ -144,8 +144,8 @@ module PostHog
         is_server = fields.fetch(:is_server, true) != false
 
         properties = {
-          '$lib' => 'posthog-ruby',
-          '$lib_version' => PostHog::VERSION.to_s
+          '$lib' => fields.fetch(:lib, 'posthog-ruby'),
+          '$lib_version' => fields.fetch(:lib_version, PostHog::VERSION.to_s)
         }
         properties['$is_server'] = true if is_server
 
