@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.6
+
+### Patch Changes
+
+- e23b9f6: Attribute events and HTTP requests from the Rails integration to `posthog-rails` with the Rails integration version.
+
 ## 3.23.5
 
 ### Patch Changes
