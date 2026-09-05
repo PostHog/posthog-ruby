@@ -79,6 +79,11 @@ module PostHog
       # from the top-level `minimal_flag_called_events` key of the local
       # evaluation definitions payload. false when the server does not send it.
       @minimal_flag_called_events = false
+      @definition_snapshot = Concurrent::AtomicReference.new({
+        flags: @feature_flags, flags_by_key: @feature_flags_by_key,
+        group_type_mapping: @group_type_mapping, cohorts: @cohorts,
+        minimal_flag_called_events: @minimal_flag_called_events, property_matching_version: 1
+      }.freeze)
       @flag_definition_cache_provider = flag_definition_cache_provider
       FlagDefinitionCacheProvider.validate!(@flag_definition_cache_provider) if @flag_definition_cache_provider
 
@@ -214,12 +219,14 @@ module PostHog
       groups = {},
       person_properties = {},
       group_properties = {},
-      only_evaluate_locally = false
+      only_evaluate_locally = false,
+      snapshot: nil
     )
       key = key.to_s
 
       # make sure they're loaded on first run
       load_feature_flags
+      snapshot ||= _evaluation_snapshot
 
       symbolize_keys! groups
       symbolize_keys! person_properties
@@ -231,12 +238,13 @@ module PostHog
 
       response = nil
       payload = nil
-      feature_flag = @feature_flags_by_key&.[](key)
+      feature_flag = snapshot[:flags_by_key]&.[](key)
 
       unless feature_flag.nil?
         begin
-          response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties)
-          payload = _compute_flag_payload_locally(key, response) unless response.nil?
+          response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties,
+                                           snapshot: snapshot)
+          payload = _compute_flag_payload_locally(key, response, snapshot: snapshot) unless response.nil?
           logger.debug "Successfully computed flag locally: #{key} -> #{response}"
         rescue RequiresServerEvaluation, InconclusiveMatchError => e
           logger.debug "Failed to compute flag #{key} locally: #{e}"
@@ -255,7 +263,7 @@ module PostHog
       # Locally-evaluated flags read it from the definitions payload; remotely
       # evaluated flags read it from the /flags response. nil when the signal
       # is unavailable, which fails safe to the full event.
-      minimal_flag_called_events = @minimal_flag_called_events if flag_was_locally_evaluated
+      minimal_flag_called_events = snapshot[:minimal_flag_called_events] if flag_was_locally_evaluated
 
       request_id = nil
       evaluated_at = nil
@@ -342,17 +350,19 @@ module PostHog
       raise_on_error = false
     )
       load_feature_flags
+      snapshot = _evaluation_snapshot
 
       flags = {}
       payloads = {}
-      fallback_to_server = @feature_flags.empty?
+      fallback_to_server = snapshot[:flags].empty?
       request_id = nil # Only for /flags requests
       evaluated_at = nil # Only for /flags requests
 
-      @feature_flags.each do |flag|
-        match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties)
+      snapshot[:flags].each do |flag|
+        match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties,
+                                            snapshot: snapshot)
         flags[flag[:key]] = match_value
-        match_payload = _compute_flag_payload_locally(flag[:key], match_value)
+        match_payload = _compute_flag_payload_locally(flag[:key], match_value, snapshot: snapshot)
         payloads[flag[:key]] = match_payload if match_payload
       rescue RequiresServerEvaluation, InconclusiveMatchError
         fallback_to_server = true
@@ -432,6 +442,8 @@ module PostHog
       only_evaluate_locally = false
     )
       key = key.to_s
+      load_feature_flags
+      snapshot = _evaluation_snapshot
 
       if match_value.nil?
         match_value = get_feature_flag(
@@ -440,11 +452,12 @@ module PostHog
           groups,
           person_properties,
           group_properties,
-          true
+          true,
+          snapshot: snapshot
         )[0]
       end
       response = nil
-      response = _compute_flag_payload_locally(key, match_value) unless match_value.nil?
+      response = _compute_flag_payload_locally(key, match_value, snapshot: snapshot) unless match_value.nil?
       if response.nil? && !only_evaluate_locally
         flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
         response = flags_payloads[key.downcase] || nil
@@ -615,14 +628,69 @@ module PostHog
       end
     end
 
-    def self.match_property(property, property_values, cohort_properties = {})
+    # Service legacy classifies the entire filter, not individual array members.
+    def self.boolean_like?(value)
+      case value
+      when true, false then true
+      when String then %w[true false].include?(value.downcase)
+      when Array then value.all? { |member| boolean_like?(member) }
+      else false
+      end
+    end
+
+    def self.legacy_truthy?(value)
+      case value
+      when true then true
+      when String then value.downcase == 'true'
+      when Array then value.all? { |member| legacy_truthy?(member) }
+      else false
+      end
+    end
+
+    def self.sorted_composite(value)
+      case value
+      when Hash
+        value.transform_keys(&:to_s).sort.to_h.transform_values { |member| sorted_composite(member) }
+      when Array
+        value.map { |member| sorted_composite(member) }
+      else
+        value
+      end
+    end
+
+    def self.property_string(value)
+      # Keep numeric normalization unchanged; null and composites need JSON rather
+      # than Ruby's nil.to_s / Array#to_s representations.
+      case value
+      when nil, Array, Hash then JSON.generate(sorted_composite(value))
+      else value.to_s
+      end.downcase
+    end
+
+    def self.exact_property_match?(filter, value, property_matching_version)
+      return legacy_truthy?(filter) == legacy_truthy?(value) if property_matching_version != 2 && boolean_like?(filter)
+      return legacy_truthy?(value) if filter.is_a?(Array) && filter.empty?
+
+      if filter.is_a?(Array)
+        filter.any? { |member| property_string(member) == property_string(value) }
+      else
+        property_string(filter) == property_string(value)
+      end
+    end
+
+    private_class_method :boolean_like?, :legacy_truthy?, :sorted_composite, :property_string, :exact_property_match?
+
+    def self.match_property(property, property_values, cohort_properties = {}, property_matching_version: 1)
       # only looks for matches where key exists in property_values
 
       PostHog::Utils.symbolize_keys! property
       PostHog::Utils.symbolize_keys! property_values
 
       # Handle cohort properties
-      return match_cohort(property, property_values, cohort_properties) if extract_value(property, :type) == 'cohort'
+      if extract_value(property, :type) == 'cohort'
+        return match_cohort(property, property_values, cohort_properties,
+                            property_matching_version: property_matching_version)
+      end
 
       key = property[:key].to_sym
       value = property[:value]
@@ -638,18 +706,8 @@ module PostHog
 
       case operator
       when 'exact', 'is_not'
-        if value.is_a?(Array)
-          values_stringified = value.map { |val| val.to_s.downcase }
-          return values_stringified.any?(override_value.to_s.downcase) if operator == 'exact'
-
-          return values_stringified.none?(override_value.to_s.downcase)
-
-        end
-        if operator == 'exact'
-          value.to_s.downcase == override_value.to_s.downcase
-        else
-          value.to_s.downcase != override_value.to_s.downcase
-        end
+        matches = exact_property_match?(value, override_value, property_matching_version)
+        operator == 'exact' ? matches : !matches
       when 'is_set'
         property_values.key?(key)
       when 'icontains'
@@ -731,7 +789,7 @@ module PostHog
       end
     end
 
-    def self.match_cohort(property, property_values, cohort_properties)
+    def self.match_cohort(property, property_values, cohort_properties, property_matching_version: 1)
       # Cohort properties are in the form of property groups like this:
       # {
       #   "cohort_id" => {
@@ -749,10 +807,11 @@ module PostHog
               "cohort #{cohort_id} not found in local cohorts - likely a static cohort that requires server evaluation"
       end
 
-      match_property_group(property_group, property_values, cohort_properties)
+      match_property_group(property_group, property_values, cohort_properties,
+                           property_matching_version: property_matching_version)
     end
 
-    def self.match_property_group(property_group, property_values, cohort_properties)
+    def self.match_property_group(property_group, property_values, cohort_properties, property_matching_version: 1)
       return true if property_group.nil? || property_group.empty?
 
       group_type = extract_value(property_group, :type)
@@ -761,9 +820,11 @@ module PostHog
       return true if properties.nil? || properties.empty?
 
       if nested_property_group?(properties)
-        match_nested_property_group(properties, group_type, property_values, cohort_properties)
+        match_nested_property_group(properties, group_type, property_values, cohort_properties,
+                                    property_matching_version: property_matching_version)
       else
-        match_regular_property_group(properties, group_type, property_values, cohort_properties)
+        match_regular_property_group(properties, group_type, property_values, cohort_properties,
+                                     property_matching_version: property_matching_version)
       end
     end
 
@@ -788,16 +849,19 @@ module PostHog
       first_property.key?(:values) || first_property.key?('values')
     end
 
-    def self.match_nested_property_group(properties, group_type, property_values, cohort_properties)
+    def self.match_nested_property_group(properties, group_type, property_values, cohort_properties,
+                                         property_matching_version: 1)
       case group_type
       when 'AND'
         properties.each do |property|
-          return false unless match_property_group(property, property_values, cohort_properties)
+          return false unless match_property_group(property, property_values, cohort_properties,
+                                                   property_matching_version: property_matching_version)
         end
         true
       when 'OR'
         properties.each do |property|
-          return true if match_property_group(property, property_values, cohort_properties)
+          return true if match_property_group(property, property_values, cohort_properties,
+                                              property_matching_version: property_matching_version)
         end
         false
       else
@@ -805,7 +869,8 @@ module PostHog
       end
     end
 
-    def self.match_regular_property_group(properties, group_type, property_values, cohort_properties)
+    def self.match_regular_property_group(properties, group_type, property_values, cohort_properties,
+                                          property_matching_version: 1)
       # Validate group type upfront
       raise InconclusiveMatchError, "Unknown property group type: #{group_type}" unless %w[AND OR].include?(group_type)
 
@@ -814,7 +879,8 @@ module PostHog
       properties.each do |prop|
         PostHog::Utils.symbolize_keys!(prop)
 
-        matches = match_property(prop, property_values, cohort_properties)
+        matches = match_property(prop, property_values, cohort_properties,
+                                 property_matching_version: property_matching_version)
 
         negated = prop[:negation] || false
         final_result = negated ? !matches : matches
@@ -847,13 +913,14 @@ module PostHog
     # @param properties [Hash] Person properties for evaluation
     # @param cohort_properties [Hash] Cohort properties for evaluation
     # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
-    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties)
+    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties,
+                                 snapshot: _evaluation_snapshot)
       if property[:operator] != 'flag_evaluates_to'
         # Should never happen, but just in case
         raise InconclusiveMatchError, "Operator #{property[:operator]} not supported for flag dependencies"
       end
 
-      if @feature_flags_by_key.nil? || evaluation_cache.nil?
+      if snapshot[:flags_by_key].nil? || evaluation_cache.nil?
         # Cannot evaluate flag dependencies without required context
         raise InconclusiveMatchError,
               "Cannot evaluate flag dependency on '#{property[:key] || 'unknown'}' " \
@@ -881,7 +948,7 @@ module PostHog
       dependency_chain.each do |dep_flag_key|
         unless evaluation_cache.key?(dep_flag_key)
           # Need to evaluate this dependency first
-          dep_flag = @feature_flags_by_key[dep_flag_key]
+          dep_flag = snapshot[:flags_by_key][dep_flag_key]
           if dep_flag.nil?
             # Missing flag dependency - cannot evaluate locally
             evaluation_cache[dep_flag_key] = nil
@@ -898,7 +965,8 @@ module PostHog
                 distinct_id,
                 properties,
                 evaluation_cache,
-                cohort_properties
+                cohort_properties,
+                snapshot: snapshot
               )
               evaluation_cache[dep_flag_key] = dep_result
             rescue InconclusiveMatchError => e
@@ -964,7 +1032,14 @@ module PostHog
     private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
                          :match_nested_property_group, :match_regular_property_group
 
-    def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {})
+    # Publish/capture all matching state together so a poll cannot switch semantics
+    # (or dependency/cohort definitions) halfway through one local evaluation.
+    def _evaluation_snapshot
+      @definition_snapshot.value
+    end
+
+    def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {},
+                              snapshot: _evaluation_snapshot)
       raise RequiresServerEvaluation, 'Flag has experience continuity enabled' if flag[:ensure_experience_continuity]
 
       return false unless flag[:active]
@@ -981,11 +1056,12 @@ module PostHog
           local_person_properties = local_person_properties.merge(distinct_id: distinct_id)
         end
 
-        return match_feature_flag_properties(flag, distinct_id, local_person_properties, evaluation_cache, @cohorts,
-                                             groups: groups, group_properties: group_properties)
+        return match_feature_flag_properties(flag, distinct_id, local_person_properties, evaluation_cache,
+                                             snapshot[:cohorts], groups: groups, group_properties: group_properties,
+                                                                 snapshot: snapshot)
       end
 
-      group_name = @group_type_mapping[aggregation_group_type_index.to_s.to_sym]
+      group_name = snapshot[:group_type_mapping][aggregation_group_type_index.to_s.to_sym]
 
       if group_name.nil?
         logger.warn(
@@ -1006,24 +1082,25 @@ module PostHog
 
       focused_group_properties = group_properties[group_name_symbol]
       match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties, evaluation_cache,
-                                    @cohorts, groups: groups, group_properties: group_properties)
+                                    snapshot[:cohorts], groups: groups, group_properties: group_properties,
+                                                        snapshot: snapshot)
     end
 
-    def _compute_flag_payload_locally(key, match_value)
-      return nil if @feature_flags_by_key.nil?
+    def _compute_flag_payload_locally(key, match_value, snapshot: _evaluation_snapshot)
+      return nil if snapshot[:flags_by_key].nil?
 
       key = key.to_s
       response = nil
       if [true, false].include? match_value
-        response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_s.to_sym)
+        response = snapshot[:flags_by_key].dig(key, :filters, :payloads, match_value.to_s.to_sym)
       elsif match_value.is_a? String
-        response = @feature_flags_by_key.dig(key, :filters, :payloads, match_value.to_sym)
+        response = snapshot[:flags_by_key].dig(key, :filters, :payloads, match_value.to_sym)
       end
       response
     end
 
     def match_feature_flag_properties(flag, distinct_id, properties, evaluation_cache, cohort_properties = {},
-                                      groups: {}, group_properties: {})
+                                      groups: {}, group_properties: {}, snapshot: _evaluation_snapshot)
       flag_filters = flag[:filters] || {}
 
       flag_conditions = flag_filters[:groups] || []
@@ -1048,7 +1125,7 @@ module PostHog
           if condition_aggregation.nil?
             # Person condition under a mixed flag — caller already passed person props/bucketing.
           else
-            group_name = @group_type_mapping[condition_aggregation.to_s.to_sym]
+            group_name = snapshot[:group_type_mapping][condition_aggregation.to_s.to_sym]
             if group_name.nil? || !groups.key?(group_name.to_sym)
               logger.debug do
                 "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
@@ -1066,7 +1143,7 @@ module PostHog
         end
 
         case condition_match_outcome(flag, effective_bucketing, condition, effective_properties, evaluation_cache,
-                                     cohort_properties)
+                                     cohort_properties, snapshot: snapshot)
         when :match
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
@@ -1100,9 +1177,10 @@ module PostHog
       false
     end
 
-    def condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
+    def condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {},
+                        snapshot: _evaluation_snapshot)
       condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache,
-                              cohort_properties) == :match
+                              cohort_properties, snapshot: snapshot) == :match
     end
 
     # Evaluates a single condition group and returns a tri-state outcome:
@@ -1112,15 +1190,18 @@ module PostHog
     #                            rollout percentage excluded the user
     # Distinguishing :no_match from :out_of_rollout_bound lets the caller implement the
     # early_exit behavior (mirrors the server-side Rust evaluation engine).
-    def condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {})
+    def condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {},
+                                snapshot: _evaluation_snapshot)
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
         unless condition[:properties].all? do |prop|
           if prop[:type] == 'flag'
-            evaluate_flag_dependency(prop, evaluation_cache, distinct_id, properties, cohort_properties)
+            evaluate_flag_dependency(prop, evaluation_cache, distinct_id, properties, cohort_properties,
+                                     snapshot: snapshot)
           else
-            FeatureFlagsPoller.match_property(prop, properties, cohort_properties)
+            FeatureFlagsPoller.match_property(prop, properties, cohort_properties,
+                                              property_matching_version: snapshot[:property_matching_version])
           end
         end
           return :no_match
@@ -1221,12 +1302,8 @@ module PostHog
           '[FEATURE FLAGS] Feature flags quota limit exceeded - unsetting all local flags. ' \
           'Learn more about billing limits at https://posthog.com/docs/billing/limits-alerts'
         )
-        @feature_flags = Concurrent::Array.new
-        @feature_flags_by_key = {}
-        @group_type_mapping = Concurrent::Hash.new
-        @cohorts = Concurrent::Hash.new
+        _apply_flag_definitions({})
         @flag_definitions_loaded_at.value = nil
-        @minimal_flag_called_events = false
         @loaded_flags_successfully_once.make_false
         @quota_limited.make_true
         return
@@ -1247,11 +1324,13 @@ module PostHog
       return unless @flag_definition_cache_provider
 
       begin
+        snapshot = _evaluation_snapshot
         data = {
-          flags: @feature_flags.to_a,
-          group_type_mapping: @group_type_mapping.to_h,
-          cohorts: @cohorts.to_h,
-          minimal_flag_called_events: @minimal_flag_called_events
+          flags: snapshot[:flags].to_a,
+          group_type_mapping: snapshot[:group_type_mapping].to_h,
+          cohorts: snapshot[:cohorts].to_h,
+          minimal_flag_called_events: snapshot[:minimal_flag_called_events],
+          property_matching_version: snapshot[:property_matching_version]
         }
         @flag_definition_cache_provider.on_flag_definitions_received(data)
       rescue StandardError => e
@@ -1265,16 +1344,25 @@ module PostHog
       cohorts = get_by_symbol_or_string_key(data, 'cohorts') || {}
       minimal_flag_called_events = get_by_symbol_or_string_key(data, 'minimal_flag_called_events')
 
-      @feature_flags = Concurrent::Array.new(flags.map { |f| deep_symbolize_keys(f) })
+      property_matching_version = get_by_symbol_or_string_key(data, 'property_matching_version') || 1
+      new_flags = Concurrent::Array.new(flags.map { |f| deep_symbolize_keys(f) })
 
       new_by_key = {}
-      @feature_flags.each do |flag|
+      new_flags.each do |flag|
         new_by_key[flag[:key]] = flag unless flag[:key].nil?
       end
+      new_group_type_mapping = Concurrent::Hash[deep_symbolize_keys(group_type_mapping)]
+      new_cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
+      @definition_snapshot.value = {
+        flags: new_flags, flags_by_key: new_by_key,
+        group_type_mapping: new_group_type_mapping, cohorts: new_cohorts,
+        minimal_flag_called_events: minimal_flag_called_events == true,
+        property_matching_version: property_matching_version
+      }.freeze
+      @feature_flags = new_flags
       @feature_flags_by_key = new_by_key
-
-      @group_type_mapping = Concurrent::Hash[deep_symbolize_keys(group_type_mapping)]
-      @cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
+      @group_type_mapping = new_group_type_mapping
+      @cohorts = new_cohorts
       @minimal_flag_called_events = minimal_flag_called_events == true
 
       logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"

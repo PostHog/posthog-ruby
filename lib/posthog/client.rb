@@ -656,7 +656,8 @@ module PostHog
       flag_keys_set = flag_keys&.to_set(&:to_s)
 
       @feature_flags_poller.load_feature_flags
-      poller_flags_by_key = @feature_flags_poller.feature_flags_by_key || {}
+      definition_snapshot = @feature_flags_poller._evaluation_snapshot
+      poller_flags_by_key = definition_snapshot[:flags_by_key] || {}
 
       poller_flags_by_key.each do |key, definition|
         next if flag_keys_set && !flag_keys_set.include?(key.to_s)
@@ -664,7 +665,7 @@ module PostHog
         begin
           match = @feature_flags_poller.send(
             :_compute_flag_locally,
-            definition, distinct_id, groups, person_properties, group_properties
+            definition, distinct_id, groups, person_properties, group_properties, snapshot: definition_snapshot
           )
         rescue PostHog::RequiresServerEvaluation, PostHog::InconclusiveMatchError, StandardError
           next
@@ -677,7 +678,7 @@ module PostHog
           enabled: match.is_a?(String) || (match ? true : false),
           variant: match.is_a?(String) ? match : nil,
           payload: FeatureFlagResult.parse_payload(
-            @feature_flags_poller.send(:_compute_flag_payload_locally, key, match)
+            @feature_flags_poller.send(:_compute_flag_payload_locally, key, match, snapshot: definition_snapshot)
           ),
           id: definition[:id],
           version: nil,
@@ -696,7 +697,7 @@ module PostHog
       # the snapshot uses a remote /flags response, the response's top-level
       # `minimalFlagCalledEvents` field governs; a local-only snapshot reads
       # the gate polled with the flag definitions.
-      minimal_flag_called_events = @feature_flags_poller.minimal_flag_called_events
+      minimal_flag_called_events = definition_snapshot[:minimal_flag_called_events]
 
       # Skip the remote `/flags` round-trip when the caller scoped the request
       # to a fixed set of `flag_keys` and we've already resolved every one of

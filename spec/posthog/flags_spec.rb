@@ -1683,11 +1683,7 @@ module PostHog
     end
 
     def stub_feature_flags(flags)
-      poller.instance_variable_set(:@feature_flags, flags)
-      flags_by_key = {}
-      flags.each { |flag| flags_by_key[flag[:key]] = flag }
-      poller.instance_variable_set(:@feature_flags_by_key, flags_by_key)
-      poller.instance_variable_get(:@loaded_flags_successfully_once).make_true
+      poller._apply_flag_definitions(flags: flags)
     end
   end
 
