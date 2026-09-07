@@ -210,11 +210,8 @@ module PostHog
             feature_flag_request_max_retries: opts[:feature_flag_request_max_retries],
             async_load: opts[:feature_flags_async_load] == true,
             user_agent: @headers['User-Agent'],
-            on_flag_definitions_updated: lambda {
-              @distinct_id_has_sent_flag_calls_mutex.synchronize do
-                @distinct_id_has_sent_flag_calls.clear
-              end
-            }
+            flag_definitions_update_mutex: @distinct_id_has_sent_flag_calls_mutex,
+            on_flag_definitions_updated: -> { @distinct_id_has_sent_flag_calls.clear }
           )
       end
 

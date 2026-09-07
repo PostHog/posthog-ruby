@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'timeout'
 
 module PostHog
   describe 'feature flag called tracking across definition reloads' do
@@ -182,6 +183,73 @@ module PostHog
       client.reload_feature_flags
 
       expect(tracker).to have_received(:clear).once
+    end
+
+    %i[network cache quota].each do |source|
+      %i[single_flag snapshot].each do |access_path|
+        it "does not erase a concurrent #{access_path} access during a #{source} refresh" do
+          provider = double(
+            'cache provider',
+            should_fetch_flag_definitions?: true,
+            on_flag_definitions_received: nil,
+            shutdown: nil,
+            flag_definitions: { flags: [flag_definition.merge(active: false)] }
+          )
+          build_client(flag_definition_cache_provider: source == :cache ? provider : nil)
+          access = lambda {
+            if access_path == :snapshot
+              client.evaluate_flags('user', only_evaluate_locally: true).get_flag('beta-feature')
+            else
+              read_flag
+            end
+          }
+          expect(access.call).to be(true)
+          expect_single_event
+
+          if source == :cache
+            allow(provider).to receive(:should_fetch_flag_definitions?).and_return(false)
+          else
+            response = if source == :quota
+                         { status: 402, body: '{}' }
+                       else
+                         { status: 200, body: { flags: [flag_definition.merge(active: false)] }.to_json }
+                       end
+            stub_request(:get, definitions_endpoint).to_return(response)
+          end
+
+          start_refresh = Queue.new
+          reset_started = Queue.new
+          resume_reset = Queue.new
+          refresh = nil
+          mutex = client.instance_variable_get(:@distinct_id_has_sent_flag_calls_mutex)
+          allow(mutex).to receive(:synchronize).and_wrap_original do |synchronize, &block|
+            if Thread.current == refresh
+              reset_started << true
+              resume_reset.pop
+            end
+            synchronize.call(&block)
+          end
+          refresh = Thread.new do
+            start_refresh.pop
+            client.reload_feature_flags
+          end
+          start_refresh << true
+          Timeout.timeout(2) { reset_started.pop }
+
+          # Read while the refresh is about to acquire the deduplication lock.
+          # Either definition set is acceptable, but a new-set access must not be erased.
+          access.call
+          resume_reset << true
+          expect(refresh.join(2)).to eq(refresh)
+          refresh.value
+          2.times { expect(access.call).to eq(source == :quota ? nil : false) }
+          expect_single_event
+        ensure
+          resume_reset&.push(true)
+          refresh&.kill if refresh&.alive?
+          refresh&.join
+        end
+      end
     end
 
     it 'continues suppressing concurrent duplicate reads after reload' do
