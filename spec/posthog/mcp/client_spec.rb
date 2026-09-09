@@ -39,6 +39,16 @@ RSpec.describe PostHog::MCP::Client do
     expect(message).to eq(events[1][:properties]['$exception_list'][0]['value'])
   end
 
+  it 'survives self-referential and oversized custom properties' do
+    properties = { 'rows' => (1..10_000).to_a }
+    properties['self'] = properties
+    expect { client.capture_tool_call('add', is_error: false, properties: properties) }.not_to raise_error
+    event = client.dequeue_last_message
+    expect(event[:event]).to eq('$mcp_tool_call')
+    expect(event[:properties]['self']).to eq('[Circular ~]')
+    expect(event[:properties]['rows'].length).to be <= PostHog::MCP::Truncation::MAX_BREADTH + 1
+  end
+
   it 'respects mcp_exception_autocapture: false and default error strings' do
     quiet = described_class.new(api_key: 'phc_test', test_mode: true, mcp_exception_autocapture: false)
     quiet.capture_tool_call('add', is_error: true)

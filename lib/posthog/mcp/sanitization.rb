@@ -15,6 +15,7 @@ module PostHog
     module Sanitization
       INJECTED_ARGUMENT_NAMES = %w[context conversation_id llm_model].freeze
       REDACTED_VALUE = '[redacted]'
+      CIRCULAR_VALUE = '[Circular ~]'
       BINARY_REDACTED_VALUE = '[binary data redacted - not supported by PostHog MCP analytics]'
       BASE64_PATTERN = %r{\A[A-Za-z0-9+/\n\r]+=*\z}
       BASE64URL_PATTERN = /\A[A-Za-z0-9_-]+={0,2}\z/
@@ -47,10 +48,24 @@ module PostHog
       module_function
 
       # Deep-copies a value with string keys so the pipeline can rely on one shape.
-      def stringify_keys(value)
+      # Runs before the cycle-aware normalizer, so it must detect cycles itself:
+      # user-supplied properties may be self-referential, and the resulting
+      # `SystemStackError` is not a `StandardError` the sink could rescue.
+      def stringify_keys(value, seen = {}.compare_by_identity)
         case value
-        when Hash then value.to_h { |k, v| [k.to_s, stringify_keys(v)] }
-        when Array then value.map { |v| stringify_keys(v) }
+        when Hash, Array
+          return CIRCULAR_VALUE if seen.key?(value)
+
+          seen[value] = true
+          begin
+            if value.is_a?(Hash)
+              value.to_h { |k, v| [k.to_s, stringify_keys(v, seen)] }
+            else
+              value.map { |v| stringify_keys(v, seen) }
+            end
+          ensure
+            seen.delete(value)
+          end
         else value
         end
       end

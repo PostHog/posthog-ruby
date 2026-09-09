@@ -43,6 +43,18 @@ RSpec.describe PostHog::MCP::Sanitization do
     end
   end
 
+  describe '.stringify_keys' do
+    it 'marks cycles instead of recursing forever, while keeping shared references' do
+      shared = { leaf: 1 }
+      props = { a: shared, b: [shared] }
+      props[:self] = props
+      props[:list] = [props]
+      expect(described_class.stringify_keys(props)).to eq(
+        'a' => { 'leaf' => 1 }, 'b' => [{ 'leaf' => 1 }], 'self' => '[Circular ~]', 'list' => ['[Circular ~]']
+      )
+    end
+  end
+
   describe '.build_captured_mcp_parameters' do
     it 'keeps id/jsonrpc/method/params, strips injected arguments, and drops everything else' do
       request = {
