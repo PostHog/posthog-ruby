@@ -49,7 +49,11 @@ module PostHog
         ['llm_model', MAX_METADATA_LENGTH]
       ].freeze
 
-      NORMALIZED_FIELDS = %w[parameters response identify_actor_data error].freeze
+      # Includes user-supplied `properties` (custom events, `event_properties`,
+      # `capture_tool_call`): a large numeric array cannot be shrunk by string
+      # trimming, so it must take part in depth/breadth reduction or the core
+      # client drops the whole message at batch time.
+      NORMALIZED_FIELDS = %w[parameters response identify_actor_data error properties].freeze
 
       module_function
 

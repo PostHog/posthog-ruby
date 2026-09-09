@@ -74,6 +74,12 @@ RSpec.describe PostHog::MCP::Truncation do
       expect(frames[49]['filename']).to eq('file79.rb')
     end
 
+    it 'bounds user-supplied properties so the event fits the core client budget' do
+      event = described_class.truncate_event('event_type' => 'custom', 'properties' => { 'rows' => (1..10_000).to_a })
+      expect(described_class.json_byte_size(event)).to be <= described_class::MAX_EVENT_BYTES
+      expect(event['properties']['rows'].length).to be <= described_class::MAX_BREADTH + 1
+    end
+
     it 'caps response text blocks and then fits the whole event in the byte budget' do
       content = described_class.truncate_response_content('content' => [{ 'type' => 'text', 'text' => 'x' * 40_000 },
                                                                         { 'type' => 'text', 'text' => 'short' }])
