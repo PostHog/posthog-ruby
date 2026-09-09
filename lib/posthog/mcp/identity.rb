@@ -11,27 +11,48 @@ module PostHog
       def initialize(max_size = 1000)
         @cache = {}
         @max_size = max_size
+        @mutex = Mutex.new
       end
 
       def get(session_id)
-        identity = @cache.delete(session_id)
-        return nil if identity.nil?
+        @mutex.synchronize do
+          identity = @cache.delete(session_id)
+          next nil if identity.nil?
 
-        @cache[session_id] = identity
+          @cache[session_id] = identity
+        end
       end
 
       def set(session_id, identity)
-        @cache.delete(session_id)
-        @cache.shift if @cache.length >= @max_size && !@cache.key?(session_id)
-        @cache[session_id] = identity
+        @mutex.synchronize do
+          @cache.delete(session_id)
+          @cache.shift if @cache.length >= @max_size
+          @cache[session_id] = identity
+        end
+      end
+
+      # Atomically read the cached identity, merge the new one, store it, and
+      # report whether it changed. Keeps concurrent requests for one session
+      # from interleaving their read-merge-write.
+      #
+      # @return [Array(UserIdentity, Boolean)] `[merged, changed]`
+      def merge!(session_id, identity)
+        @mutex.synchronize do
+          previous = @cache.delete(session_id)
+          merged = Identity.merge_identities(previous, identity)
+          changed = !(previous && Identity.identities_equal?(previous, merged))
+          @cache.shift if @cache.length >= @max_size
+          @cache[session_id] = merged
+          [merged, changed]
+        end
       end
 
       def has?(session_id)
-        @cache.key?(session_id)
+        @mutex.synchronize { @cache.key?(session_id) }
       end
 
       def size
-        @cache.length
+        @mutex.synchronize { @cache.length }
       end
     end
 
@@ -88,10 +109,7 @@ module PostHog
           return nil
         end
 
-        previous = data.identified_sessions.get(session_id)
-        merged = merge_identities(previous, identity)
-        changed = !(previous && identities_equal?(previous, merged))
-        data.identified_sessions.set(session_id, merged)
+        _merged, changed = data.identified_sessions.merge!(session_id, identity)
         return nil unless changed
 
         Log.debug(data.options, "Identified session #{session_id}")

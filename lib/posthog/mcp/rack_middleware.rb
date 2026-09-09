@@ -44,13 +44,22 @@ module PostHog
         end
 
         status, headers, body = @app.call(env)
-        if token && headers.respond_to?(:key?) && headers.keys.none? { |k| k.to_s.casecmp?(MCP_SESSION_HEADER) }
+        # Only a successful initialize gets the token, so a client cannot replay a
+        # session minted for a handshake the server rejected.
+        if token && success?(status) && headers.respond_to?(:key?) &&
+           headers.keys.none? { |k| k.to_s.casecmp?(MCP_SESSION_HEADER) }
           headers[MCP_SESSION_HEADER] = token
+        elsif token && !decoded
+          env.delete(ENV_KEY)
         end
         [status, headers, body]
       end
 
       private
+
+      def success?(status)
+        status.to_i.between?(200, 299)
+      end
 
       # Reads the request body (bounded) and makes it re-readable for the app.
       def read_body(env)

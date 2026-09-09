@@ -363,6 +363,23 @@ RSpec.describe PostHog::MCP do
     end
   end
 
+  describe 'payload size' do
+    it 'keeps every captured message under the core client per-message limit so it is not dropped' do
+      allow(Kernel).to receive(:warn)
+      server.define_tool(name: 'huge', input_schema: { properties: {} }) do |**|
+        MCP::Tool::Response.new([{ type: 'text', text: 'lorem ipsum ' * 5000 }])
+      end
+      described_class.instrument(server, client)
+      server.handle(rpc(1, 'tools/call', { name: 'huge', arguments: { context: 'c' * 5000 } }))
+      events = drain_events(client)
+      call = events.find { |e| e[:event] == '$mcp_tool_call' }
+      expect(call[:properties]['$mcp_response']['content'][0]['text']).to end_with('...')
+      events.each do |message|
+        expect(JSON.generate(message).bytesize).to be < PostHog::Defaults::Message::MAX_BYTES
+      end
+    end
+  end
+
   describe 'custom events' do
     it 'sends custom events verbatim on the current session' do
       allow(Kernel).to receive(:warn)

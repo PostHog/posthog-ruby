@@ -58,9 +58,7 @@ RSpec.describe PostHog::MCP::Truncation do
         'error' => { '$exception_list' => [{ 'value' => 'e' * 3000,
                                              'stacktrace' => { 'frames' => (0...80).map do |i|
                                                { 'filename' => "file#{i}.rb" }
-                                             end } }] },
-        'response' => { 'content' => [{ 'type' => 'text', 'text' => 'x' * 40_000 },
-                                      { 'type' => 'text', 'text' => 'short' }] }
+                                             end } }] }
       )
       expect(event['user_intent'].length).to eq(2051)
       expect(event['resource_name'].length).to eq(259)
@@ -74,8 +72,17 @@ RSpec.describe PostHog::MCP::Truncation do
       expect(frames[24]['filename']).to eq('file24.rb')
       expect(frames[25]['filename']).to eq('file55.rb')
       expect(frames[49]['filename']).to eq('file79.rb')
-      expect(event['response']['content'][0]['text'].length).to eq(32_771)
-      expect(event['response']['content'][1]['text']).to eq('short')
+    end
+
+    it 'caps response text blocks and then fits the whole event in the byte budget' do
+      content = described_class.truncate_response_content('content' => [{ 'type' => 'text', 'text' => 'x' * 40_000 },
+                                                                        { 'type' => 'text', 'text' => 'short' }])
+      expect(content['content'][0]['text'].length).to eq(32_771)
+      expect(content['content'][1]['text']).to eq('short')
+
+      event = described_class.truncate_event('response' => content)
+      expect(event['response']['content'][0]['text']).to end_with('...')
+      expect(described_class.json_byte_size(event)).to be <= described_class::MAX_EVENT_BYTES
     end
 
     it 'keeps events within the byte budget without mutating the input' do

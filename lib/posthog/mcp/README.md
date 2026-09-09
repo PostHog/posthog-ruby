@@ -109,7 +109,7 @@ posthog.capture_missing_capability(context: prepared.intent) if prepared.is_miss
 
 ## Privacy and payload safety
 
-Before anything is sent: sensitive keys (`authorization`, `api_key`, `token`, `password`, ...) are redacted, PostHog tokens and credential-looking words are masked, image/audio/binary content blocks are replaced with placeholders, structured PII (emails, IPs, card numbers, SSNs, phone numbers) is scrubbed from `$mcp_intent`, and events are truncated to 100KB. Use `before_send` for anything domain-specific.
+Before anything is sent: sensitive keys (`authorization`, `api_key`, `token`, `password`, ...) are redacted, PostHog tokens and credential-looking words are masked, image/audio/binary content blocks are replaced with placeholders, structured PII (emails, IPs, card numbers, SSNs, phone numbers) is scrubbed from `$mcp_intent`, and events are truncated to fit the core client's 32KB per-message limit (the Node and Python SDKs budget 100KB; posthog-ruby drops larger messages at batch time, so Ruby truncates harder rather than lose the event). Use `before_send` for anything domain-specific.
 
 ## Logging on stdio servers
 

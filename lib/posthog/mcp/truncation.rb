@@ -21,7 +21,11 @@ module PostHog
       MAX_DEPTH = 10
       MAX_BREADTH = 100
       MAX_STRING_LENGTH = 32_768
-      MAX_EVENT_BYTES = 102_400
+      # JS/Python budget 100KB, but the Ruby core client drops any single message
+      # larger than `Defaults::Message::MAX_BYTES` (32KB) at batch time, so the
+      # internal event is budgeted to leave headroom for the envelope (`$lib`,
+      # timestamp, uuid, distinct_id) the client adds around it.
+      MAX_EVENT_BYTES = PostHog::Defaults::Message::MAX_BYTES - 2048
 
       MAX_USER_INTENT_LENGTH = 2048
       MAX_ERROR_MESSAGE_LENGTH = 2048
@@ -259,6 +263,12 @@ module PostHog
 
       def truncate_to_size(event)
         return event if json_byte_size(event) <= MAX_EVENT_BYTES
+
+        # Trim the largest strings first so a big tool response keeps its shape
+        # (the budget here is tight enough that depth reduction alone would turn
+        # a `content` array into "[Array]").
+        trimmed = truncate_largest_fields(event, MAX_EVENT_BYTES)
+        return trimmed if json_byte_size(trimmed) <= MAX_EVENT_BYTES
 
         (MAX_DEPTH - 1).downto(1) do |depth|
           reduced = event.dup

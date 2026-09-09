@@ -134,6 +134,15 @@ RSpec.describe PostHog::MCP::RackMiddleware do
     expect(seen_body).to eq(body)
   end
 
+  it 'does not attach the token when the app rejects the initialize' do
+    failing = ->(_env) { [400, {}, ['{}']] }
+    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
+    env = env_for(body)
+    _, headers, = described_class.new(failing).call(env)
+    expect(headers['mcp-session-id']).to be_nil
+    expect(env['posthog_mcp.session']).to be_nil
+  end
+
   it 'never clobbers a replayed header and skips non-initialize or modern requests' do
     token = PostHog::MCP.encode_session_id(session_id: 'ses_replayed')
     env = env_for('{}', 'mcp-session-id' => token)

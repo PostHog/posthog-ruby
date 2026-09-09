@@ -43,6 +43,29 @@ RSpec.describe PostHog::MCP::Identity do
     expect(described_class.handle_identify(nils, 'ses_1', request, nil)).to be_nil
   end
 
+  it 'keeps the identity cache consistent under concurrent identification' do
+    concurrent = PostHog::MCP::TrackingData.new(
+      options: PostHog::MCP::Options.new(identify: lambda { |req, _e|
+        { distinct_id: 'user-1', properties: { req[:params][:name] => true } }
+      }),
+      sink: nil
+    )
+    threads = 16.times.map do |i|
+      Thread.new do
+        50.times do |j|
+          described_class.handle_identify(concurrent, "ses_#{j % 4}", { params: { name: "t#{i}" } }, nil)
+        end
+      end
+    end
+    threads.each(&:join)
+    expect(concurrent.identified_sessions.size).to eq(4)
+    4.times do |j|
+      identity = concurrent.identified_sessions.get("ses_#{j}")
+      expect(identity.distinct_id).to eq('user-1')
+      expect(identity.properties.keys.length).to eq(16)
+    end
+  end
+
   it 'bounds the identity cache as an LRU' do
     cache = PostHog::MCP::IdentityCache.new(2)
     cache.set('a', 1)
