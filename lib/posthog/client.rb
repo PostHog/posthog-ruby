@@ -302,6 +302,11 @@ module PostHog
 
       symbolize_keys! attrs
       minimal_flag_called_event = attrs.delete(:_minimal_flag_called_event) == true
+      # Integrations that ride on a host application's client (e.g. PostHog::MCP)
+      # may relabel a single event's `$lib`/`$lib_version` without relabeling the
+      # client or its User-Agent.
+      lib_override = attrs.delete(:_lib)
+      lib_version_override = attrs.delete(:_lib_version)
       enrich_capture_attrs_with_context(attrs)
 
       # Precedence: an explicit `flags` snapshot always wins, regardless of
@@ -370,8 +375,8 @@ module PostHog
       end
 
       attrs[:is_server] = @is_server
-      attrs[:lib] = @lib
-      attrs[:lib_version] = @lib_version
+      attrs[:lib] = lib_override || @lib
+      attrs[:lib_version] = (lib_version_override || @lib_version).to_s
       message = FieldParser.parse_for_capture(attrs)
       # Minimal events are built from the allowlist after full assembly so
       # context properties and parser-added metadata can never leak in.
