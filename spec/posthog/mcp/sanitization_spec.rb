@@ -26,6 +26,12 @@ RSpec.describe PostHog::MCP::Sanitization do
         .to eq('level1' => { 'data' => binary })
     end
 
+    it 'keeps literal plus signs when percent-decoding base64 data URLs' do
+      url = "data:application/octet-stream;base64,#{'++//' * 3000}"
+      expect(described_class.sanitize_captured_value(url)).to eq(binary)
+      expect(described_class.sanitize_captured_value("data:image/png;base64,#{'A%2BB/' * 2500}")).to eq(binary)
+    end
+
     it 'passes non-strings through and redacts other vendors\' credentials per word' do
       expect(described_class.sanitize_captured_value(42)).to eq(42)
       expect(described_class.sanitize_captured_value(true)).to eq(true)

@@ -69,8 +69,14 @@ module PostHog
         BASE64_DATA_URL_PAYLOAD_PATTERN.match?(payload.delete("\r\n"))
       end
 
+      # Percent-decoding only: `+` is a base64 character, so form decoding
+      # (which turns it into a space) would break detection of valid data URLs.
       def decode_percent(value)
-        URI.decode_www_form_component(value)
+        if URI.respond_to?(:decode_uri_component)
+          URI.decode_uri_component(value)
+        else
+          URI::DEFAULT_PARSER.unescape(value)
+        end
       rescue ArgumentError
         nil
       end
