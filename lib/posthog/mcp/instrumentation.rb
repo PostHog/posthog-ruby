@@ -44,7 +44,7 @@ module PostHog
         end
 
         # Enrich an event with session/identity/server metadata and hand it to
-        # the sink. Mirrors the Python `capture_event`.
+        # the sink.
         def capture_event(data, input)
           sink = data.sink
           return nil if sink.nil?
@@ -130,6 +130,7 @@ module PostHog
           return result
         end
 
+        safely { prime_session }
         begin
           result = yield
         rescue StandardError => e
@@ -360,6 +361,17 @@ module PostHog
 
       # --- session / identity -----------------------------------------------
 
+      # Point the server-wide session at *this* request before the tool body runs,
+      # and pin it to the request scope. {Analytics#capture} reads the session from
+      # there, so a custom event emitted inside a tool belongs to its caller rather
+      # than to whichever request finished last (or is running concurrently). The
+      # full {#prepare_request} still runs after the call, because the conversation
+      # anchor is only known once the tool has returned. Emits nothing.
+      def prime_session
+        session_id, = Session.resolve(@data, mcp_session_id(@token), token: @token)
+        @scope[:session_id] = session_id if @scope.is_a?(Hash)
+      end
+
       # Resolve the session id, run identify, then lazily emit initialize.
       def prepare_request(request, conversation_id: nil, skip_initialize: false, token: nil)
         token ||= @token
@@ -392,7 +404,7 @@ module PostHog
         self.class.capture_event(@data, event)
       end
 
-      # Era is decided by the version the client *asked for* (as in @posthog/mcp):
+      # Era is decided by the version the client *asked for*:
       # a client declaring the 2026-07-28 revision or later must not be answered
       # with an `Mcp-Session-Id`, even though this gem counter-offers a legacy version.
       def mint_session_token(client_name, client_version, protocol_version, requested_version)

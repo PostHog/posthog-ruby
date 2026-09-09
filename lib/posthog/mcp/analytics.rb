@@ -15,6 +15,10 @@ module PostHog
       # Capture a custom event scoped to the current MCP session. The event
       # name is sent verbatim (a customer event, not `$`-prefixed).
       #
+      # Inside a tool body the session is the one pinned to the in-flight
+      # request by {Instrumentation}; outside of one (or over stdio, where a
+      # server only ever talks to one client) it is the server's current session.
+      #
       # @param event [String] event name
       # @param properties [Hash] event properties
       # @return [void]
@@ -28,7 +32,7 @@ module PostHog
         return if data.nil?
 
         Instrumentation.capture_event(data, {
-                                        'session_id' => data.session_id,
+                                        'session_id' => current_session_id(data),
                                         'event_type' => EventType::CUSTOM,
                                         'event_name' => event,
                                         'timestamp' => Time.now.utc,
@@ -45,6 +49,14 @@ module PostHog
         client = data&.sink&.client
         client.flush if client.respond_to?(:flush)
         nil
+      end
+
+      private
+
+      def current_session_id(data)
+        scope = RequestScope.current
+        scoped = scope.is_a?(Hash) ? scope[:session_id] : nil
+        scoped || data.session_id
       end
     end
 

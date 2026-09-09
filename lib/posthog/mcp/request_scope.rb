@@ -19,7 +19,10 @@ module PostHog
 
       module_function
 
-      # @return [Hash, nil] `{headers:, transport:, mint:}` for the in-flight HTTP request
+      # @return [Hash, nil] `{headers:, transport:, mint:, session_id:}` for the in-flight HTTP request.
+      #   `session_id` is the `$session_id` {Instrumentation} settled on before running the
+      #   tool body, so a custom event captured inside the tool is attributed to this
+      #   request even while another request on the same server is in flight.
       def current
         FIBER_STORAGE ? Fiber[KEY] : Thread.current[KEY]
       end
@@ -35,7 +38,7 @@ module PostHog
       # @param headers [Hash{String => String}] lowercase header names
       def with(headers:, transport: :http)
         previous = current
-        self.current = { headers: headers, transport: transport, mint: nil }
+        self.current = { headers: headers, transport: transport, mint: nil, session_id: nil }
         yield current
       ensure
         self.current = previous

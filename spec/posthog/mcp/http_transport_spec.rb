@@ -16,6 +16,20 @@ class PostHogMcpHttpSpecTool < MCP::Tool
   end
 end
 
+class PostHogMcpHttpSpecCaptureTool < MCP::Tool
+  tool_name 'capture_tool'
+  input_schema(properties: {})
+  class << self
+    attr_accessor :analytics, :before_capture
+
+    def call(**)
+      before_capture&.call
+      analytics.capture('in_tool_event', { from: 'tool' })
+      MCP::Tool::Response.new([{ type: 'text', text: 'captured' }])
+    end
+  end
+end
+
 RSpec.describe 'PostHog::MCP over Streamable HTTP' do
   let(:client) { new_test_client }
   let(:server) { MCP::Server.new(name: 'http-server', version: '1.0.0', tools: [PostHogMcpHttpSpecTool]) }
@@ -104,6 +118,65 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
     ensure
       transport.close
+    end
+  end
+
+  context 'custom events captured inside a tool body' do
+    let(:server) do
+      MCP::Server.new(name: 'http-server', version: '1.0.0', tools: [PostHogMcpHttpSpecTool, PostHogMcpHttpSpecCaptureTool])
+    end
+    let(:transport) { MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true, enable_json_response: true) }
+    let(:identify) { ->(_request, extra) { { distinct_id: extra['headers']['user-agent'] } } }
+
+    before do
+      PostHogMcpHttpSpecCaptureTool.analytics = PostHog::MCP.instrument(server, client, identify: identify)
+      PostHogMcpHttpSpecCaptureTool.before_capture = nil
+    end
+
+    def initialize_as(user)
+      transport.call(env_for(initialize_body, 'user-agent' => user))[1]['mcp-session-id']
+    end
+
+    def call_capture_tool_as(user, token, id: 2)
+      transport.call(env_for(rpc(id, 'tools/call', { name: 'capture_tool', arguments: {} }), 'mcp-session-id' => token, 'user-agent' => user))
+    end
+
+    # distinct_id => $session_id for every event with the given name
+    def attribution(events, name)
+      events.select { |e| e[:event] == name }.to_h { |e| [e[:distinct_id], e[:properties]['$session_id']] }
+    end
+
+    it 'attributes the event to the caller, not to the last request the server finished' do
+      alice = initialize_as('alice')
+      initialize_as('bob')
+      call_capture_tool_as('alice', alice)
+
+      events = drain_events(client)
+      expect(attribution(events, 'in_tool_event')).to eq('alice' => PostHog::MCP.decode_session_id(alice).session_id)
+      expect(attribution(events, 'in_tool_event')).to eq(attribution(events, '$mcp_tool_call'))
+    end
+
+    it 'attributes the event to the caller while another request runs to completion on the same server' do
+      alice = initialize_as('alice')
+      bob = initialize_as('bob')
+      bob_finished = Queue.new
+      PostHogMcpHttpSpecCaptureTool.before_capture = lambda do
+        # Runs inside Alice's tool body: let Bob's whole request finish before Alice captures.
+        PostHogMcpHttpSpecCaptureTool.before_capture = nil
+        Thread.new do
+          call_capture_tool_as('bob', bob, id: 3)
+          bob_finished << true
+        end
+        bob_finished.pop
+      end
+      call_capture_tool_as('alice', alice)
+
+      events = drain_events(client)
+      expect(attribution(events, 'in_tool_event')).to eq(
+        'alice' => PostHog::MCP.decode_session_id(alice).session_id,
+        'bob' => PostHog::MCP.decode_session_id(bob).session_id
+      )
+      expect(attribution(events, 'in_tool_event')).to eq(attribution(events, '$mcp_tool_call'))
     end
   end
 end
