@@ -119,6 +119,22 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
     ensure
       transport.close
     end
+
+    it 'runs get_more_tools through the real request lifecycle so in-flight entries are released' do
+      PostHog::MCP.instrument(server, client, report_missing: true)
+      session_id = transport.call(env_for(initialize_body))[1]['mcp-session-id']
+      3.times do |i|
+        response = transport.call(env_for(rpc(i + 2, 'tools/call', { name: 'get_more_tools', arguments: { context: 'csv export' } }),
+                                          'mcp-session-id' => session_id))
+        expect(response[0]).to eq(200)
+        expect(parse(response)['result']['content'][0]['text']).to include('Unfortunately')
+      end
+      server_session = transport.instance_variable_get(:@sessions).fetch(session_id).fetch(:server_session)
+      expect((2..4).none? { |id| server_session.in_flight?(id) }).to be(true)
+      expect(drain_events(client).count { |e| e[:event] == '$mcp_missing_capability' }).to eq(3)
+    ensure
+      transport.close
+    end
   end
 
   context 'custom events captured inside a tool body' do

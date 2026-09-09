@@ -83,6 +83,7 @@ module PostHog
                                   server_version: safe_call(server, :version))
           install_extensions!
           server.instance_variable_set(:@__posthog_mcp, data)
+          register_missing_capability_tool(server, data)
           Analytics.new(server)
         rescue StandardError => e
           Log.warn(opts, "Warning: failed to instrument server - #{e.class}: #{e.message}")
@@ -174,6 +175,19 @@ module PostHog
         object.respond_to?(method_name) ? object.public_send(method_name) : nil
       rescue StandardError
         nil
+      end
+
+      # Adds the `get_more_tools` virtual tool as a real server tool. An application
+      # tool that already uses the name wins and is tracked as an ordinary tool.
+      def register_missing_capability_tool(server, data)
+        return unless data.options.report_missing
+
+        name = Tools.missing_capability_tool_name(data.options)
+        return if server.tools.is_a?(Hash) && server.tools.key?(name)
+
+        data.virtual_tool = Tools.register(server, name)
+      rescue StandardError => e
+        Log.warn(data.options, "Warning: could not register the #{name} tool - #{e.class}: #{e.message}")
       end
 
       def install_extensions!

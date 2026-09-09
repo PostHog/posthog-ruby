@@ -124,9 +124,14 @@ module PostHog
         end
         request = request_with_arguments(original_arguments)
 
-        if @options.report_missing && name == missing_name && !real_tool?(name)
-          result = Tools.result
-          safely { record_missing_capability(name, original_arguments, request) }
+        if virtual_tool?(name)
+          # Run the gem's own handler so validation, in-flight tracking and
+          # cancellation behave exactly as for any other tool; only the event differs.
+          begin
+            result = yield
+          ensure
+            safely { record_missing_capability(name, original_arguments, request) }
+          end
           return result
         end
 
@@ -182,11 +187,6 @@ module PostHog
             names = tools.map { |tool| fetch(tool, :name) }.compact
             empty = tools.empty?
             mutated = tools.map { |tool| mutate_tool(tool) }
-            missing_name = Tools.missing_capability_tool_name(@options)
-            if @options.report_missing && names.none? { |n| n == missing_name }
-              mutated << Tools.descriptor(missing_name)
-              names << missing_name
-            end
             result = result.merge(SchemaMutation.key_for(result, :tools) => mutated)
           end
         end
@@ -534,9 +534,13 @@ module PostHog
 
       # --- tools -------------------------------------------------------------
 
-      def real_tool?(name)
+      # True only for the `get_more_tools` class {Tools.register} added; an
+      # application tool that shares the name is an ordinary tool.
+      def virtual_tool?(name)
+        return false if @data.virtual_tool.nil?
+
         tools = @server.respond_to?(:tools) ? @server.tools : nil
-        tools.is_a?(Hash) && tools.key?(name)
+        tools.is_a?(Hash) && tools[name].equal?(@data.virtual_tool)
       end
 
       # Injected argument names the analytics layer owns for this tool: the ones
@@ -579,7 +583,7 @@ module PostHog
         return tool unless tool.is_a?(Hash)
 
         name = fetch(tool, :name)
-        return tool if name == Tools::GET_MORE_TOOLS_NAME
+        return tool if virtual_tool?(name)
 
         schema = fetch(tool, :inputSchema)
         owned = []

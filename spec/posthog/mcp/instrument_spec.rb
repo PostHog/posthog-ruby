@@ -349,6 +349,32 @@ RSpec.describe PostHog::MCP do
       expect(events.none? { |e| e[:event] == '$mcp_tool_call' }).to be(true)
     end
 
+    it 'lets the gem validate get_more_tools arguments and still records the missing capability' do
+      described_class.instrument(server, client, report_missing: true)
+      result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools', arguments: {} }))
+      expect(result[:result][:isError]).to be(true)
+      expect(result[:result][:content][0][:text]).to include('Missing required arguments: context')
+      events = drain_events(client)
+      missing = events.find { |e| e[:event] == '$mcp_missing_capability' }
+      expect(missing[:properties]['$mcp_resource_name']).to eq('get_more_tools')
+      expect(missing[:properties]).not_to have_key('$mcp_intent')
+      expect(events.none? { |e| e[:event] == '$mcp_tool_call' }).to be(true)
+    end
+
+    it 'leaves an application tool named get_more_tools alone' do
+      own = MCP::Tool.define(name: 'get_more_tools', input_schema: { properties: {} }) do |**|
+        MCP::Tool::Response.new([{ type: 'text', text: 'mine' }])
+      end
+      server = MCP::Server.new(name: 'spec-server', version: '9.9.9', tools: [PostHogMcpSpecEchoTool, own])
+      described_class.instrument(server, client, report_missing: true)
+      expect(server.tools['get_more_tools']).to equal(own)
+      result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools', arguments: { context: 'why' } }))
+      expect(result[:result][:content][0][:text]).to eq('mine')
+      events = drain_events(client)
+      expect(events.map { |e| e[:event] }).to include('$mcp_tool_call')
+      expect(events.none? { |e| e[:event] == '$mcp_missing_capability' }).to be(true)
+    end
+
     it 'captures llm_model from the injected argument or client metadata' do
       described_class.instrument(server, client, capture_model: true)
       server.handle(rpc(1, 'tools/call',

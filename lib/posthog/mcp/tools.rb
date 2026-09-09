@@ -52,6 +52,31 @@ module PostHog
       def result
         { content: [{ type: 'text', text: RESULT_TEXT }], isError: false }
       end
+
+      # Register the virtual tool on an `MCP::Server` so the gem dispatches it like
+      # any other tool: argument validation, envelope checks, in-flight tracking
+      # and cancellation all apply. {Instrumentation} recognises the returned class
+      # and records the call as `$mcp_missing_capability`.
+      #
+      # @return [Class] the registered `MCP::Tool` subclass
+      def register(server, name)
+        spec = descriptor(name)
+        annotations = spec[:annotations]
+        content = result[:content]
+        server.define_tool(
+          name: name,
+          description: spec[:description],
+          input_schema: spec[:inputSchema],
+          annotations: {
+            title: annotations[:title],
+            read_only_hint: annotations[:readOnlyHint],
+            open_world_hint: annotations[:openWorldHint],
+            idempotent_hint: annotations[:idempotentHint],
+            destructive_hint: annotations[:destructiveHint]
+          }
+        ) { |**| ::MCP::Tool::Response.new(content) }
+        server.tools[name]
+      end
     end
   end
 end
