@@ -92,4 +92,19 @@ RSpec.describe PostHog::MCP::Client do
                             is_missing_capability: false)
     expect(client.prepare_tool_call('get_more_tools').is_missing_capability).to be(true)
   end
+
+  it 'strips only the context argument it injected when given the tool schema' do
+    own = { type: 'object', properties: { context: { type: 'string' } }, required: ['context'] }
+    expect(client.prepare_tool_list([{ name: 'search', inputSchema: own }])[0][:inputSchema]).to eq(own)
+    kept = client.prepare_tool_call('search', { context: 'application data' }, input_schema: own)
+    expect(kept.args).to eq(context: 'application data')
+    expect(kept.intent).to eq('application data')
+
+    injected = { type: 'object', properties: { title: { type: 'string' } } }
+    stripped = client.prepare_tool_call('add', { title: 'x', context: 'agent intent' }, input_schema: injected)
+    expect(stripped.args).to eq(title: 'x')
+    expect(stripped.intent).to eq('agent intent')
+
+    expect(client.prepare_tool_call('search', { context: 'application data' }).args).to eq({})
+  end
 end

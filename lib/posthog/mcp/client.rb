@@ -140,15 +140,25 @@ module PostHog
         prepared
       end
 
-      # Pull the agent's intent off the injected `context` argument, strip it
-      # from the arguments, and flag the `get_more_tools` virtual tool.
+      # Pull the agent's intent off the `context` argument, strip the argument
+      # this integration injected, and flag the `get_more_tools` virtual tool.
       #
+      # Pass the tool's own `inputSchema` (the same Hash you handed to
+      # {#prepare_tool_list}) so a `context` field the tool declares itself is
+      # left in `args`: only an injected `context` is stripped. Without the
+      # schema there is no way to tell the two apart, so `context` is always
+      # stripped.
+      #
+      # @param name [String] tool name
+      # @param args [Hash, nil] the call's arguments
+      # @param input_schema [Hash, nil] the tool's raw `inputSchema`
       # @return [PreparedToolCall]
-      def prepare_tool_call(name, args = nil)
+      def prepare_tool_call(name, args = nil, input_schema: nil)
         raw_context = args.is_a?(Hash) ? (args[:context] || args['context']) : nil
         intent = raw_context.is_a?(String) && !raw_context.strip.empty? ? raw_context.strip : nil
+        tool_declares_context = input_schema && SchemaMutation.declares_param?(input_schema, 'context')
         PreparedToolCall.new(
-          args: strip_context(args),
+          args: tool_declares_context ? args : strip_context(args),
           intent: intent,
           intent_source: intent ? 'context_parameter' : nil,
           is_missing_capability: name == @missing_capability_tool_name

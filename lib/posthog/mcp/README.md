@@ -97,7 +97,7 @@ If you own the HTTP layer and have no `MCP::Server` to wrap, use the client subc
 posthog = PostHog::MCP::Client.new(api_key: 'phc_...', host: 'https://us.i.posthog.com')
 
 tools = posthog.prepare_tool_list(raw_tools, report_missing: true)          # injects `context`, appends get_more_tools
-prepared = posthog.prepare_tool_call(name, args)                             # strips `context`, extracts intent
+prepared = posthog.prepare_tool_call(name, args, input_schema: tool[:inputSchema])  # extracts intent, strips the injected `context` (a `context` the tool declares itself is kept)
 posthog.capture_tool_call(name, intent: prepared.intent, intent_source: prepared.intent_source,
                           duration_ms: 42, is_error: false, distinct_id: 'user_123')
 posthog.capture_initialize(client_name: 'claude-code', client_version: '1.2.3', protocol_version: '2025-06-18')
