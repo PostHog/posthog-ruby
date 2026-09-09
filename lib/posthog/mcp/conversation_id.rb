@@ -45,7 +45,7 @@ module PostHog
       end
 
       # Plain data, not an instruction: an instruction-shaped block is what a
-      # client's prompt-injection filter strips. Compact JSON, same as @posthog/mcp.
+      # client's prompt-injection filter strips. Compact JSON.
       def build_prompt_back(conversation_id)
         { type: 'text', text: JSON.generate({ conversation_id: conversation_id }) }
       end

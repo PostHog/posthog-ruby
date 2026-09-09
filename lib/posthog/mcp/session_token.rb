@@ -23,8 +23,7 @@ module PostHog
     # start a new session and the client identity (only sent at `initialize`)
     # would be lost. Clients replay the `Mcp-Session-Id` header on every request,
     # so at `initialize` we mint that header as an unsigned base64url(JSON) token
-    # with short keys (`sid`, `cn`, `cv`, `pv`). Wire-compatible with the JS and
-    # Python SDKs.
+    # with short keys (`sid`, `cn`, `cv`, `pv`).
     #
     # @api private
     module SessionToken

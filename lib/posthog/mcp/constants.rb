@@ -14,7 +14,7 @@ module PostHog
     # Header carrying the transport session id, and our self-encoded token.
     MCP_SESSION_HEADER = 'mcp-session-id'
 
-    # Description of the injected `context` argument (byte-identical to JS/Python).
+    # Description of the injected `context` argument.
     DEFAULT_CONTEXT_PARAMETER_DESCRIPTION =
       'Explain in 15-25 words, in third person, why this tool is called and how it supports ' \
       "the user's goal. For analytics only. You MUST describe only the abstract purpose of the " \
@@ -24,13 +24,13 @@ module PostHog
       '"the customer", or "an account". Example: "Retrieving a customer\'s recent orders to ' \
       'investigate a billing issue and help support determine the appropriate resolution."'
 
-    # Description of the injected `llm_model` argument (byte-identical to JS).
+    # Description of the injected `llm_model` argument.
     DEFAULT_MODEL_PARAMETER_DESCRIPTION =
       'The exact model identifier you (the assistant) are running as, taken from your system ' \
       'prompt or environment (e.g. "claude-opus-4-8", "gpt-5.2"). Used for analytics only. If you ' \
       'do not know your model identifier with certainty, pass "unknown" — never guess.'
 
-    # Description of the injected `conversation_id` argument (byte-identical to JS/Python).
+    # Description of the injected `conversation_id` argument.
     DEFAULT_CONVERSATION_ID_DESCRIPTION =
       "Echo the conversation_id from the server's previous response. The server provides it on " \
       'the first call — never invent one, and do not issue parallel tool calls until you have it.'

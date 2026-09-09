@@ -30,8 +30,7 @@ module PostHog
   # PostHog MCP analytics for servers built on the official Ruby `mcp` gem.
   #
   # Wrap an `MCP::Server` so every tool call, handshake, listing, prompt,
-  # resource read, and failure is captured to PostHog as a `$mcp_*` event with
-  # the same wire contract as `@posthog/mcp` (Node) and `posthog.mcp` (Python).
+  # resource read, and failure is captured to PostHog as a `$mcp_*` event.
   #
   # @note Experimental: the API and the captured event schema may change in a
   #   minor release. A warning is logged when this file is required.
@@ -121,7 +120,7 @@ module PostHog
         Session.derive_session_id_from_mcp_session(mcp_session_id)
       end
 
-      # Deterministic `$session_id` for an agent conversation handle (cross-SDK contract).
+      # Deterministic `$session_id` for an agent conversation handle.
       #
       # @return [String]
       def derive_session_id_from_conversation(conversation_id)
@@ -131,7 +130,7 @@ module PostHog
       # The canned `get_more_tools` result for custom dispatchers.
       #
       # @return [Hash]
-      def get_more_tools_result # rubocop:disable Naming/AccessorMethodName -- cross-SDK name
+      def get_more_tools_result # rubocop:disable Naming/AccessorMethodName -- public API name
         Tools.result
       end
 

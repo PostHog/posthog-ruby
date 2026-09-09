@@ -21,7 +21,7 @@ module PostHog
       MAX_DEPTH = 10
       MAX_BREADTH = 100
       MAX_STRING_LENGTH = 32_768
-      # JS/Python budget 100KB, but the Ruby core client drops any single message
+      # The core client drops any single message
       # larger than `Defaults::Message::MAX_BYTES` (32KB) at batch time, so the
       # internal event is budgeted to leave headroom for the envelope (`$lib`,
       # timestamp, uuid, distinct_id) the client adds around it.

@@ -28,7 +28,7 @@ module PostHog
 
       # PII redaction for the agent-narrated intent string only. Ordered so an
       # earlier pass never eats digits a later pass needs. `\d`, `\w` and `\b`
-      # are ASCII-only in Ruby, matching the JS semantics these are ported from.
+      # are ASCII-only in Ruby, which is what these patterns assume.
       UNICODE_SPACE_PATTERN = /[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/
       EMAIL_PATTERN = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}/
       IPV4_PATTERN = /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/
@@ -275,8 +275,7 @@ module PostHog
         end
       end
 
-      # Last-resort credential detection for bare words, ported from
-      # posthog-python's `exception_utils._looks_like_secret`.
+      # Last-resort credential detection for bare words.
       #
       # @api private
       module SecretDetection

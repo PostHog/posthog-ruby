@@ -5,7 +5,7 @@ require 'securerandom'
 module PostHog
   module MCP
     # Id generation: `evt_<uuidv7>` / `ses_<uuidv7>` and the deterministic FNV-1a
-    # derivation shared byte-for-byte with posthog-js and posthog-python.
+    # derivation used for session ids that must agree across servers and restarts.
     #
     # @api private
     module Ids
@@ -37,8 +37,7 @@ module PostHog
       # Deterministic id derived from an arbitrary string. FNV-1a 64-bit mixed
       # twice to fill 32 hex chars. Not cryptographic; only stable and low-collision.
       #
-      # Iterates code points (Python `ord`), which agrees with the JS UTF-16
-      # `charCodeAt` port for every BMP input; session/conversation ids are ASCII.
+      # Iterates code points; session/conversation ids are ASCII in practice.
       def deterministic_prefixed_id(prefix, value)
         "#{prefix}_#{fnv1a_hex(value)}#{fnv1a_hex("#{value}::salt")}"
       end

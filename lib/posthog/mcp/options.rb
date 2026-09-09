@@ -40,7 +40,7 @@ module PostHog
     # the call targeted the `get_more_tools` virtual tool.
     PreparedToolCall = Struct.new(:args, :intent, :intent_source, :is_missing_capability, keyword_init: true)
 
-    # Configuration for {PostHog::MCP.instrument}. Mirrors the JS/Python options.
+    # Configuration for {PostHog::MCP.instrument}.
     #
     # @note Experimental: option names may change in a future minor release.
     class Options
