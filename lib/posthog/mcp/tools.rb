@@ -23,8 +23,12 @@ module PostHog
       end
 
       # The advertised descriptor (a `tools/list` entry, symbol keys like `MCP::Tool#to_h`).
-      def descriptor(name = GET_MORE_TOOLS_NAME)
-        {
+      # With `capture_model` on, the `llm_model` argument is advertised here too, so
+      # a missing-capability report carries the model that asked for it. The virtual
+      # tool is deliberately left out of the `conversation_id` loop-back: it reports
+      # a gap in the tool list rather than taking part in a tool conversation.
+      def descriptor(name = GET_MORE_TOOLS_NAME, options = nil)
+        spec = {
           name: name,
           description: 'Check for additional tools whenever your task might benefit from specialized ' \
                        'capabilities - even if existing tools could work as a fallback.',
@@ -46,6 +50,11 @@ module PostHog
             destructiveHint: false
           }
         }
+        return spec unless options.respond_to?(:capture_model_enabled?) && options.capture_model_enabled?
+
+        spec.merge(inputSchema: SchemaMutation.add_model_parameter(
+          spec[:inputSchema], tool_name: name, description: options.model_description, options: options
+        ))
       end
 
       # The canned acknowledgement returned to the agent after it calls `get_more_tools`.
@@ -59,8 +68,8 @@ module PostHog
       # and records the call as `$mcp_missing_capability`.
       #
       # @return [Class] the registered `MCP::Tool` subclass
-      def register(server, name)
-        spec = descriptor(name)
+      def register(server, name, options = nil)
+        spec = descriptor(name, options)
         annotations = spec[:annotations]
         content = result[:content]
         server.define_tool(

@@ -36,6 +36,8 @@ module PostHog
       end
 
       # @param headers [Hash{String => String}] lowercase header names
+      # @param transport [Symbol] `:http` for the Streamable HTTP transport, `:other`
+      #   for a transport that publishes no headers (stdio, a custom dispatcher)
       def with(headers:, transport: :http)
         previous = current
         self.current = { headers: headers, transport: transport, mint: nil, session_id: nil }

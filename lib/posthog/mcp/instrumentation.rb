@@ -94,11 +94,28 @@ module PostHog
         @scope = RequestScope.current
         @headers = @scope ? (@scope[:headers] || {}) : {}
         @token = SessionToken.decode(header_session_id)
+        @data.http_transport_seen = true if http?
+        @identified_in_request = {}
       end
 
       # Runs the wrapped handler and records the request.
       def dispatch(&handler)
         @start = self.class.monotonic_now
+        return dispatch_kind(&handler) if @scope
+
+        # Only the Streamable HTTP transport publishes a scope. Opening one for
+        # every other transport too (stdio, a custom dispatcher) means the session
+        # settled before the tool body runs is the one {Analytics#capture} reads
+        # inside it, whatever the request is anchored on.
+        RequestScope.with(headers: {}, transport: :other) do |scope|
+          @scope = scope
+          dispatch_kind(&handler)
+        end
+      end
+
+      private
+
+      def dispatch_kind(&handler)
         case @kind
         when :tools_call then dispatch_tool_call(&handler)
         when :tools_list then dispatch_tools_list(&handler)
@@ -106,8 +123,6 @@ module PostHog
         else dispatch_generic(&handler)
         end
       end
-
-      private
 
       # --- dispatchers -------------------------------------------------------
 
@@ -135,7 +150,7 @@ module PostHog
           return result
         end
 
-        safely { prime_session }
+        safely { prime_session(request, minted ? nil : conversation_id) }
         begin
           result = yield
         rescue StandardError => e
@@ -148,6 +163,10 @@ module PostHog
         end
 
         delivered = false
+        # The handle appended below is unique per conversation, so an error read
+        # off the delivered result would give every identical failure a different
+        # `$mcp_error_message`. Grouping reads the result the tool returned.
+        error_source = result
         unless no_response?(result) || conversation_id.nil?
           safely do
             if @data.tool_output_instructions[name]
@@ -164,7 +183,8 @@ module PostHog
         safely do
           cid = minted && !delivered ? nil : conversation_id
           session_id = prepare_request(request, conversation_id: cid)
-          record_tool_call(session_id, name, request, result: result, conversation_id: cid, stripped: stripped)
+          record_tool_call(session_id, name, request, result: result, conversation_id: cid,
+                                                      stripped: stripped, error_source: error_source)
         end
         result
       end
@@ -236,7 +256,8 @@ module PostHog
 
       # --- recording ---------------------------------------------------------
 
-      def record_tool_call(session_id, name, request, result: nil, error: nil, conversation_id: nil, stripped: {})
+      def record_tool_call(session_id, name, request, result: nil, error: nil, conversation_id: nil, stripped: {},
+                           error_source: nil)
         event = base_event(EventType::MCP_TOOLS_CALL, session_id, request)
         event['resource_name'] = name
         event['tool_description'] = @data.tool_descriptions[name]
@@ -263,9 +284,10 @@ module PostHog
           event['error'] = Exceptions.capture_exception(error)
         elsif !result.nil? && !no_response?(result)
           event['response'] = result
-          if tool_result_error?(result)
+          source = error_source.nil? ? result : error_source
+          if tool_result_error?(source)
             event['is_error'] = true
-            event['error'] = Exceptions.capture_exception(Sanitization.stringify_keys(result))
+            event['error'] = Exceptions.capture_exception(Sanitization.stringify_keys(source))
           end
         end
 
@@ -283,7 +305,22 @@ module PostHog
           event['user_intent'] = context.strip
           event['user_intent_source'] = 'context_parameter'
         end
+        if @options.capture_model_enabled?
+          model = ModelCapture.resolve(request, self_reported_model(arguments))
+          if model
+            event['llm_model'] = model[0]
+            event['llm_model_source'] = model[1]
+          end
+        end
         finish_event(event, request)
+      end
+
+      # The virtual tool declares `llm_model` itself, so the argument is never
+      # stripped and is read straight off the call.
+      def self_reported_model(arguments)
+        return nil unless arguments.is_a?(Hash)
+
+        arguments[ModelCapture::PARAM_NAME] || arguments[ModelCapture::PARAM_NAME.to_sym]
       end
 
       def record_tools_list(session_id, names:, response: nil, empty: false, error: nil)
@@ -361,14 +398,19 @@ module PostHog
 
       # --- session / identity -----------------------------------------------
 
-      # Point the server-wide session at *this* request before the tool body runs,
-      # and pin it to the request scope. {Analytics#capture} reads the session from
-      # there, so a custom event emitted inside a tool belongs to its caller rather
-      # than to whichever request finished last (or is running concurrently). The
-      # full {#prepare_request} still runs after the call, because the conversation
-      # anchor is only known once the tool has returned. Emits nothing.
-      def prime_session
-        session_id, = Session.resolve(@data, mcp_session_id(@token), token: @token)
+      # Settle session and identity before the tool body runs, and pin the session
+      # to the request scope. {Analytics#capture} reads both from there, so a
+      # custom event emitted inside a tool belongs to its caller rather than to
+      # whichever request finished last (or is running concurrently), and carries
+      # the same identified person as the `$mcp_tool_call` that follows it.
+      #
+      # `conversation_id` is passed when the agent echoed one back: that anchor is
+      # already known, so priming resolves the same session the tool call will be
+      # recorded under. A minted handle is not known to have reached the agent
+      # until the call returns, so it stays out of here. {#prepare_request} runs
+      # again after the call; the second run is idempotent.
+      def prime_session(request, conversation_id)
+        session_id = prepare_request(request, conversation_id: conversation_id)
         @scope[:session_id] = session_id if @scope.is_a?(Hash)
       end
 
@@ -379,8 +421,15 @@ module PostHog
                                                                            conversation_id: conversation_id)
         warn_stateless_session_not_wired if source == 'generated' && http?
 
-        identify_event = Identity.handle_identify(@data, session_id, request, extra)
-        self.class.capture_event(@data, identify_event) if identify_event
+        # A tool call prepares twice: once before the body to pin the session, and
+        # once after it, when the conversation anchor is known. A customer's
+        # `identify` callback runs once per session per request, so preparing
+        # twice never asks it the same question twice.
+        unless @identified_in_request.key?(session_id)
+          @identified_in_request[session_id] = true
+          identify_event = Identity.handle_identify(@data, session_id, request, extra)
+          self.class.capture_event(@data, identify_event) if identify_event
+        end
         maybe_emit_initialize(session_id, request) unless skip_initialize
         session_id
       end
@@ -545,7 +594,10 @@ module PostHog
 
       # Injected argument names the analytics layer owns for this tool: the ones
       # it injected at tools/list, or (never listed) the ones the tool's own
-      # schema does not declare.
+      # schema does not declare. A composed or referenced schema is never
+      # injected into, so nothing in it is ours to strip either - the same guard
+      # {SchemaMutation.add_parameter} uses, so a call before the first
+      # tools/list behaves exactly like one after it.
       def owned_params_for(name)
         cached = @data.tool_owned_params[name]
         return cached if cached
@@ -553,6 +605,8 @@ module PostHog
         tools = @server.respond_to?(:tools) ? @server.tools : nil
         tool = tools.is_a?(Hash) ? tools[name] : nil
         schema = tool.respond_to?(:input_schema) ? tool.input_schema&.to_h : nil
+        return [] unless SchemaMutation.injectable?(schema)
+
         owned = []
         owned << 'context' if @options.context_enabled? && !SchemaMutation.declares_param?(schema, 'context')
         owned << ConversationId::PARAM_NAME if @options.enable_conversation_id &&

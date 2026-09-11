@@ -185,7 +185,7 @@ module PostHog
         name = Tools.missing_capability_tool_name(data.options)
         return if server.tools.is_a?(Hash) && server.tools.key?(name)
 
-        data.virtual_tool = Tools.register(server, name)
+        data.virtual_tool = Tools.register(server, name, data.options)
       rescue StandardError => e
         Log.warn(data.options, "Warning: could not register the #{name} tool - #{e.class}: #{e.message}")
       end

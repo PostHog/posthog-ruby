@@ -232,6 +232,37 @@ RSpec.describe PostHog::MCP::RackMiddleware do
     expect(env['posthog_mcp.session']).to be_nil
   end
 
+  it 'does not attach the token when a 200 carries a JSON-RPC error' do
+    rejecting = lambda do |_env|
+      [200, { 'content-type' => 'application/json' },
+       [JSON.generate({ jsonrpc: '2.0', id: 1, error: { code: -32_602, message: 'Unsupported protocol version' } })]]
+    end
+    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
+    env = env_for(body)
+    _, headers, = described_class.new(rejecting).call(env)
+    expect(headers['mcp-session-id']).to be_nil
+    expect(env['posthog_mcp.session']).to be_nil
+  end
+
+  it 'attaches the token on an InitializeResult and on a body it cannot sniff' do
+    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
+    accepting = lambda do |_env|
+      [200, { 'content-type' => 'application/json' },
+       [JSON.generate({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-06-18' } })]]
+    end
+    _, headers, = described_class.new(accepting).call(env_for(body))
+    expect(headers['mcp-session-id']).not_to be_nil
+
+    streaming = Class.new do
+      def each
+        yield "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"
+      end
+    end.new
+    sse = ->(_env) { [200, { 'content-type' => 'text/event-stream' }, streaming] }
+    _, headers, = described_class.new(sse).call(env_for(body))
+    expect(headers['mcp-session-id']).not_to be_nil
+  end
+
   it 'never clobbers a replayed header and skips non-initialize or modern requests' do
     token = PostHog::MCP.encode_session_id(session_id: 'ses_replayed')
     env = env_for('{}', 'mcp-session-id' => token)

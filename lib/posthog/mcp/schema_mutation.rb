@@ -38,6 +38,17 @@ module PostHog
         COMPLEX_KEYS.any? { |key| truthy?(fetch(schema, key)) }
       end
 
+      # Whether an analytics parameter may be injected into (and therefore owned
+      # in) this input schema. A composed (oneOf/allOf/anyOf) or referenced
+      # ($ref) schema can declare the property out of band, and a sibling
+      # property next to a reference to a closed object makes the schema
+      # unsatisfiable, so those are left alone entirely.
+      def injectable?(schema)
+        return true unless schema.is_a?(Hash)
+
+        !complex?(schema) && !truthy?(fetch(schema, :$ref))
+      end
+
       # Key style of `hash`, falling back to `parent`'s when `hash` is empty.
       def string_keys?(hash, parent)
         source = hash.empty? ? parent : hash
@@ -57,7 +68,8 @@ module PostHog
       end
 
       # Add a string property to an object schema. Returns the input unchanged
-      # (logging a warning) when the property exists or the schema is composed.
+      # (logging a warning) when the property exists or the schema is composed
+      # or referenced.
       #
       # @return [Hash] new schema
       def add_parameter(schema, name, description, tool_name:, required:, options: nil, label: name)
@@ -66,9 +78,10 @@ module PostHog
                     "WARN: Tool \"#{tool_name}\" already has '#{name}' parameter. Skipping #{label} injection.")
           return schema
         end
-        if schema && complex?(schema)
+        unless injectable?(schema)
           Log.debug(options,
-                    "WARN: Tool \"#{tool_name}\" has complex schema (oneOf/allOf/anyOf). Skipping #{label} injection.")
+                    "WARN: Tool \"#{tool_name}\" has a composed schema (oneOf/allOf/anyOf/$ref). " \
+                    "Skipping #{label} injection.")
           return schema
         end
 
@@ -79,9 +92,10 @@ module PostHog
         schema = deep_dup(schema)
         properties_key = key_for(schema, :properties)
         schema[properties_key] = {} unless schema[properties_key].is_a?(Hash)
-        additional_key = key_for(schema, :additionalProperties)
-        schema.delete(additional_key) if schema[additional_key] == false
 
+        # `additionalProperties: false` stays: the injected name is listed under
+        # `properties`, so it is still accepted, and relaxing the constraint would
+        # advertise a looser schema than the dispatcher actually validates against.
         property_key = string_keys?(schema[properties_key], schema) ? name.to_s : name.to_sym
         schema[properties_key][property_key] = { type: 'string', description: description }
 

@@ -56,6 +56,30 @@ class PostHogMcpSpecErrorResultTool < MCP::Tool
   end
 end
 
+class PostHogMcpSpecComposedContextTool < MCP::Tool
+  tool_name 'composed'
+  input_schema(type: 'object', properties: { message: { type: 'string' } },
+               allOf: [{ properties: { context: { type: 'string' } }, required: ['context'] }])
+  class << self
+    def call(context: nil, **)
+      MCP::Tool::Response.new([{ type: 'text', text: "ctx=#{context}" }])
+    end
+  end
+end
+
+class PostHogMcpSpecCaptureTool < MCP::Tool
+  tool_name 'capture'
+  input_schema(properties: {})
+  class << self
+    attr_accessor :analytics
+
+    def call(**)
+      analytics.capture('in_tool_event')
+      MCP::Tool::Response.new([{ type: 'text', text: 'captured' }])
+    end
+  end
+end
+
 RSpec.describe PostHog::MCP do
   let(:client) { new_test_client }
   let(:tools) do
@@ -221,6 +245,48 @@ RSpec.describe PostHog::MCP do
       expect(events[4][:properties]['$mcp_response']['contents'][0]['text']).to eq('hello')
     end
 
+    it 'redacts binary prompt messages and resource blobs on the way out' do
+      server.define_prompt(name: 'picture', description: 'p', arguments: []) do |_args, **|
+        MCP::Prompt::Result.new(description: 'x', messages: [
+                                  MCP::Prompt::Message.new(
+                                    role: 'user',
+                                    content: MCP::Content::Image.new('c2Vuc2l0aXZl', 'image/png')
+                                  )
+                                ])
+      end
+      server.define_resource(uri: 'file:///data.bin', name: 'data', mime_type: 'application/octet-stream') do
+        [{ uri: 'file:///data.bin', mimeType: 'application/octet-stream', blob: 'c2Vuc2l0aXZl' }]
+      end
+      described_class.instrument(server, client)
+      server.handle(rpc(1, 'prompts/get', { name: 'picture', arguments: {} }))
+      server.handle(rpc(2, 'resources/read', { uri: 'file:///data.bin' }))
+      events = drain_events(client)
+      prompt = events.find { |e| e[:event] == '$mcp_prompt_get' }
+      read = events.find { |e| e[:event] == '$mcp_resource_read' }
+      expect(prompt[:properties]['$mcp_response']['messages'][0]['content'])
+        .to eq('type' => 'text', 'text' => '[image content redacted - not supported by PostHog MCP analytics]')
+      expect(read[:properties]['$mcp_response']['contents'][0]['blob'])
+        .to eq('[binary resource content redacted - not supported by PostHog MCP analytics]')
+      expect(JSON.generate(events)).not_to include('c2Vuc2l0aXZl')
+    end
+
+    it 'leaves a composed schema and the context argument it owns alone, listed or not' do
+      composed = MCP::Server.new(name: 'spec-server', version: '9.9.9', tools: [PostHogMcpSpecComposedContextTool])
+      described_class.instrument(composed, client)
+      # Called before any tools/list, so ownership is decided from the schema alone.
+      first = composed.handle(rpc(1, 'tools/call', { name: 'composed', arguments: { context: 'why' } }))
+      expect(first[:result][:content][0][:text]).to eq('ctx=why')
+
+      listed = composed.handle(rpc(2, 'tools/list'))[:result][:tools][0][:inputSchema]
+      expect(listed[:properties].keys).to eq([:message])
+      expect(listed[:allOf]).to eq([{ properties: { context: { type: 'string' } }, required: ['context'] }])
+
+      second = composed.handle(rpc(3, 'tools/call', { name: 'composed', arguments: { context: 'why' } }))
+      expect(second[:result][:content][0][:text]).to eq('ctx=why')
+      calls = drain_events(client).select { |e| e[:event] == '$mcp_tool_call' }
+      expect(calls.map { |c| c[:properties]['$mcp_intent'] }).to eq(%w[why why])
+    end
+
     it 'flags an empty tools/list as an error' do
       empty_server = MCP::Server.new(name: 'empty', tools: [])
       described_class.instrument(empty_server, client)
@@ -329,6 +395,19 @@ RSpec.describe PostHog::MCP do
       expect(events.map { |e| e[:properties]['$session_id'] }.uniq.length).to eq(1)
     end
 
+    it 'keeps the conversation handle out of the error message so failures still group' do
+      described_class.instrument(server, client, enable_conversation_id: true)
+      2.times { |i| server.handle(rpc(i + 1, 'tools/call', { name: 'soft_fail', arguments: { context: 'c' } })) }
+      events = drain_events(client)
+      calls = events.select { |e| e[:event] == '$mcp_tool_call' }
+      expect(calls.map { |c| c[:properties]['$mcp_error_message'] }).to eq(['tool failed badly'] * 2)
+      expect(events.select { |e| e[:event] == '$exception' }
+                   .map { |e| e[:properties]['$exception_list'][0]['value'] }).to eq(['tool failed badly'] * 2)
+      # The handle still reaches the agent on the delivered result.
+      expect(calls[0][:properties]['$mcp_response']['content'].length).to eq(2)
+      expect(calls[0][:properties]['$mcp_conversation_id']).to be_a(String)
+    end
+
     it 'advertises and intercepts get_more_tools as $mcp_missing_capability' do
       described_class.instrument(server, client, report_missing: true)
       list = server.handle(rpc(1, 'tools/list'))
@@ -375,6 +454,22 @@ RSpec.describe PostHog::MCP do
       expect(events.none? { |e| e[:event] == '$mcp_missing_capability' }).to be(true)
     end
 
+    it 'advertises llm_model on get_more_tools and records it on the missing-capability event' do
+      described_class.instrument(server, client, report_missing: true, capture_model: true)
+      list = server.handle(rpc(1, 'tools/list'))
+      virtual = list[:result][:tools].find { |t| t[:name] == 'get_more_tools' }
+      expect(virtual[:inputSchema][:properties].keys).to contain_exactly(:context, :llm_model)
+      expect(virtual[:inputSchema][:properties].keys).not_to include(:conversation_id)
+      expect(virtual[:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+      result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools',
+                                                    arguments: { context: 'need csv export',
+                                                                 llm_model: ' claude-opus-4-8 ' } }))
+      expect(result[:result][:content][0][:text]).to include('Unfortunately')
+      missing = drain_events(client).find { |e| e[:event] == '$mcp_missing_capability' }
+      expect(missing[:properties]).to include('$mcp_llm_model' => 'claude-opus-4-8',
+                                              '$mcp_llm_model_source' => 'self_reported')
+    end
+
     it 'captures llm_model from the injected argument or client metadata' do
       described_class.instrument(server, client, capture_model: true)
       server.handle(rpc(1, 'tools/call',
@@ -407,6 +502,39 @@ RSpec.describe PostHog::MCP do
   end
 
   describe 'custom events' do
+    it 'anchors an in-tool event on the echoed conversation and the identified person' do
+      allow(Kernel).to receive(:warn)
+      capture_server = MCP::Server.new(name: 'spec-server', version: '9.9.9', tools: [PostHogMcpSpecCaptureTool])
+      PostHogMcpSpecCaptureTool.analytics = described_class.instrument(
+        capture_server, client, enable_conversation_id: true, identify: { distinct_id: 'user-1' }
+      )
+      conversation = '019fd2b0-1111-7111-8111-111111111111'
+      capture_server.handle(rpc(1, 'tools/call', { name: 'capture',
+                                                   arguments: { context: 'c', conversation_id: conversation } }))
+      events = drain_events(client)
+      custom = events.find { |e| e[:event] == 'in_tool_event' }
+      call = events.find { |e| e[:event] == '$mcp_tool_call' }
+      expect(custom[:properties]['$session_id'])
+        .to eq(described_class.derive_session_id_from_conversation(conversation))
+      expect(custom[:properties]['$session_id']).to eq(call[:properties]['$session_id'])
+      expect(custom[:distinct_id]).to eq('user-1')
+      expect(custom[:distinct_id]).to eq(call[:distinct_id])
+    end
+
+    it 'gives a capture that lost its request scope a standalone session on an HTTP server' do
+      allow(Kernel).to receive(:warn)
+      logs = []
+      handle = described_class.instrument(server, client, logger: ->(message) { logs << message })
+      server.handle(initialize_request)
+      data = described_class.tracking_data(server)
+      data.http_transport_seen = true # a request has arrived over HTTP
+      handle.capture('detached_event')
+      custom = drain_events(client).find { |e| e[:event] == 'detached_event' }
+      expect(custom[:properties]['$session_id']).to start_with('ses_')
+      expect(custom[:properties]['$session_id']).not_to eq(data.session_id)
+      expect(logs).to include(a_string_including('without the scope of the request'))
+    end
+
     it 'sends custom events verbatim on the current session' do
       allow(Kernel).to receive(:warn)
       handle = described_class.instrument(server, client)

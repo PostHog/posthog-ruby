@@ -17,6 +17,7 @@ module PostHog
       REDACTED_VALUE = '[redacted]'
       CIRCULAR_VALUE = '[Circular ~]'
       BINARY_REDACTED_VALUE = '[binary data redacted - not supported by PostHog MCP analytics]'
+      BINARY_RESOURCE_REDACTED_VALUE = '[binary resource content redacted - not supported by PostHog MCP analytics]'
       BASE64_PATTERN = %r{\A[A-Za-z0-9+/\n\r]+=*\z}
       BASE64URL_PATTERN = /\A[A-Za-z0-9_-]+={0,2}\z/
       BASE64URL_SPECIFIC_CHAR_PATTERN = /[-_]/
@@ -227,17 +228,45 @@ module PostHog
         return sanitized unless sanitized.is_a?(Hash)
 
         result = sanitized.dup
-        if result['content'].is_a?(Array)
-          result['content'] = result['content'].map do |block|
-            sanitize_content_block(block)
-          end
-        end
+        result['content'] = sanitize_content_blocks(result['content']) if result['content'].is_a?(Array)
+        result['messages'] = sanitize_prompt_messages(result['messages']) if result['messages'].is_a?(Array)
+        result['contents'] = sanitize_resource_contents(result['contents']) if result['contents'].is_a?(Array)
         structured = result['structuredContent']
         if structured.is_a?(Hash) || structured.is_a?(Array)
           result['structuredContent'] =
             sanitize_captured_value(structured)
         end
         result
+      end
+
+      def sanitize_content_blocks(blocks)
+        blocks.map { |block| sanitize_content_block(block) }
+      end
+
+      # A `prompts/get` result carries its blocks under `messages[].content`,
+      # either as a single block or as an array of them.
+      def sanitize_prompt_messages(messages)
+        messages.map do |message|
+          next message unless message.is_a?(Hash) && message.key?('content')
+
+          content = message['content']
+          sanitized = case content
+                      when Array then sanitize_content_blocks(content)
+                      when Hash then sanitize_content_block(content)
+                      else content
+                      end
+          message.merge('content' => sanitized)
+        end
+      end
+
+      # A `resources/read` result carries its payloads under `contents[]`, where a
+      # binary resource is a `blob` rather than a typed content block.
+      def sanitize_resource_contents(contents)
+        contents.map do |entry|
+          next entry unless entry.is_a?(Hash) && entry.key?('blob')
+
+          entry.merge('blob' => BINARY_RESOURCE_REDACTED_VALUE)
+        end
       end
 
       def sanitize_content_block(block)
@@ -250,7 +279,7 @@ module PostHog
         when 'resource'
           resource = block['resource']
           if resource.is_a?(Hash) && resource.key?('blob')
-            text_block('[binary resource content redacted - not supported by PostHog MCP analytics]')
+            text_block(BINARY_RESOURCE_REDACTED_VALUE)
           else
             sanitize_captured_value(block)
           end

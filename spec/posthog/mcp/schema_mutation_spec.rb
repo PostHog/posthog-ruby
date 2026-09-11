@@ -16,11 +16,11 @@ RSpec.describe PostHog::MCP::SchemaMutation do
     expect(schema[:required]).to eq(['x'])
   end
 
-  it 'honours description overrides and removes additionalProperties: false' do
+  it 'honours description overrides and keeps additionalProperties: false' do
     out = described_class.add_context_parameter({ 'type' => 'object', 'properties' => {}, 'additionalProperties' => false },
                                                 tool_name: 't', description: 'why')
     expect(out).to eq('type' => 'object', 'properties' => { 'context' => { type: 'string', description: 'why' } },
-                      'required' => ['context'])
+                      'required' => ['context'], 'additionalProperties' => false)
   end
 
   it 'skips schemas that declare the param or are composed, and builds one from nil' do
@@ -28,6 +28,8 @@ RSpec.describe PostHog::MCP::SchemaMutation do
     expect(described_class.add_context_parameter(owned, tool_name: 't')).to equal(owned)
     complex = { oneOf: [{ type: 'object' }] }
     expect(described_class.add_context_parameter(complex, tool_name: 't')).to equal(complex)
+    referenced = { type: 'object', :$ref => '#/$defs/payload' }
+    expect(described_class.add_context_parameter(referenced, tool_name: 't')).to equal(referenced)
     out = described_class.add_conversation_id_parameter(nil, tool_name: 't')
     expect(out[:properties][:conversation_id][:description]).to eq(PostHog::MCP::DEFAULT_CONVERSATION_ID_DESCRIPTION)
     expect(out[:required]).to eq([])
@@ -37,6 +39,18 @@ RSpec.describe PostHog::MCP::SchemaMutation do
     out = described_class.add_model_parameter(schema, tool_name: 't')
     expect(out[:properties][:llm_model][:description]).to eq(PostHog::MCP::DEFAULT_MODEL_PARAMETER_DESCRIPTION)
     expect(out[:required]).to include('llm_model')
+  end
+
+  describe '.injectable?' do
+    it 'refuses composed and referenced schemas only' do
+      expect(described_class.injectable?(schema)).to be(true)
+      expect(described_class.injectable?(nil)).to be(true)
+      expect(described_class.injectable?({})).to be(true)
+      expect(described_class.injectable?({ allOf: [{ required: ['context'] }] })).to be(false)
+      expect(described_class.injectable?({ 'anyOf' => [{ type: 'object' }] })).to be(false)
+      expect(described_class.injectable?({ oneOf: [{ type: 'object' }] })).to be(false)
+      expect(described_class.injectable?({ '$ref' => '#/$defs/payload' })).to be(false)
+    end
   end
 
   describe '.add_output_instructions' do

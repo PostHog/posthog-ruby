@@ -49,11 +49,7 @@ module PostHog
         event['is_error'] = is_error == true
         event['error_type'] = error_type
         apply_intent(event, intent, intent_source)
-        model = ModelCapture.normalize(llm_model)
-        if model
-          event['llm_model'] = model
-          event['llm_model_source'] = llm_model_source || 'self_reported'
-        end
+        apply_model(event, llm_model, llm_model_source)
         if is_error
           event['error'] =
             Exceptions.capture_exception(error.nil? ? "Tool #{tool_name} returned an error" : error)
@@ -105,37 +101,47 @@ module PostHog
       # @return [void]
       def capture_missing_capability(context: nil, parameters: nil, protocol_version: nil, distinct_id: nil,
                                      session_id: nil, client_user_agent: nil, vendor_client: nil,
-                                     set_properties: nil, groups: nil, properties: nil, timestamp: nil)
+                                     set_properties: nil, groups: nil, properties: nil, timestamp: nil,
+                                     llm_model: nil, llm_model_source: nil)
         event = base_event(EventType::MCP_MISSING_CAPABILITY, distinct_id, session_id, set_properties, groups,
                            properties, timestamp, client_user_agent, vendor_client)
         event['resource_name'] = @missing_capability_tool_name
         event['protocol_version'] = protocol_version
         event['parameters'] = parameters
         apply_intent(event, context, 'context_parameter')
+        apply_model(event, llm_model, llm_model_source)
         emit(event)
       end
 
-      # Inject the `context` argument into every tool descriptor (Hash with
-      # `inputSchema`) so agents state their intent, and optionally append the
-      # `get_more_tools` virtual tool. Returns a new Array of new Hashes.
+      # Inject the `context` argument (and, with `capture_model`, `llm_model`) into
+      # every tool descriptor (Hash with `inputSchema`) so agents state their intent,
+      # and optionally append the `get_more_tools` virtual tool. Returns a new Array
+      # of new Hashes. A tool whose schema is composed (oneOf/allOf/anyOf) or a
+      # `$ref` is passed through untouched.
       #
       # @param tools [Array<Hash>] `tools/list` entries
       # @return [Array<Hash>]
-      def prepare_tool_list(tools, context: true, report_missing: false)
-        options = Options.new(context: context)
+      def prepare_tool_list(tools, context: true, report_missing: false, capture_model: false)
+        options = Options.new(context: context, capture_model: capture_model)
         prepared = tools.map do |tool|
-          next tool unless options.context_enabled? && tool.is_a?(Hash)
+          next tool unless tool.is_a?(Hash) && (options.context_enabled? || options.capture_model_enabled?)
 
           name = SchemaMutation.fetch(tool, :name) || 'unknown'
           next tool if name == @missing_capability_tool_name
 
-          schema = SchemaMutation.add_context_parameter(
-            SchemaMutation.fetch(tool, :inputSchema), tool_name: name, description: options.context_description
-          )
+          schema = SchemaMutation.fetch(tool, :inputSchema)
+          if options.context_enabled?
+            schema = SchemaMutation.add_context_parameter(schema, tool_name: name,
+                                                                  description: options.context_description)
+          end
+          if options.capture_model_enabled?
+            schema = SchemaMutation.add_model_parameter(schema, tool_name: name,
+                                                                description: options.model_description)
+          end
           tool.merge(SchemaMutation.key_for(tool, :inputSchema) => schema)
         end
         if report_missing && prepared.none? { |t| SchemaMutation.fetch(t, :name) == @missing_capability_tool_name }
-          prepared << Tools.descriptor(@missing_capability_tool_name)
+          prepared << Tools.descriptor(@missing_capability_tool_name, options)
         end
         prepared
       end
@@ -145,9 +151,10 @@ module PostHog
       #
       # Pass the tool's own `inputSchema` (the same Hash you handed to
       # {#prepare_tool_list}) so a `context` field the tool declares itself is
-      # left in `args`: only an injected `context` is stripped. Without the
-      # schema there is no way to tell the two apart, so `context` is always
-      # stripped.
+      # left in `args`: only an injected `context` is stripped. A composed
+      # (oneOf/allOf/anyOf) or `$ref` schema is never injected into, so its
+      # `context` is the tool's own and is left alone too. Without the schema
+      # there is no way to tell the two apart, so `context` is always stripped.
       #
       # @param name [String] tool name
       # @param args [Hash, nil] the call's arguments
@@ -156,9 +163,8 @@ module PostHog
       def prepare_tool_call(name, args = nil, input_schema: nil)
         raw_context = args.is_a?(Hash) ? (args[:context] || args['context']) : nil
         intent = raw_context.is_a?(String) && !raw_context.strip.empty? ? raw_context.strip : nil
-        tool_declares_context = input_schema && SchemaMutation.declares_param?(input_schema, 'context')
         PreparedToolCall.new(
-          args: tool_declares_context ? args : strip_context(args),
+          args: tool_owns_context?(input_schema) ? args : strip_context(args),
           intent: intent,
           intent_source: intent ? 'context_parameter' : nil,
           is_missing_capability: name == @missing_capability_tool_name
@@ -183,6 +189,14 @@ module PostHog
         event
       end
 
+      def apply_model(event, llm_model, source)
+        model = ModelCapture.normalize(llm_model)
+        return unless model
+
+        event['llm_model'] = model
+        event['llm_model_source'] = source || 'self_reported'
+      end
+
       def apply_intent(event, intent, source)
         trimmed = intent.is_a?(String) ? intent.strip : ''
         return if trimmed.empty?
@@ -194,6 +208,12 @@ module PostHog
       def emit(event)
         @mcp_sink.capture(event, @mcp_options)
         nil
+      end
+
+      def tool_owns_context?(input_schema)
+        return false unless input_schema
+
+        !SchemaMutation.injectable?(input_schema) || SchemaMutation.declares_param?(input_schema, 'context')
       end
 
       def strip_context(args)

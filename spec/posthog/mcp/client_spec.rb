@@ -70,12 +70,15 @@ RSpec.describe PostHog::MCP::Client do
     props = client.dequeue_last_message[:properties]
     expect(props['$mcp_listed_tool_names']).to eq(%w[execute-sql query-logs get_more_tools])
 
-    client.capture_missing_capability(context: '  wanted a tool to export to CSV ', distinct_id: 'u')
+    client.capture_missing_capability(context: '  wanted a tool to export to CSV ', distinct_id: 'u',
+                                      llm_model: ' claude-opus-4-8 ')
     event = client.dequeue_last_message
     expect(event[:event]).to eq('$mcp_missing_capability')
     expect(event[:properties]).to include('$mcp_intent' => 'wanted a tool to export to CSV',
                                           '$mcp_intent_source' => 'context_parameter',
-                                          '$mcp_resource_name' => 'get_more_tools')
+                                          '$mcp_resource_name' => 'get_more_tools',
+                                          '$mcp_llm_model' => 'claude-opus-4-8',
+                                          '$mcp_llm_model_source' => 'self_reported')
   end
 
   it 'prepares tool lists and tool calls' do
@@ -91,6 +94,31 @@ RSpec.describe PostHog::MCP::Client do
     expect(call.to_h).to eq(args: { q: 'x' }, intent: 'find it', intent_source: 'context_parameter',
                             is_missing_capability: false)
     expect(client.prepare_tool_call('get_more_tools').is_missing_capability).to be(true)
+  end
+
+  it 'advertises llm_model on every tool and on the virtual one when capture_model is on' do
+    tools = [{ name: 'a', inputSchema: { type: 'object', properties: {} } }]
+    prepared = client.prepare_tool_list(tools, capture_model: true, report_missing: true)
+    expect(prepared[0][:inputSchema][:properties].keys).to eq(%i[context llm_model])
+    expect(prepared[1][:name]).to eq('get_more_tools')
+    expect(prepared[1][:inputSchema][:properties].keys).to eq(%i[context llm_model])
+    expect(prepared[1][:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+
+    without = client.prepare_tool_list(tools, report_missing: true)
+    expect(without[0][:inputSchema][:properties].keys).to eq([:context])
+    expect(without[1][:inputSchema][:properties].keys).to eq([:context])
+  end
+
+  it 'leaves a composed or referenced schema, and the context argument it owns, alone' do
+    composed = { type: 'object', allOf: [{ properties: { context: { type: 'string' } }, required: ['context'] }] }
+    expect(client.prepare_tool_list([{ name: 'search', inputSchema: composed }])[0][:inputSchema]).to eq(composed)
+    kept = client.prepare_tool_call('search', { context: 'application data' }, input_schema: composed)
+    expect(kept.args).to eq(context: 'application data')
+
+    referenced = { type: 'object', :$ref => '#/$defs/payload' }
+    expect(client.prepare_tool_list([{ name: 'search', inputSchema: referenced }])[0][:inputSchema]).to eq(referenced)
+    expect(client.prepare_tool_call('search', { context: 'application data' }, input_schema: referenced).args)
+      .to eq(context: 'application data')
   end
 
   it 'strips only the context argument it injected when given the tool schema' do

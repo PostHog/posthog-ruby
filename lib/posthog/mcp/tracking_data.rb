@@ -12,7 +12,7 @@ module PostHog
       attr_reader :options, :sink, :server_name, :server_version, :identified_sessions,
                   :tool_descriptions, :tool_categories, :tool_output_instructions, :tool_owned_params
       attr_accessor :session_id, :session_source, :last_mcp_session_id, :last_activity, :warned_no_stateless_session,
-                    :virtual_tool
+                    :virtual_tool, :http_transport_seen, :warned_unscoped_capture
 
       def initialize(options:, sink:, server_name: nil, server_version: nil)
         @options = options
@@ -25,6 +25,10 @@ module PostHog
         @last_mcp_session_id = nil
         @last_activity = Time.now
         @warned_no_stateless_session = false
+        # Set once a request arrives over HTTP: from then on the server-wide session
+        # is never a safe fallback for a capture that lost its request scope.
+        @http_transport_seen = false
+        @warned_unscoped_capture = false
         # The `get_more_tools` class {Tools.register} added to the server, if any.
         @virtual_tool = nil
         @identified_sessions = IdentityCache.new

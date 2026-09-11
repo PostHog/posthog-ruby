@@ -109,6 +109,43 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(sanitized['structuredContent']).to eq('project' => 'Default project', 'api_token' => '[redacted]')
       expect(response['structuredContent']['api_token']).to start_with('phc_') # never mutated
     end
+
+    it 'redacts binary blocks in a prompts/get result, however short' do
+      response = {
+        'description' => 'a prompt',
+        'messages' => [
+          { 'role' => 'user', 'content' => { 'type' => 'text', 'text' => 'hello' } },
+          { 'role' => 'user', 'content' => { 'type' => 'image', 'data' => 'c2Vuc2l0aXZl', 'mimeType' => 'image/png' } },
+          { 'role' => 'assistant',
+            'content' => [{ 'type' => 'audio', 'data' => 'c2Vuc2l0aXZl', 'mimeType' => 'audio/wav' }] }
+        ]
+      }
+      sanitized = described_class.sanitize_response(response)
+      expect(sanitized['messages'][0]['content']).to eq('type' => 'text', 'text' => 'hello')
+      expect(sanitized['messages'][1]['content'])
+        .to eq('type' => 'text', 'text' => '[image content redacted - not supported by PostHog MCP analytics]')
+      expect(sanitized['messages'][2]['content'])
+        .to eq([{ 'type' => 'text', 'text' => '[audio content redacted - not supported by PostHog MCP analytics]' }])
+      expect(JSON.generate(sanitized)).not_to include('c2Vuc2l0aXZl')
+      expect(response['messages'][1]['content']['data']).to eq('c2Vuc2l0aXZl') # never mutated
+    end
+
+    it 'redacts a blob in a resources/read result, however short, and keeps its text sibling' do
+      response = {
+        'contents' => [
+          { 'uri' => 'file:///data.bin', 'mimeType' => 'application/octet-stream', 'blob' => 'c2Vuc2l0aXZl' },
+          { 'uri' => 'file:///readme.txt', 'mimeType' => 'text/plain', 'text' => 'readable' }
+        ]
+      }
+      sanitized = described_class.sanitize_response(response)
+      expect(sanitized['contents'][0]).to eq(
+        'uri' => 'file:///data.bin', 'mimeType' => 'application/octet-stream',
+        'blob' => '[binary resource content redacted - not supported by PostHog MCP analytics]'
+      )
+      expect(sanitized['contents'][1]).to eq('uri' => 'file:///readme.txt', 'mimeType' => 'text/plain',
+                                             'text' => 'readable')
+      expect(response['contents'][0]['blob']).to eq('c2Vuc2l0aXZl') # never mutated
+    end
   end
 
   describe '.redact_pii' do

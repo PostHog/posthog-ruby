@@ -69,7 +69,7 @@ PostHog::MCP.instrument(
 | `capture_model` | `false` | Inject `llm_model` and capture `$mcp_llm_model` (client metadata wins over self-report). |
 | `logger` | no-op | Sink for the integration's own debug messages. Never writes to stdout. |
 
-The injected arguments are stripped before your tool's `call` receives its keywords. A tool that declares `context` in its own `input_schema` keeps it.
+The injected arguments are stripped before your tool's `call` receives its keywords. A tool that declares `context` in its own `input_schema` keeps it, and a tool whose schema is composed (`oneOf`/`allOf`/`anyOf`) or a `$ref` is left untouched entirely: nothing is injected into it and nothing is stripped from its calls.
 
 `extra` passed to callbacks contains `'session_id'` (the transport session), `'request_id'`, `'protocol_version'`, `'headers'` (lowercase, HTTP only), and `'session'` (the `MCP::ServerSession`).
 
@@ -77,7 +77,7 @@ The injected arguments are stripped before your tool's `call` receives its keywo
 
 * **stdio**: one `$session_id` per process, rolled over after 30 minutes of inactivity.
 * **Streamable HTTP, stateful**: the transport's `Mcp-Session-Id` is hashed deterministically, so a session survives server restarts.
-* **Streamable HTTP, stateless**: the transport issues no session id, so at `initialize` PostHog mints a self-encoded token onto the `Mcp-Session-Id` response header. Clients replay it on every request, and any pod recovers `$session_id` and the client identity from the header alone. This is wired automatically for `MCP::Server::Transports::StreamableHTTPTransport`. For a custom Rack stack add `use PostHog::MCP::RackMiddleware`; the decoded token is exposed as `env['posthog_mcp.session']`.
+* **Streamable HTTP, stateless**: the transport issues no session id, so at `initialize` PostHog mints a self-encoded token onto the `Mcp-Session-Id` response header. Clients replay it on every request, and any pod recovers `$session_id` and the client identity from the header alone. This is wired automatically for `MCP::Server::Transports::StreamableHTTPTransport`. For a custom Rack stack add `use PostHog::MCP::RackMiddleware`; the decoded token is exposed as `env['posthog_mcp.session']`. The middleware only attaches the header to a successful handshake, so a rejected `initialize` - including a JSON-RPC error on a 200 - mints nothing.
 * **Conversation ids**: `enable_conversation_id: true` derives `$session_id` from the agent's conversation handle, identically on every pod and without any middleware. It is also the only anchor under the 2026-07-28 protocol revision, which removed protocol-level sessions.
 
 When an HTTP request arrives with no session and no token, the integration logs one warning per server explaining how to fix it.
@@ -89,6 +89,8 @@ analytics = PostHog::MCP.instrument(server, posthog)
 analytics.capture('feedback_submitted', { rating: 5 })  # name sent verbatim, on the current session
 ```
 
+Called inside a tool body, the event is attributed to the request that is running it, with the same `$session_id` and identified person as the `$mcp_tool_call` it belongs to. On Ruby 3.2+ that also holds in a thread or fiber the tool spawns; before 3.2 the request scope is not inherited, so capture from the tool body itself - an HTTP server falls back to a standalone session rather than to another caller's.
+
 ## Custom dispatchers
 
 If you own the HTTP layer and have no `MCP::Server` to wrap, use the client subclass and call the capture methods yourself. It shares the sanitize / truncate / `$exception` pipeline and does not need the `mcp` gem.
@@ -96,7 +98,7 @@ If you own the HTTP layer and have no `MCP::Server` to wrap, use the client subc
 ```ruby
 posthog = PostHog::MCP::Client.new(api_key: 'phc_...', host: 'https://us.i.posthog.com')
 
-tools = posthog.prepare_tool_list(raw_tools, report_missing: true)          # injects `context`, appends get_more_tools
+tools = posthog.prepare_tool_list(raw_tools, report_missing: true)          # injects `context` (and `llm_model` with capture_model: true), appends get_more_tools
 prepared = posthog.prepare_tool_call(name, args, input_schema: tool[:inputSchema])  # extracts intent, strips the injected `context` (a `context` the tool declares itself is kept)
 posthog.capture_tool_call(name, intent: prepared.intent, intent_source: prepared.intent_source,
                           duration_ms: 42, is_error: false, distinct_id: 'user_123')
@@ -109,7 +111,7 @@ posthog.capture_missing_capability(context: prepared.intent) if prepared.is_miss
 
 ## Privacy and payload safety
 
-Before anything is sent: sensitive keys (`authorization`, `api_key`, `token`, `password`, ...) are redacted, PostHog tokens and credential-looking words are masked, image/audio/binary content blocks are replaced with placeholders, structured PII (emails, IPs, card numbers, SSNs, phone numbers) is scrubbed from `$mcp_intent`, and events are truncated to fit the core client's 32KB per-message limit (the Node and Python SDKs budget 100KB; posthog-ruby drops larger messages at batch time, so Ruby truncates harder rather than lose the event). Use `before_send` for anything domain-specific.
+Before anything is sent: sensitive keys (`authorization`, `api_key`, `token`, `password`, ...) are redacted, PostHog tokens and credential-looking words are masked, image/audio/binary content blocks are replaced with placeholders (in tool results, in `prompts/get` messages and in `resources/read` blobs), structured PII (emails, IPs, card numbers, SSNs, phone numbers) is scrubbed from `$mcp_intent`, and events are truncated to fit the core client's 32KB per-message limit (the Node and Python SDKs budget 100KB; posthog-ruby drops larger messages at batch time, so Ruby truncates harder rather than lose the event). Use `before_send` for anything domain-specific.
 
 ## Logging on stdio servers
 
