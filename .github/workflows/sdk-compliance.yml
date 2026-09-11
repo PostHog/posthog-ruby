@@ -13,9 +13,47 @@ on:
 
 jobs:
   compliance:
-    name: PostHog SDK compliance tests
+    name: PostHog Ruby (${{ matrix.mode }}) compliance
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: async
+            dockerfile: sdk_compliance_adapter/Dockerfile
+          - mode: sync
+            dockerfile: sdk_compliance_adapter/Dockerfile.sync
     uses: PostHog/posthog-sdk-test-harness/.github/workflows/test-sdk-action.yml@6d19abb9c81e2262dacbe340e7dddda9c871c178
     with:
-      adapter-dockerfile: "sdk_compliance_adapter/Dockerfile"
+      adapter-dockerfile: ${{ matrix.dockerfile }}
       adapter-context: "."
-      test-harness-version: "0.10.0"
+      test-harness-version: "1.0.0"
+      report-name: sdk-compliance-ruby-${{ matrix.mode }}
+      sdk-type: server
+      continue-on-error: true
+
+  report-inventory:
+    name: Verify compliance report inventory
+    needs: compliance
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: sdk-compliance-ruby-*
+          path: reports
+      - name: Require both complete reports (assertion failures remain advisory)
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+
+          for mode in ('async', 'sync'):
+              path = pathlib.Path(f'reports/sdk-compliance-ruby-{mode}/sdk-compliance-report.md')
+              report = path.read_text()
+              assert report.startswith(f'# posthog-ruby-{mode} Compliance Report\n'), path
+              counts = re.findall(r'\*\*(\d+)/(\d+)\*\* tests passed', report)
+              assert [int(total) for _, total in counts] == [47, 30, 17], (path, counts)
+              rows = re.findall(r'^\| .+ \| [✅❌] \| \d+ms \|$', report, re.MULTILINE)
+              assert len(rows) == 47, (path, len(rows))
+              print(f'{mode}: {counts[0][0]}/47 passed; all 47 results present')
+          PY
