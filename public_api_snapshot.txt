@@ -118,6 +118,145 @@ instance_method PostHog::Logging#logger()
 class_method PostHog::Logging.included(base)
 class_method PostHog::Logging.logger()
 class_method PostHog::Logging.logger=(arg0)
+module PostHog::MCP
+class_method PostHog::MCP.decode_session_id(value)
+class_method PostHog::MCP.derive_session_id_from_conversation(conversation_id)
+class_method PostHog::MCP.derive_session_id_from_mcp_session(mcp_session_id)
+class_method PostHog::MCP.encode_session_id(payload)
+class_method PostHog::MCP.get_more_tools_result()
+class_method PostHog::MCP.instrument(server, client = ..., options: ..., **kwargs)
+class PostHog::MCP::Analytics
+instance_method PostHog::MCP::Analytics#capture(event, properties = ...)
+instance_method PostHog::MCP::Analytics#flush()
+class PostHog::MCP::Client < PostHog::Client
+instance_method PostHog::MCP::Client#capture_initialize(client_name: ..., client_version: ..., protocol_version: ..., parameters: ..., response: ..., duration_ms: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ...)
+instance_method PostHog::MCP::Client#capture_missing_capability(context: ..., parameters: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ..., llm_model: ..., llm_model_source: ...)
+instance_method PostHog::MCP::Client#capture_tool_call(tool_name, intent: ..., intent_source: ..., parameters: ..., response: ..., duration_ms: ..., is_error: ..., error: ..., error_type: ..., category: ..., tool_description: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ..., llm_model: ..., llm_model_source: ...)
+instance_method PostHog::MCP::Client#capture_tools_list(tool_names: ..., parameters: ..., response: ..., duration_ms: ..., is_error: ..., error: ..., error_type: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ...)
+instance_method PostHog::MCP::Client#prepare_tool_call(name, args = ..., input_schema: ...)
+instance_method PostHog::MCP::Client#prepare_tool_list(tools, context: ..., report_missing: ..., capture_model: ...)
+class PostHog::MCP::ContextOptions < Struct
+instance_method PostHog::MCP::ContextOptions#description()
+instance_method PostHog::MCP::ContextOptions#description=(_)
+class_method PostHog::MCP::ContextOptions.[](*arg0)
+class_method PostHog::MCP::ContextOptions.inspect()
+class_method PostHog::MCP::ContextOptions.keyword_init?()
+class_method PostHog::MCP::ContextOptions.members()
+class_method PostHog::MCP::ContextOptions.new(*arg0)
+constant PostHog::MCP::DEFAULT_CONTEXT_PARAMETER_DESCRIPTION: String
+constant PostHog::MCP::DEFAULT_CONVERSATION_ID_DESCRIPTION: String
+constant PostHog::MCP::DEFAULT_MODEL_PARAMETER_DESCRIPTION: String
+constant PostHog::MCP::EXPERIMENTAL_NOTICE: String
+module PostHog::MCP::Event
+constant PostHog::MCP::Event::CUSTOM: String
+constant PostHog::MCP::Event::EXCEPTION: String
+constant PostHog::MCP::Event::IDENTIFY: String
+constant PostHog::MCP::Event::INITIALIZE: String
+constant PostHog::MCP::Event::MISSING_CAPABILITY: String
+constant PostHog::MCP::Event::PROMPTS_LIST: String
+constant PostHog::MCP::Event::PROMPT_GET: String
+constant PostHog::MCP::Event::RESOURCES_LIST: String
+constant PostHog::MCP::Event::RESOURCE_READ: String
+constant PostHog::MCP::Event::TOOLS_LIST: String
+constant PostHog::MCP::Event::TOOL_CALL: String
+constant PostHog::MCP::INACTIVITY_TIMEOUT_MINUTES: Integer
+constant PostHog::MCP::LIB_NAME: String
+constant PostHog::MCP::MCP_SESSION_HEADER: String
+class PostHog::MCP::ModelOptions < Struct
+instance_method PostHog::MCP::ModelOptions#description()
+instance_method PostHog::MCP::ModelOptions#description=(_)
+class_method PostHog::MCP::ModelOptions.[](*arg0)
+class_method PostHog::MCP::ModelOptions.inspect()
+class_method PostHog::MCP::ModelOptions.keyword_init?()
+class_method PostHog::MCP::ModelOptions.members()
+class_method PostHog::MCP::ModelOptions.new(*arg0)
+class PostHog::MCP::Options
+instance_method PostHog::MCP::Options#before_send()
+instance_method PostHog::MCP::Options#capture_model()
+instance_method PostHog::MCP::Options#capture_model_enabled?()
+instance_method PostHog::MCP::Options#context()
+instance_method PostHog::MCP::Options#context_description()
+instance_method PostHog::MCP::Options#context_enabled?()
+instance_method PostHog::MCP::Options#enable_conversation_id()
+instance_method PostHog::MCP::Options#enable_exception_autocapture()
+instance_method PostHog::MCP::Options#event_properties()
+instance_method PostHog::MCP::Options#identify()
+instance_method PostHog::MCP::Options#intent_fallback()
+instance_method PostHog::MCP::Options#logger()
+instance_method PostHog::MCP::Options#missing_capability_tool_name()
+instance_method PostHog::MCP::Options#model_description()
+instance_method PostHog::MCP::Options#report_missing()
+class PostHog::MCP::PreparedToolCall < Struct
+instance_method PostHog::MCP::PreparedToolCall#args()
+instance_method PostHog::MCP::PreparedToolCall#args=(_)
+instance_method PostHog::MCP::PreparedToolCall#intent()
+instance_method PostHog::MCP::PreparedToolCall#intent=(_)
+instance_method PostHog::MCP::PreparedToolCall#intent_source()
+instance_method PostHog::MCP::PreparedToolCall#intent_source=(_)
+instance_method PostHog::MCP::PreparedToolCall#is_missing_capability()
+instance_method PostHog::MCP::PreparedToolCall#is_missing_capability=(_)
+class_method PostHog::MCP::PreparedToolCall.[](*arg0)
+class_method PostHog::MCP::PreparedToolCall.inspect()
+class_method PostHog::MCP::PreparedToolCall.keyword_init?()
+class_method PostHog::MCP::PreparedToolCall.members()
+class_method PostHog::MCP::PreparedToolCall.new(*arg0)
+module PostHog::MCP::Property
+constant PostHog::MCP::Property::CLIENT_NAME: String
+constant PostHog::MCP::Property::CLIENT_USER_AGENT: String
+constant PostHog::MCP::Property::CLIENT_VERSION: String
+constant PostHog::MCP::Property::CONVERSATION_ID: String
+constant PostHog::MCP::Property::DURATION_MS: String
+constant PostHog::MCP::Property::ERROR_MESSAGE: String
+constant PostHog::MCP::Property::ERROR_TYPE: String
+constant PostHog::MCP::Property::INTENT: String
+constant PostHog::MCP::Property::INTENT_SOURCE: String
+constant PostHog::MCP::Property::IS_ERROR: String
+constant PostHog::MCP::Property::LISTED_TOOL_NAMES: String
+constant PostHog::MCP::Property::LLM_MODEL: String
+constant PostHog::MCP::Property::LLM_MODEL_SOURCE: String
+constant PostHog::MCP::Property::PARAMETERS: String
+constant PostHog::MCP::Property::PROTOCOL_VERSION: String
+constant PostHog::MCP::Property::RESOURCE_NAME: String
+constant PostHog::MCP::Property::RESPONSE: String
+constant PostHog::MCP::Property::SERVER_NAME: String
+constant PostHog::MCP::Property::SERVER_VERSION: String
+constant PostHog::MCP::Property::SESSION_ID: String
+constant PostHog::MCP::Property::SOURCE: String
+constant PostHog::MCP::Property::TOOL_CATEGORY: String
+constant PostHog::MCP::Property::TOOL_DESCRIPTION: String
+constant PostHog::MCP::Property::TOOL_NAME: String
+constant PostHog::MCP::Property::VENDOR_CLIENT: String
+class PostHog::MCP::RackMiddleware
+instance_method PostHog::MCP::RackMiddleware#call(env)
+constant PostHog::MCP::RackMiddleware::ENV_KEY: String
+constant PostHog::MCP::RackMiddleware::MAX_SNIFF_BODY: Integer
+constant PostHog::MCP::SOURCE: String
+class PostHog::MCP::SessionTokenPayload < Struct
+instance_method PostHog::MCP::SessionTokenPayload#client_name()
+instance_method PostHog::MCP::SessionTokenPayload#client_name=(_)
+instance_method PostHog::MCP::SessionTokenPayload#client_version()
+instance_method PostHog::MCP::SessionTokenPayload#client_version=(_)
+instance_method PostHog::MCP::SessionTokenPayload#protocol_version()
+instance_method PostHog::MCP::SessionTokenPayload#protocol_version=(_)
+instance_method PostHog::MCP::SessionTokenPayload#session_id()
+instance_method PostHog::MCP::SessionTokenPayload#session_id=(_)
+class_method PostHog::MCP::SessionTokenPayload.[](*arg0)
+class_method PostHog::MCP::SessionTokenPayload.inspect()
+class_method PostHog::MCP::SessionTokenPayload.keyword_init?()
+class_method PostHog::MCP::SessionTokenPayload.members()
+class_method PostHog::MCP::SessionTokenPayload.new(*arg0)
+class PostHog::MCP::UserIdentity < Struct
+instance_method PostHog::MCP::UserIdentity#distinct_id()
+instance_method PostHog::MCP::UserIdentity#distinct_id=(_)
+instance_method PostHog::MCP::UserIdentity#groups()
+instance_method PostHog::MCP::UserIdentity#groups=(_)
+instance_method PostHog::MCP::UserIdentity#properties()
+instance_method PostHog::MCP::UserIdentity#properties=(_)
+class_method PostHog::MCP::UserIdentity.[](*arg0)
+class_method PostHog::MCP::UserIdentity.inspect()
+class_method PostHog::MCP::UserIdentity.keyword_init?()
+class_method PostHog::MCP::UserIdentity.members()
+class_method PostHog::MCP::UserIdentity.new(*arg0)
 module PostHog::Rails
 constant PostHog::Rails::VERSION: String
 class PostHog::RequiresServerEvaluation < StandardError
