@@ -32,8 +32,10 @@ module PostHog
   # Wrap an `MCP::Server` so every tool call, handshake, listing, prompt,
   # resource read, and failure is captured to PostHog as a `$mcp_*` event.
   #
-  # @note Experimental: the API and the captured event schema may change in a
+  # @note Experimental and not officially supported: no support is provided for
+  #   this integration, and its API and the captured event schema may change in a
   #   minor release. A warning is logged when this file is required.
+  #   Docs: https://posthog.com/docs/mcp-analytics
   #
   # @example
   #   require 'posthog/mcp'
@@ -46,8 +48,9 @@ module PostHog
   #   PostHog::MCP.instrument(server)
   module MCP
     EXPERIMENTAL_NOTICE =
-      'PostHog::MCP is experimental: its API and the captured $mcp_* event schema may change in a minor ' \
-      'release. Feedback welcome at https://github.com/PostHog/posthog-ruby/issues.'
+      'PostHog::MCP is experimental and not officially supported: no support is provided for it, and its ' \
+      'API and the captured $mcp_* event schema may change in a minor release. Docs: ' \
+      'https://posthog.com/docs/mcp-analytics. Feedback welcome at https://github.com/PostHog/posthog-ruby/issues.'
 
     class << self
       # Instrument an `MCP::Server`.

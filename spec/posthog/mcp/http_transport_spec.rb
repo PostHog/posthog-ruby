@@ -197,9 +197,18 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
   end
 end
 
+# An input the middleware must never touch: reading it fails the example.
+class PostHogMcpUnreadableInput
+  def read(*) = raise('the middleware read the request body')
+  def gets(*) = raise('the middleware read the request body')
+  def each(*) = raise('the middleware read the request body')
+end
+
 RSpec.describe PostHog::MCP::RackMiddleware do
-  let(:app) { ->(_env) { [200, { 'content-type' => 'application/json' }, ['{}']] } }
-  let(:middleware) { described_class.new(app) }
+  let(:client) { new_test_client }
+  let(:server) { MCP::Server.new(name: 'rack-server', version: '1.0.0', tools: [PostHogMcpHttpSpecTool]) }
+
+  before { allow(Kernel).to receive(:warn) }
 
   def env_for(body, headers = {})
     env = { 'REQUEST_METHOD' => 'POST', 'rack.input' => StringIO.new(body) }
@@ -207,75 +216,127 @@ RSpec.describe PostHog::MCP::RackMiddleware do
     env
   end
 
-  it 'mints on a tokenless initialize and leaves the body readable' do
-    seen_body = nil
-    inner = lambda do |env|
-      seen_body = env['rack.input'].read
-      [200, {}, []]
+  def initialize_json(version = '2025-06-18')
+    JSON.generate(rpc(1, 'initialize', { protocolVersion: version, capabilities: {}, clientInfo: { name: 'claude-code', version: '1.2.3' } }))
+  end
+
+  # A dispatcher that reads the body itself, exactly as a custom Rack stack does.
+  def dispatching_app(status: 200, body: nil)
+    lambda do |env|
+      request = JSON.parse(env['rack.input'].read)
+      [status, { 'content-type' => 'application/json' }, [body || server.handle_json(JSON.generate(request))]]
     end
-    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
-    env = env_for(body)
-    status, headers, = described_class.new(inner).call(env)
+  end
+
+  it 'mints from the instrumented server without reading the request body' do
+    PostHog::MCP.instrument(server, client)
+    env = { 'REQUEST_METHOD' => 'POST', 'rack.input' => PostHogMcpUnreadableInput.new }
+    app = ->(_e) { [200, { 'content-type' => 'application/json' }, [server.handle_json(initialize_json)]] }
+    status, headers, = described_class.new(app).call(env)
+
     expect(status).to eq(200)
     payload = PostHog::MCP.decode_session_id(headers['mcp-session-id'])
-    expect(payload.client_name).to eq('c')
+    expect(payload.session_id).to match(/\Ases_/)
+    expect(payload.client_name).to eq('claude-code')
+    expect(payload.protocol_version).to eq('2025-06-18')
     expect(env['posthog_mcp.session']).to eq(payload)
-    expect(seen_body).to eq(body)
+    expect(drain_events(client).find { |e| e[:event] == '$mcp_initialize' }[:properties]['$session_id'])
+      .to eq(payload.session_id)
   end
 
-  it 'does not attach the token when the app rejects the initialize' do
-    failing = ->(_env) { [400, {}, ['{}']] }
-    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
-    env = env_for(body)
-    _, headers, = described_class.new(failing).call(env)
+  it 'publishes the request headers so a server below it sees the HTTP context' do
+    PostHog::MCP.instrument(server, client)
+    env = env_for(initialize_json, 'user-agent' => 'claude-code/2.1.0 (cli)', 'x-anthropic-client' => 'cli')
+    _, headers, = described_class.new(dispatching_app).call(env)
+    token = headers['mcp-session-id']
+
+    replay = env_for(JSON.generate(rpc(2, 'tools/call', { name: 'ping_tool', arguments: {} })),
+                     'mcp-session-id' => token, 'user-agent' => 'claude-code/2.1.0 (cli)')
+    _, replay_headers, = described_class.new(dispatching_app).call(replay)
+    expect(replay_headers['mcp-session-id']).to be_nil
+    expect(replay['posthog_mcp.session'].session_id).to eq(PostHog::MCP.decode_session_id(token).session_id)
+
+    events = drain_events(client)
+    expect(events.map { |e| e[:properties]['$session_id'] }.uniq).to eq([PostHog::MCP.decode_session_id(token).session_id])
+    expect(events.last[:properties]).to include('$mcp_client_name' => 'claude-code', '$mcp_client_version' => '1.2.3',
+                                                '$mcp_client_user_agent' => 'claude-code/2.1.0 (cli)')
+  end
+
+  it 'mints nothing for a modern-era handshake or one the server rejects' do
+    PostHog::MCP.instrument(server, client)
+    env = env_for(initialize_json('draft'))
+    _, headers, = described_class.new(dispatching_app).call(env)
+    expect(headers['mcp-session-id']).to be_nil
+    expect(env['posthog_mcp.session']).to be_nil
+
+    # A JSON-RPC error rides on a 200, and nothing below minted a token for it.
+    rejected = JSON.generate({ jsonrpc: '2.0', id: 1, error: { code: -32_602, message: 'Unsupported protocol version' } })
+    env = env_for(initialize_json)
+    _, headers, = described_class.new(dispatching_app(body: rejected)).call(env)
     expect(headers['mcp-session-id']).to be_nil
     expect(env['posthog_mcp.session']).to be_nil
   end
 
-  it 'does not attach the token when a 200 carries a JSON-RPC error' do
-    rejecting = lambda do |_env|
-      [200, { 'content-type' => 'application/json' },
-       [JSON.generate({ jsonrpc: '2.0', id: 1, error: { code: -32_602, message: 'Unsupported protocol version' } })]]
+  it 'lets a hand-rolled dispatcher mint the session it captures against' do
+    minted = nil
+    app = lambda do |env|
+      params = JSON.parse(env['rack.input'].read)['params']
+      minted = env['posthog_mcp.mint'].call(client_name: params['clientInfo']['name'],
+                                            client_version: params['clientInfo']['version'],
+                                            protocol_version: params['protocolVersion'])
+      [200, {}, ['{}']]
     end
-    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
-    env = env_for(body)
-    _, headers, = described_class.new(rejecting).call(env)
+    env = env_for(initialize_json)
+    _, headers, = described_class.new(app).call(env)
+
+    expect(minted.client_name).to eq('claude-code')
+    expect(PostHog::MCP.decode_session_id(headers['mcp-session-id'])).to eq(minted)
+    expect(env['posthog_mcp.session']).to eq(minted)
+    expect(env).not_to have_key('posthog_mcp.mint')
+  end
+
+  it 'refuses to mint for a modern-era client' do
+    minted = :unset
+    app = lambda do |env|
+      minted = env['posthog_mcp.mint'].call(client_name: 'c', protocol_version: '2026-07-28')
+      [200, {}, ['{}']]
+    end
+    _, headers, = described_class.new(app).call(env_for(initialize_json('2026-07-28')))
+    expect(minted).to be_nil
+    expect(headers['mcp-session-id']).to be_nil
+  end
+
+  it 'withholds a token the client cannot use when the request then fails' do
+    app = lambda do |env|
+      env['posthog_mcp.mint'].call(client_name: 'c', protocol_version: '2025-06-18')
+      [400, {}, ['{}']]
+    end
+    env = env_for(initialize_json)
+    _, headers, = described_class.new(app).call(env)
     expect(headers['mcp-session-id']).to be_nil
     expect(env['posthog_mcp.session']).to be_nil
   end
 
-  it 'attaches the token on an InitializeResult and on a body it cannot sniff' do
-    body = JSON.generate(rpc(1, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'c', version: '1' } }))
-    accepting = lambda do |_env|
-      [200, { 'content-type' => 'application/json' },
-       [JSON.generate({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-06-18' } })]]
-    end
-    _, headers, = described_class.new(accepting).call(env_for(body))
-    expect(headers['mcp-session-id']).not_to be_nil
-
+  it 'attaches the token to a streaming body and never clobbers a replayed header' do
+    PostHog::MCP.instrument(server, client)
     streaming = Class.new do
-      def each
-        yield "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"
-      end
-    end.new
-    sse = ->(_env) { [200, { 'content-type' => 'text/event-stream' }, streaming] }
-    _, headers, = described_class.new(sse).call(env_for(body))
+      def initialize(json) = @json = json
+      def each = yield("data: #{@json}\n\n")
+    end
+    sse = lambda do |_env|
+      [200, { 'content-type' => 'text/event-stream' }, streaming.new(server.handle_json(initialize_json))]
+    end
+    _, headers, = described_class.new(sse).call(env_for(initialize_json))
     expect(headers['mcp-session-id']).not_to be_nil
-  end
 
-  it 'never clobbers a replayed header and skips non-initialize or modern requests' do
     token = PostHog::MCP.encode_session_id(session_id: 'ses_replayed')
-    env = env_for('{}', 'mcp-session-id' => token)
-    _, headers, = middleware.call(env)
+    replay = env_for('{}', 'mcp-session-id' => token)
+    app = ->(env) { [200, {}, [env.key?('posthog_mcp.mint') ? 'hook' : 'no-hook']] }
+    _, headers, body = described_class.new(app).call(replay)
     expect(headers['mcp-session-id']).to be_nil
-    expect(env['posthog_mcp.session'].session_id).to eq('ses_replayed')
-
-    _, headers, = middleware.call(env_for(JSON.generate(rpc(1, 'tools/list'))))
-    expect(headers['mcp-session-id']).to be_nil
-    _, headers, = middleware.call(env_for(JSON.generate(rpc(1, 'initialize', { protocolVersion: '2026-07-28' }))))
-    expect(headers['mcp-session-id']).to be_nil
-    _, headers, = middleware.call(env_for('not json'))
-    expect(headers['mcp-session-id']).to be_nil
+    expect(replay['posthog_mcp.session'].session_id).to eq('ses_replayed')
+    expect(body).to eq(['no-hook'])
   end
 end
+
 # rubocop:enable Layout/LineLength

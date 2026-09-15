@@ -33,24 +33,13 @@ module PostHog
     #
     # @api private
     module TransportExtension
-      HEADER_ENV_KEYS = {
-        'user-agent' => 'HTTP_USER_AGENT',
-        'x-anthropic-client' => 'HTTP_X_ANTHROPIC_CLIENT',
-        'mcp-session-id' => 'HTTP_MCP_SESSION_ID',
-        'mcp-protocol-version' => 'HTTP_MCP_PROTOCOL_VERSION'
-      }.freeze
-
       def handle_request(request)
         server = instance_variable_defined?(:@server) ? @server : nil
         return super unless server && PostHog::MCP.tracking_data(server)
 
         env = request.respond_to?(:env) ? request.env : {}
-        headers = HEADER_ENV_KEYS.each_with_object({}) do |(name, env_key), acc|
-          value = env[env_key]
-          acc[name] = value if value.is_a?(String) && !value.empty?
-        end
 
-        RequestScope.with(headers: headers) do |scope|
+        RequestScope.with(headers: RequestScope.headers_from_env(env)) do |scope|
           response = super
           mint = scope[:mint]
           if mint && response.is_a?(Array) && response[1].is_a?(Hash) &&

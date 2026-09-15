@@ -482,7 +482,7 @@ module PostHog
           'client must replay the Mcp-Session-Id header PostHog::MCP mints at initialize; for a custom Rack ' \
           'stack add PostHog::MCP::RackMiddleware. Enabling conversation ids ' \
           '(PostHog::MCP.instrument(server, enable_conversation_id: true)) also anchors the session without ' \
-          'any middleware. See lib/posthog/mcp/README.md (stateless / multi-pod servers).'
+          'any middleware. See https://posthog.com/docs/mcp-analytics/installation#ruby.'
         )
       end
 

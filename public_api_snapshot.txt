@@ -229,7 +229,7 @@ constant PostHog::MCP::Property::VENDOR_CLIENT: String
 class PostHog::MCP::RackMiddleware
 instance_method PostHog::MCP::RackMiddleware#call(env)
 constant PostHog::MCP::RackMiddleware::ENV_KEY: String
-constant PostHog::MCP::RackMiddleware::MAX_SNIFF_BODY: Integer
+constant PostHog::MCP::RackMiddleware::MINT_ENV_KEY: String
 constant PostHog::MCP::SOURCE: String
 class PostHog::MCP::SessionTokenPayload < Struct
 instance_method PostHog::MCP::SessionTokenPayload#client_name()

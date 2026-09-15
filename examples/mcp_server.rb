@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
-# Minimal stdio MCP server instrumented with PostHog MCP analytics (experimental).
+# Minimal stdio MCP server instrumented with PostHog MCP analytics.
+#
+# PostHog::MCP is experimental and not officially supported; its API and event
+# schema may change in a minor release. Docs: https://posthog.com/docs/mcp-analytics
 #
 #   POSTHOG_API_KEY=phc_... bundle exec ruby examples/mcp_server.rb
 #
