@@ -39,10 +39,10 @@ module SDKComplianceAdapter
       @mutex.synchronize { @client = new_client }
     end
 
-    def increment_captured
+    def increment_captured(pending: true)
       @mutex.synchronize do
         @total_events_captured += 1
-        @pending_events += 1
+        @pending_events += 1 if pending
       end
     end
 
@@ -144,7 +144,11 @@ module PostHog
 end
 
 class ComplianceServer
-  def initialize(host: '0.0.0.0', port: 8080)
+  def initialize(host: '0.0.0.0', port: Integer(ENV.fetch('PORT', '8080')),
+                 mode: ENV.fetch('SDK_MODE', 'async'))
+    raise ArgumentError, 'SDK_MODE must be async or sync' unless %w[async sync].include?(mode)
+
+    @mode = mode
     @server = TCPServer.new(host, port)
   end
 
@@ -236,7 +240,7 @@ class ComplianceServer
     [
       200,
       {
-        sdk_name: 'posthog-ruby',
+        sdk_name: "posthog-ruby-#{@mode}",
         sdk_version: PostHog::VERSION,
         adapter_version: '1.0.0',
         capabilities: %w[capture_v0 encoding_gzip]
@@ -255,6 +259,12 @@ class ComplianceServer
     options = {
       api_key: api_key,
       host: host,
+      sync_mode: @mode == 'sync',
+      before_send: proc do |event|
+        # The SDK has already generated the UUID; observe without changing the event.
+        Thread.current[:sdk_compliance_uuid] = event['uuid']
+        event
+      end,
       batch_size: data.fetch('flush_at', 100),
       flush_interval_seconds: data.fetch('flush_interval_ms', 500).to_f / 1000.0,
       on_error: proc { |_status, error| SDKComplianceAdapter.state.record_error(error) },
@@ -276,29 +286,33 @@ class ComplianceServer
     return [400, { error: 'distinct_id is required' }] if distinct_id.nil? || distinct_id.empty?
     return [400, { error: 'event is required' }] if event.nil? || event.empty?
 
-    uuid = SecureRandom.uuid
     attrs = {
       distinct_id: distinct_id,
       event: event,
-      properties: data['properties'] || {},
-      uuid: uuid
+      properties: data['properties'] || {}
     }
+    attrs[:uuid] = data['uuid'] if data.key?('uuid')
     attrs[:timestamp] = Time.iso8601(data['timestamp']) if data['timestamp']
 
+    Thread.current[:sdk_compliance_uuid] = nil
     if client.capture(attrs)
-      SDKComplianceAdapter.state.increment_captured
-      [200, { success: true, uuid: uuid }]
+      SDKComplianceAdapter.state.increment_captured(pending: @mode != 'sync')
+      [200, { success: true, uuid: Thread.current[:sdk_compliance_uuid] }]
     else
       [500, { error: 'capture was not queued' }]
     end
+  ensure
+    Thread.current[:sdk_compliance_uuid] = nil
   end
 
   def flush
     client = SDKComplianceAdapter.state.client
     return [400, { error: 'SDK not initialized' }] unless client
 
+    sent_before_flush = SDKComplianceAdapter.state.snapshot[:total_events_sent]
     client.flush
-    [200, { success: true, events_flushed: SDKComplianceAdapter.state.snapshot[:total_events_sent] }]
+    events_flushed = SDKComplianceAdapter.state.snapshot[:total_events_sent] - sent_before_flush
+    [200, { success: true, events_flushed: events_flushed }]
   rescue StandardError => e
     SDKComplianceAdapter.state.record_error(e.message)
     [500, { error: e.message, errors: [e.message] }]
@@ -313,15 +327,16 @@ class ComplianceServer
     return [400, { error: 'key is required' }] if key.nil? || key.empty?
     return [400, { error: 'distinct_id is required' }] if distinct_id.nil? || distinct_id.empty?
 
-    disable_geoip = data.key?('disable_geoip') ? data['disable_geoip'] : false
+    options = {}
+    options[:disable_geoip] = data['disable_geoip'] if data.key?('disable_geoip')
     flags = client.evaluate_flags(
       distinct_id,
       groups: data['groups'] || {},
       person_properties: data['person_properties'] || {},
       group_properties: data['group_properties'] || {},
       only_evaluate_locally: data.fetch('force_remote', true) == false,
-      disable_geoip: disable_geoip,
-      flag_keys: [key]
+      flag_keys: [key],
+      **options
     )
     value = flags.get_flag(key)
     client.flush
@@ -347,7 +362,9 @@ class ComplianceServer
   end
 end
 
-trap('TERM') { exit }
-trap('INT') { exit }
+if $PROGRAM_NAME == __FILE__
+  trap('TERM') { exit }
+  trap('INT') { exit }
 
-ComplianceServer.new.run
+  ComplianceServer.new.run
+end

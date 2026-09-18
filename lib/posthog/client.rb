@@ -191,6 +191,12 @@ module PostHog
         end
       end
 
+      # Initialize tracking before the poller can load definitions (including async loads).
+      @distinct_id_has_sent_flag_calls_mutex = Mutex.new
+      @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
+        hash[key] = SizeLimitedArray.new(Defaults::MAX_HASH_SIZE)
+      end
+
       unless @disabled
         @feature_flags_poller =
           FeatureFlagsPoller.new(
@@ -203,13 +209,10 @@ module PostHog
             flag_definition_cache_provider: opts[:flag_definition_cache_provider],
             feature_flag_request_max_retries: opts[:feature_flag_request_max_retries],
             async_load: opts[:feature_flags_async_load] == true,
-            user_agent: @headers['User-Agent']
+            user_agent: @headers['User-Agent'],
+            flag_definitions_update_mutex: @distinct_id_has_sent_flag_calls_mutex,
+            on_flag_definitions_updated: -> { @distinct_id_has_sent_flag_calls.clear }
           )
-      end
-
-      @distinct_id_has_sent_flag_calls_mutex = Mutex.new
-      @distinct_id_has_sent_flag_calls = SizeLimitedHash.new(Defaults::MAX_HASH_SIZE) do |hash, key|
-        hash[key] = SizeLimitedArray.new(Defaults::MAX_HASH_SIZE)
       end
 
       @before_send = opts[:before_send]

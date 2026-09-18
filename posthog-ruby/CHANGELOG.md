@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.23.7
+
+### Patch Changes
+
+- 6e2b0b0: Reset feature flag event deduplication when local flag definitions are refreshed or discarded, allowing the next flag access to emit a fresh event.
+
 ## 3.23.6
 
 ### Patch Changes

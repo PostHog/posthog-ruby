@@ -45,6 +45,9 @@ module PostHog
     #   immediate first tick at construction, then the regular polling cadence, which keeps retrying until a
     #   load succeeds.
     # @param user_agent [String] User-Agent header sent with feature flag requests.
+    # @param flag_definitions_update_mutex [Mutex] Internal lock shared with flag-called deduplication.
+    # @param on_flag_definitions_updated [Proc, nil] Internal callback after definitions are applied or discarded,
+    #   called while holding flag_definitions_update_mutex.
     def initialize(
       polling_interval,
       secret_key,
@@ -55,7 +58,9 @@ module PostHog
       flag_definition_cache_provider: nil,
       feature_flag_request_max_retries: nil,
       async_load: false,
-      user_agent: "posthog-ruby/#{PostHog::VERSION}"
+      user_agent: "posthog-ruby/#{PostHog::VERSION}",
+      on_flag_definitions_updated: nil,
+      flag_definitions_update_mutex: Mutex.new
     )
       @polling_interval = polling_interval || Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS
       @secret_key = secret_key
@@ -75,6 +80,8 @@ module PostHog
       @flag_definitions_loaded_at = Concurrent::AtomicReference.new(nil)
       @async_load = async_load
       @user_agent = user_agent
+      @on_flag_definitions_updated = on_flag_definitions_updated
+      @flag_definitions_update_mutex = flag_definitions_update_mutex
       # Server-controlled gate for minimal `$feature_flag_called` events, read
       # from the top-level `minimal_flag_called_events` key of the local
       # evaluation definitions payload. false when the server does not send it.
@@ -1302,10 +1309,23 @@ module PostHog
           '[FEATURE FLAGS] Feature flags quota limit exceeded - unsetting all local flags. ' \
           'Learn more about billing limits at https://posthog.com/docs/billing/limits-alerts'
         )
-        _apply_flag_definitions({})
-        @flag_definitions_loaded_at.value = nil
-        @loaded_flags_successfully_once.make_false
-        @quota_limited.make_true
+        @flag_definitions_update_mutex.synchronize do
+          definitions_were_loaded = definitions_loaded?
+          @feature_flags = Concurrent::Array.new
+          @feature_flags_by_key = {}
+          @group_type_mapping = Concurrent::Hash.new
+          @cohorts = Concurrent::Hash.new
+          @flag_definitions_loaded_at.value = nil
+          @minimal_flag_called_events = false
+          @definition_snapshot.value = {
+            flags: @feature_flags, flags_by_key: @feature_flags_by_key,
+            group_type_mapping: @group_type_mapping, cohorts: @cohorts,
+            minimal_flag_called_events: false, property_matching_version: 1
+          }.freeze
+          @loaded_flags_successfully_once.make_false
+          @quota_limited.make_true
+          @on_flag_definitions_updated&.call if definitions_were_loaded
+        end
         return
       end
 
@@ -1346,28 +1366,31 @@ module PostHog
 
       property_matching_version = get_by_symbol_or_string_key(data, 'property_matching_version') || 1
       new_flags = Concurrent::Array.new(flags.map { |f| deep_symbolize_keys(f) })
-
       new_by_key = {}
       new_flags.each do |flag|
         new_by_key[flag[:key]] = flag unless flag[:key].nil?
       end
       new_group_type_mapping = Concurrent::Hash[deep_symbolize_keys(group_type_mapping)]
       new_cohorts = Concurrent::Hash[deep_symbolize_keys(cohorts)]
-      @definition_snapshot.value = {
-        flags: new_flags, flags_by_key: new_by_key,
-        group_type_mapping: new_group_type_mapping, cohorts: new_cohorts,
-        minimal_flag_called_events: minimal_flag_called_events == true,
-        property_matching_version: property_matching_version
-      }.freeze
-      @feature_flags = new_flags
-      @feature_flags_by_key = new_by_key
-      @group_type_mapping = new_group_type_mapping
-      @cohorts = new_cohorts
-      @minimal_flag_called_events = minimal_flag_called_events == true
 
-      logger.debug "Loaded #{@feature_flags.length} feature flags and #{@cohorts.length} cohorts"
-      @flag_definitions_loaded_at.value = (Time.now.to_f * 1000).to_i
-      @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
+      # A read of the new definitions must not record its event before the tracker reset.
+      @flag_definitions_update_mutex.synchronize do
+        @definition_snapshot.value = {
+          flags: new_flags, flags_by_key: new_by_key,
+          group_type_mapping: new_group_type_mapping, cohorts: new_cohorts,
+          minimal_flag_called_events: minimal_flag_called_events == true,
+          property_matching_version: property_matching_version
+        }.freeze
+        @feature_flags = new_flags
+        @feature_flags_by_key = new_by_key
+        @group_type_mapping = new_group_type_mapping
+        @cohorts = new_cohorts
+        @minimal_flag_called_events = minimal_flag_called_events == true
+        @flag_definitions_loaded_at.value = (Time.now.to_f * 1000).to_i
+        @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
+        @on_flag_definitions_updated&.call
+      end
+      logger.debug "Loaded #{new_flags.length} feature flags and #{new_cohorts.length} cohorts"
     end
 
     def _request_feature_flag_definitions(etag: nil)
