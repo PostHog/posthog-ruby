@@ -343,6 +343,16 @@ module PostHog
     end
 
     describe '#capture' do
+      it 'honours the private per-event _lib/_lib_version override without relabeling the client' do
+        client.capture(distinct_id: 'u', event: 'mcp', _lib: 'posthog-ruby-mcp', _lib_version: '1.2.3')
+        properties = client.dequeue_last_message[:properties]
+        expect(properties).to include('$lib' => 'posthog-ruby-mcp', '$lib_version' => '1.2.3')
+        expect(properties).not_to have_key(:_lib)
+
+        client.capture(distinct_id: 'u', event: 'plain')
+        expect(client.dequeue_last_message[:properties]).to include('$lib' => 'posthog-ruby', '$lib_version' => PostHog::VERSION)
+      end
+
       it 'errors without an event' do
         expect { client.capture(distinct_id: 'user') }.to raise_error(
           ArgumentError
