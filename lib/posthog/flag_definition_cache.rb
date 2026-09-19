@@ -14,11 +14,14 @@ module PostHog
   #
   # @!method flag_definitions
   #   Retrieve cached flag definitions. Return a Hash with +:flags+,
-  #   +:group_type_mapping+, +:cohorts+, and +:minimal_flag_called_events+
+  #   +:group_type_mapping+, +:cohorts+, +:minimal_flag_called_events+, and +:property_matching_version+
   #   keys, or +nil+ if the cache is empty. Returning +nil+ triggers an API
   #   fetch when no flags are loaded yet (emergency fallback). Providers
   #   written before +:minimal_flag_called_events+ existed continue to work;
-  #   a missing key is treated as +false+.
+  #   a missing key is treated as +false+. Preserve +:property_matching_version+
+  #   with the definitions: exactly +2+ selects explicit equality; missing/1
+  #   (including older cache entries) selects service legacy boolean matching.
+  #   A fresh entry without the version resets to legacy, even after version 2.
   #   @return [Hash, nil]
   #
   # @!method should_fetch_flag_definitions?
@@ -29,9 +32,10 @@ module PostHog
   #
   # @!method on_flag_definitions_received(data)
   #   Called after successfully fetching new definitions from the API.
-  #   +data+ is a Hash with +:flags+, +:group_type_mapping+, +:cohorts+, and
-  #   +:minimal_flag_called_events+ keys (plain Ruby types, not Concurrent::
-  #   wrappers). Store it in your external cache.
+  #   +data+ is a Hash with +:flags+, +:group_type_mapping+, +:cohorts+,
+  #   +:minimal_flag_called_events+, and +:property_matching_version+ keys
+  #   (plain Ruby types, not Concurrent:: wrappers). Store the entire snapshot
+  #   together in your external cache, including version-only updates.
   #   @param data [Hash]
   #   @return [void]
   #

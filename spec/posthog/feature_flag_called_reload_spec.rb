@@ -142,6 +142,27 @@ module PostHog
       expect_single_event
     end
 
+    it 'discards the versioned snapshot before resetting tracking on a quota response' do
+      poller._apply_flag_definitions(definitions.merge(property_matching_version: 2, minimal_flag_called_events: true))
+      tracker = client.instance_variable_get(:@distinct_id_has_sent_flag_calls)
+      mutex = client.instance_variable_get(:@distinct_id_has_sent_flag_calls_mutex)
+      allow(tracker).to receive(:clear).and_wrap_original do |clear|
+        expect(mutex.owned?).to be(true)
+        expect(poller.definitions_loaded?).to be(false)
+        expect(poller._evaluation_snapshot).to eq(
+          flags: [], flags_by_key: {}, group_type_mapping: {}, cohorts: {},
+          minimal_flag_called_events: false, property_matching_version: 1
+        )
+        clear.call
+      end
+      stub_request(:get, definitions_endpoint).to_return(status: 402, body: '{}')
+
+      2.times { client.reload_feature_flags }
+
+      expect(tracker).to have_received(:clear).once
+      expect(client.evaluate_flags('user', only_evaluate_locally: true).get_flag('beta-feature')).to be_nil
+    end
+
     [
       { status: 304, body: '' },
       { status: 500, body: '{}' },
