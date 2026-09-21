@@ -90,6 +90,23 @@ class PostHogMcpSpecCaptureTool < MCP::Tool
   end
 end
 
+# Parks inside its own body so a second request can land, identify and finish
+# while the first is still in flight on the same session.
+class PostHogMcpSpecParkedTool < MCP::Tool
+  tool_name 'parked'
+  input_schema(properties: { user: { type: 'string' } })
+  class << self
+    attr_accessor :entered, :release, :analytics
+
+    def call(**)
+      entered << true
+      release.pop
+      analytics&.capture('inside_tool')
+      MCP::Tool::Response.new([{ type: 'text', text: 'done' }])
+    end
+  end
+end
+
 RSpec.describe PostHog::MCP do
   let(:client) { new_test_client }
   let(:tools) do
@@ -354,6 +371,48 @@ RSpec.describe PostHog::MCP do
       events = drain_events(client)
       expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
       expect(events[1][:properties]).not_to have_key('$mcp_intent')
+    end
+
+    it 'attributes a request to the identity it resolved, not to one a later request installed' do
+      PostHogMcpSpecParkedTool.entered = Queue.new
+      PostHogMcpSpecParkedTool.release = Queue.new
+      identify = lambda do |request, _extra|
+        params = request[:params] || request['params'] || {}
+        args = params[:arguments] || params['arguments'] || {}
+        user = args[:user] || args['user']
+        { distinct_id: user, properties: { email: "#{user}@example.com" } }
+      end
+      shared = MCP::Server.new(name: 'spec-server', version: '9.9.9',
+                               tools: [PostHogMcpSpecParkedTool, PostHogMcpSpecEchoTool])
+      PostHogMcpSpecParkedTool.analytics = described_class.instrument(shared, client, identify: identify)
+
+      alice = Thread.new { shared.handle(rpc(1, 'tools/call', { name: 'parked', arguments: { user: 'alice' } })) }
+      PostHogMcpSpecParkedTool.entered.pop
+      # Bob's request lands whole - identify included - while Alice is parked in
+      # her tool body. Over stdio both share the server-wide session, so Bob's
+      # identify re-points that session's cache entry at Bob.
+      shared.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi', user: 'bob' } }))
+      PostHogMcpSpecParkedTool.release << true
+      expect(alice.value[:result][:content][0][:text]).to eq('done')
+
+      events = drain_events(client)
+      calls = events_named(events, '$mcp_tool_call')
+      alice_call = calls.find { |e| e[:properties]['$mcp_resource_name'] == 'parked' }
+      bob_call = calls.find { |e| e[:properties]['$mcp_resource_name'] == 'echo' }
+      # The race needs one session behind both requests; without that there is
+      # nothing to overwrite and the test proves nothing.
+      expect(calls.map { |e| e[:properties]['$session_id'] }.uniq.length).to eq(1)
+
+      expect(bob_call[:distinct_id]).to eq('bob')
+      expect(bob_call[:properties]['$set']).to eq('email' => 'bob@example.com')
+      # Alice's event is built after Bob won the cache entry, so it must come from
+      # the identity pinned when her request started.
+      expect(alice_call[:distinct_id]).to eq('alice')
+      expect(alice_call[:properties]['$set']).to eq('email' => 'alice@example.com')
+      # A custom event from inside the tool body follows the same request identity.
+      custom = events_named(events, 'inside_tool').first
+      expect(custom[:distinct_id]).to eq('alice')
+      expect(custom[:properties]['$set']).to eq('email' => 'alice@example.com')
     end
 
     it 'shrinks a payload a before_send hook grew past the transport limit' do

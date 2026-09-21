@@ -91,11 +91,21 @@ module PostHog
         )
       end
 
-      # Resolve the optional `identify` callback and return an `$identify` event
-      # to emit only when the identity has materially changed (else nil).
-      def handle_identify(data, session_id, request, extra)
+      # Resolve the optional `identify` callback for one request: the identity the
+      # request's events belong to, plus an `$identify` event to emit only when
+      # that identity has materially changed.
+      #
+      # The actor is handed back rather than left for the caller to read out of
+      # {IdentityCache} later. The cache is keyed by session, and a request's
+      # events are built after its handler returns, so a concurrent request on
+      # the same session would otherwise decide who this one is attributed to.
+      # When resolution yields nothing the cache is read once, here, so whatever
+      # a request is attributed to it is attributed to consistently.
+      #
+      # @return [Array(Hash, UserIdentity), Array(nil, UserIdentity), Array(nil, nil)] `[event, actor]`
+      def identify_for_request(data, session_id, request, extra)
         identify = data.options.identify
-        return nil unless identify
+        return [nil, nil] unless identify
 
         result = if identify.is_a?(UserIdentity) || identify.is_a?(Hash)
                    identify
@@ -106,23 +116,28 @@ module PostHog
         identity = UserIdentity.coerce(result)
         unless identity
           Log.debug(data.options, "Warning: Supplied identify function returned null for session #{session_id}")
-          return nil
+          return [nil, data.identified_sessions.get(session_id)]
         end
 
-        _merged, changed = data.identified_sessions.merge!(session_id, identity)
-        return nil unless changed
+        merged, changed = data.identified_sessions.merge!(session_id, identity)
+        return [nil, merged] unless changed
 
         Log.debug(data.options, "Identified session #{session_id}")
-        {
+        [{
           'session_id' => session_id,
           'resource_name' => request_resource_name(request),
           'event_type' => EventType::IDENTIFY,
           'parameters' => { 'request' => request, 'extra' => captured_extra(extra) },
           'timestamp' => Time.now.utc
-        }
+        }, merged]
       rescue StandardError => e
         Log.debug(data.options, "Error: identify function threw while identifying session #{session_id} - #{e.message}")
-        nil
+        [nil, data.identified_sessions.get(session_id)]
+      end
+
+      # @return [Hash, nil] the `$identify` event alone; see {identify_for_request}.
+      def handle_identify(data, session_id, request, extra)
+        identify_for_request(data, session_id, request, extra).first
       end
 
       def request_resource_name(request)

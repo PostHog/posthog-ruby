@@ -15,11 +15,13 @@ module PostHog
       # Capture a custom event scoped to the current MCP session. The event
       # name is sent verbatim (a customer event, not `$`-prefixed).
       #
-      # Inside a tool body the session is the one pinned to the in-flight
-      # request by {Instrumentation}. Over stdio, where a server only ever talks
-      # to one client, it is the server's current session. On an HTTP server a
-      # call that has lost the request scope gets a standalone session rather
-      # than the server's, which may belong to another caller's request.
+      # Inside a tool body the session and the identity are the ones pinned to
+      # the in-flight request by {Instrumentation}, so a concurrent request on
+      # the same session cannot reattribute this event. Over stdio, where a
+      # server only ever talks to one client, the session is the server's
+      # current one. On an HTTP server a call that has lost the request scope
+      # gets a standalone session rather than the server's, which may belong to
+      # another caller's request.
       #
       # @param event [String] event name
       # @param properties [Hash] event properties
@@ -33,13 +35,15 @@ module PostHog
         data = PostHog::MCP.tracking_data(@server)
         return if data.nil?
 
+        scope = RequestScope.current
+        scope = nil unless scope.is_a?(Hash)
         Instrumentation.capture_event(data, {
-                                        'session_id' => current_session_id(data),
+                                        'session_id' => current_session_id(data, scope),
                                         'event_type' => EventType::CUSTOM,
                                         'event_name' => event,
                                         'timestamp' => Time.now.utc,
                                         'properties' => properties
-                                      })
+                                      }, actor: scoped_actor(scope))
         nil
       end
 
@@ -63,14 +67,20 @@ module PostHog
       # fiber-local and is not inherited. Fail closed with a standalone session
       # rather than filing the event under another caller's identity; over stdio a
       # server only ever talks to one client, so the fallback stays.
-      def current_session_id(data)
-        scope = RequestScope.current
-        scoped = scope.is_a?(Hash) ? scope[:session_id] : nil
+      def current_session_id(data, scope)
+        scoped = scope ? scope[:session_id] : nil
         return scoped if scoped
         return data.session_id unless data.http_transport_seen
 
         warn_unscoped_capture(data)
         Session.new_session_id
+      end
+
+      # The identity the in-flight request resolved, which {Instrumentation} pinned
+      # on the scope before running the tool body. Absent outside a request it
+      # started, and only then is the session-keyed cache consulted instead.
+      def scoped_actor(scope)
+        scope&.key?(:actor) ? scope[:actor] : Instrumentation::UNRESOLVED_ACTOR
       end
 
       def warn_unscoped_capture(data)

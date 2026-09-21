@@ -38,6 +38,10 @@ module PostHog
       META_PROTOCOL_VERSION_KEY = 'io.modelcontextprotocol/protocolVersion'
       INJECTED_PARAMS = ['context', ConversationId::PARAM_NAME, ModelCapture::PARAM_NAME].freeze
 
+      # Passed as `actor:` by a caller that has no request identity to offer, and
+      # is distinct from an explicit `nil` (a request that resolved to nobody).
+      UNRESOLVED_ACTOR = Object.new.freeze
+
       class << self
         def tracked?(method)
           TRACKED_METHODS.key?(method)
@@ -45,12 +49,17 @@ module PostHog
 
         # Enrich an event with session/identity/server metadata and hand it to
         # the sink.
-        def capture_event(data, input)
+        #
+        # @param actor [UserIdentity, nil, Object] the identity resolved for the
+        #   request this event belongs to, pinned when the request started. Only
+        #   {UNRESOLVED_ACTOR} falls back to the session-keyed cache, which a
+        #   concurrent request on the same session may have moved on since.
+        def capture_event(data, input, actor: UNRESOLVED_ACTOR)
           sink = data.sink
           return nil if sink.nil?
 
           session_id = input['session_id'] || data.session_id
-          actor = session_id ? data.identified_sessions.get(session_id) : nil
+          actor = (session_id ? data.identified_sessions.get(session_id) : nil) if actor.equal?(UNRESOLVED_ACTOR)
           timestamp = input['timestamp'] || Time.now.utc
           duration = input['duration']
           duration = (Time.now - timestamp) * 1000.0 if duration.nil? && input['timestamp']
@@ -386,7 +395,14 @@ module PostHog
         props = resolve_event_properties(request)
         event['properties'] = props unless props.nil?
         TransportIdentity.stamp(event, @headers)
-        self.class.capture_event(@data, event)
+        self.class.capture_event(@data, event, actor: actor_for(event['session_id']))
+      end
+
+      # The identity this request resolved for the session the event is filed
+      # under. {#prepare_request} always runs first for that session, so the key
+      # is present; a missing one means nobody identified and stays nil.
+      def actor_for(session_id)
+        @identified_in_request[session_id]
       end
 
       def resolve_event_properties(request)
@@ -430,9 +446,14 @@ module PostHog
         # `identify` callback runs once per session per request, so preparing
         # twice never asks it the same question twice.
         unless @identified_in_request.key?(session_id)
-          @identified_in_request[session_id] = true
-          identify_event = Identity.handle_identify(@data, session_id, request, extra)
-          self.class.capture_event(@data, identify_event) if identify_event
+          identify_event, actor = Identity.identify_for_request(@data, session_id, request, extra)
+          # Pin what this request resolved. Every event it emits afterwards -
+          # including one a tool body captures through {Analytics} - is attributed
+          # to this, never to a re-read of the cache another request may have
+          # overwritten while the handler ran.
+          @identified_in_request[session_id] = actor
+          @scope[:actor] = actor if @scope.is_a?(Hash)
+          self.class.capture_event(@data, identify_event, actor: actor) if identify_event
         end
         maybe_emit_initialize(session_id, request) unless skip_initialize
         session_id
@@ -455,7 +476,7 @@ module PostHog
         props = resolve_event_properties({ method: 'initialize', params: {} })
         event['properties'] = props unless props.nil?
         TransportIdentity.stamp(event, @headers)
-        self.class.capture_event(@data, event)
+        self.class.capture_event(@data, event, actor: actor_for(session_id))
       end
 
       # Era is decided by the version the client *asked for*:

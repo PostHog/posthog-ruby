@@ -43,6 +43,35 @@ RSpec.describe PostHog::MCP::Identity do
     expect(described_class.handle_identify(nils, 'ses_1', request, nil)).to be_nil
   end
 
+  it 'hands back the identity it resolved, as a snapshot a later request cannot move' do
+    event, actor = described_class.identify_for_request(data, 'ses_1', request, nil)
+    expect(event['event_type']).to eq('posthog:identify')
+    expect(actor.distinct_id).to eq('user-1')
+
+    data.options.instance_variable_set(:@identify, ->(_r, _e) { { distinct_id: 'user-2' } })
+    _later, later_actor = described_class.identify_for_request(data, 'ses_1', request, nil)
+    expect(later_actor.distinct_id).to eq('user-2')
+    expect(data.identified_sessions.get('ses_1').distinct_id).to eq('user-2')
+    # The cache has moved on; the first request's own actor has not, which is what
+    # keeps its events attributed to it after its handler returns.
+    expect(actor.distinct_id).to eq('user-1')
+  end
+
+  it 'falls back to the cached identity at resolution time when the callback yields nothing' do
+    described_class.identify_for_request(data, 'ses_1', request, nil)
+    data.options.instance_variable_set(:@identify, ->(_r, _e) { raise 'nope' })
+    event, actor = described_class.identify_for_request(data, 'ses_1', request, nil)
+    expect(event).to be_nil
+    expect(actor.distinct_id).to eq('user-1')
+
+    data.options.instance_variable_set(:@identify, ->(_r, _e) {})
+    expect(described_class.identify_for_request(data, 'ses_1', request, nil)[1].distinct_id).to eq('user-1')
+
+    # No `identify` option at all: nothing to attribute, and nothing cached either.
+    none = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new, sink: nil)
+    expect(described_class.identify_for_request(none, 'ses_1', request, nil)).to eq([nil, nil])
+  end
+
   it 'keeps the identity cache consistent under concurrent identification' do
     concurrent = PostHog::MCP::TrackingData.new(
       options: PostHog::MCP::Options.new(identify: lambda { |req, _e|

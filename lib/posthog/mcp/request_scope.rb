@@ -27,10 +27,13 @@ module PostHog
 
       module_function
 
-      # @return [Hash, nil] `{headers:, transport:, mint:, session_id:}` for the in-flight HTTP request.
+      # @return [Hash, nil] `{headers:, transport:, mint:, session_id:}` for the in-flight HTTP request,
+      #   plus `actor:` once {Instrumentation} has resolved identity for it.
       #   `session_id` is the `$session_id` {Instrumentation} settled on before running the
-      #   tool body, so a custom event captured inside the tool is attributed to this
-      #   request even while another request on the same server is in flight.
+      #   tool body, and `actor` the identity it resolved, so a custom event captured inside
+      #   the tool is attributed to this request - to the right session and the right person -
+      #   even while another request on the same server is in flight. `actor` is absent until
+      #   the request resolves identity, which is what tells {Analytics} it has none to use.
       def current
         FIBER_STORAGE ? Fiber[KEY] : Thread.current[KEY]
       end
