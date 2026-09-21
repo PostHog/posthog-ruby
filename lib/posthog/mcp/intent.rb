@@ -9,15 +9,6 @@ module PostHog
     module Intent
       module_function
 
-      def context_argument(request)
-        params = request[:params] || request['params'] || {}
-        arguments = (params[:arguments] || params['arguments']) || {}
-        return nil unless arguments.is_a?(Hash)
-
-        context = arguments[:context] || arguments['context']
-        context.is_a?(String) && !context.strip.empty? ? context : nil
-      end
-
       def normalize(intent)
         return nil unless intent.is_a?(String)
 
@@ -25,13 +16,16 @@ module PostHog
         trimmed.empty? ? nil : trimmed
       end
 
+      # @param context [String, nil] the `context` argument, and only when this
+      #   layer owns it. A tool that declares `context` in its own schema is
+      #   passed application data, which is never the agent's stated intent.
       # @return [Array(String, String), nil] `[intent, source]`
-      def resolve(data, request, extra)
+      def resolve(data, request, extra, context = nil)
         params = request[:params] || request['params'] || {}
         name = params[:name] || params['name']
         missing_name = Tools.missing_capability_tool_name(data.options)
-        context = context_argument(request)
-        return [context, 'context_parameter'] if data.options.context_enabled? && name != missing_name && context
+        intent = normalize(context)
+        return [intent, 'context_parameter'] if data.options.context_enabled? && name != missing_name && intent
 
         run_fallback(data, request, extra)
       end

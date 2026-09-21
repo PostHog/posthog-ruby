@@ -65,8 +65,20 @@ module PostHog
             Log.debug(options, "before_send threw for event #{payload['event']}; dropping it: #{e.message}")
             next nil
           end
-          result.is_a?(Hash) ? result : nil
+          next nil unless result.is_a?(Hash)
+
+          retruncate(result, options)
         end
+      end
+
+      # The size budget was applied before `before_send` ran, so a hook that
+      # enriches an event can push it back over the transport's per-message
+      # limit, which drops it at batch time. Shrink it again instead.
+      def retruncate(payload, options)
+        Truncation.truncate_payload(payload)
+      rescue StandardError => e
+        Log.debug(options, "Failed to truncate event after before_send: #{e.message}")
+        payload
       end
 
       def dispatch(payload)

@@ -35,10 +35,12 @@ module PostHog
       end
     end
 
-    # Result of {PostHog::MCP::Client#prepare_tool_call}: the intent pulled off
-    # the call, the arguments with the injected `context` stripped, and whether
-    # the call targeted the `get_more_tools` virtual tool.
-    PreparedToolCall = Struct.new(:args, :intent, :intent_source, :is_missing_capability, keyword_init: true)
+    # Result of {PostHog::MCP::Client#prepare_tool_call}: the intent and the
+    # self-reported model pulled off the call, the arguments with the injected
+    # `context` and `llm_model` stripped, and whether the call targeted the
+    # `get_more_tools` virtual tool.
+    PreparedToolCall = Struct.new(:args, :intent, :intent_source, :llm_model, :llm_model_source,
+                                  :is_missing_capability, keyword_init: true)
 
     # Configuration for {PostHog::MCP.instrument}.
     #

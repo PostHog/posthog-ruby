@@ -63,6 +63,19 @@ module PostHog
         synchronize { @initialized_sessions.key?(session_id) }
       end
 
+      # Claim the one lazy initialize event a session gets. Check and mark are a
+      # single critical section, so when concurrent first requests race only the
+      # caller that inserted the key sees `true` and emits `$mcp_initialize`.
+      def claim_session_initialized(session_id)
+        synchronize do
+          next false if @initialized_sessions.key?(session_id)
+
+          @initialized_sessions[session_id] = true
+          @initialized_sessions.shift while @initialized_sessions.length > MAX_INITIALIZED_SESSIONS
+          true
+        end
+      end
+
       def remember_tool(name, description: nil, category: nil, owned_params: nil, output_instructions: nil)
         synchronize do
           @tool_descriptions[name] = description if description.is_a?(String) && !description.empty?

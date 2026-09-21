@@ -134,8 +134,12 @@ module PostHog
         missing_name = Tools.missing_capability_tool_name(@options)
         owned = safely([]) { owned_params_for(name) }
         stripped = safely({}) { strip_injected_arguments(arguments, owned) }
+        # Resolution reads the stripped values, never `original_arguments`: only an
+        # argument this layer injected is ours to interpret. A `conversation_id` or
+        # `context` the tool declares itself stays application data and is left to it.
         conversation_id, minted = safely([nil, false]) do
-          ConversationId.resolve(@options.enable_conversation_id, original_arguments, name, missing_name)
+          ConversationId.resolve(@options.enable_conversation_id, stripped[ConversationId::PARAM_NAME], name,
+                                 missing_name)
         end
         request = request_with_arguments(original_arguments)
 
@@ -266,7 +270,7 @@ module PostHog
         event['conversation_id'] = conversation_id
         event['is_error'] = false
 
-        intent = Intent.resolve(@data, request, extra)
+        intent = Intent.resolve(@data, request, extra, stripped['context'])
         if intent
           event['user_intent'] = intent[0]
           event['user_intent_source'] = intent[1]
@@ -435,9 +439,10 @@ module PostHog
       end
 
       def maybe_emit_initialize(session_id, request)
-        return if @data.session_initialized?(session_id)
+        # Claiming is atomic: two threads opening the same session concurrently
+        # must not both get past the check and emit an initialize each.
+        return unless @data.claim_session_initialized(session_id)
 
-        @data.mark_session_initialized(session_id)
         name, version = client_identity(request)
         event = {
           'event_type' => EventType::MCP_INITIALIZE,

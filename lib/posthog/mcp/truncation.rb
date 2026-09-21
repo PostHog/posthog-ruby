@@ -265,7 +265,7 @@ module PostHog
         result
       end
 
-      def truncate_to_size(event)
+      def truncate_to_size(event, fields = NORMALIZED_FIELDS)
         return event if json_byte_size(event) <= MAX_EVENT_BYTES
 
         # Trim the largest strings first so a big tool response keeps its shape
@@ -276,17 +276,31 @@ module PostHog
 
         (MAX_DEPTH - 1).downto(1) do |depth|
           reduced = event.dup
-          NORMALIZED_FIELDS.each do |field|
+          fields.each do |field|
             reduced[field] = normalize(reduced[field], depth) unless reduced[field].nil?
           end
           return reduced if json_byte_size(reduced) <= MAX_EVENT_BYTES
         end
 
         minimal = event.dup
-        NORMALIZED_FIELDS.each do |field|
+        fields.each do |field|
           minimal[field] = normalize(minimal[field], 1) unless minimal[field].nil?
         end
         truncate_largest_fields(minimal, MAX_EVENT_BYTES)
+      end
+
+      # Re-apply the byte budget to a built payload a `before_send` hook returned.
+      # The hook runs after {truncate_event}, so it can grow an event back over
+      # the transport's per-message limit, where the batch would drop it whole;
+      # trimming here costs the enrichment its bulk instead of the whole event.
+      #
+      # @param payload [Hash] a payload from {EventBuilder.build}, post-hook
+      # @return [Hash] a payload within the byte budget
+      def truncate_payload(payload)
+        return payload unless payload.is_a?(Hash)
+
+        key = payload.key?(:properties) && !payload.key?('properties') ? :properties : 'properties'
+        truncate_to_size(payload, [key])
       end
 
       # @param event [Hash] internal event with string keys

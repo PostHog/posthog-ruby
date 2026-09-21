@@ -56,6 +56,16 @@ class PostHogMcpSpecErrorResultTool < MCP::Tool
   end
 end
 
+class PostHogMcpSpecOwnsConversationIdTool < MCP::Tool
+  tool_name 'owns_conversation_id'
+  input_schema(properties: { conversation_id: { type: 'string' } })
+  class << self
+    def call(conversation_id: nil, **)
+      MCP::Tool::Response.new([{ type: 'text', text: "cid=#{conversation_id}" }])
+    end
+  end
+end
+
 class PostHogMcpSpecComposedContextTool < MCP::Tool
   tool_name 'composed'
   input_schema(type: 'object', properties: { message: { type: 'string' } },
@@ -196,6 +206,11 @@ RSpec.describe PostHog::MCP do
       list = server.handle(rpc(2, 'tools/list'))
       owns = list[:result][:tools].find { |t| t[:name] == 'owns_context' }
       expect(owns[:inputSchema][:required]).to be_nil
+      # The tool declares `context`, so its value is application data, not the
+      # agent's stated intent, and must not be read as one.
+      call = drain_events(client).find { |e| e[:event] == '$mcp_tool_call' }
+      expect(call[:properties]).not_to have_key('$mcp_intent')
+      expect(call[:properties]).not_to have_key('$mcp_intent_source')
     end
 
     it 'records raised tool errors with unwrapped scalars and an $exception sibling, then re-raises to the client' do
@@ -284,7 +299,9 @@ RSpec.describe PostHog::MCP do
       second = composed.handle(rpc(3, 'tools/call', { name: 'composed', arguments: { context: 'why' } }))
       expect(second[:result][:content][0][:text]).to eq('ctx=why')
       calls = drain_events(client).select { |e| e[:event] == '$mcp_tool_call' }
-      expect(calls.map { |c| c[:properties]['$mcp_intent'] }).to eq(%w[why why])
+      # A composed schema is never injected into, so this `context` is the tool's
+      # own argument: it reaches the tool untouched and is not read as intent.
+      expect(calls.map { |c| c[:properties]['$mcp_intent'] }).to eq([nil, nil])
     end
 
     it 'flags an empty tools/list as an error' do
@@ -339,6 +356,23 @@ RSpec.describe PostHog::MCP do
       expect(events[1][:properties]).not_to have_key('$mcp_intent')
     end
 
+    it 'shrinks a payload a before_send hook grew past the transport limit' do
+      before_send = lambda do |payload|
+        payload['properties']['bloat'] = 'x' * 40_000
+        payload
+      end
+      described_class.instrument(server, client, before_send: before_send)
+      server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
+      events = drain_events(client)
+      # The hook runs after truncation, so without a second pass the batch would
+      # drop these whole for exceeding the per-message limit.
+      expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
+      events.each do |event|
+        expect(JSON.generate(event).bytesize).to be <= PostHog::Defaults::Message::MAX_BYTES
+        expect(event[:properties]['bloat']).to start_with('x')
+      end
+    end
+
     it 'never lets analytics failures reach the tool' do
       described_class.instrument(server, client, identify: ->(_r, _e) { raise 'identify exploded' },
                                                  event_properties: ->(_r, _e) { raise 'props exploded' },
@@ -384,6 +418,28 @@ RSpec.describe PostHog::MCP do
       expected_session = PostHog::MCP.derive_session_id_from_conversation(handle)
       expect(calls.map { |c| c[:properties]['$session_id'] }.uniq).to eq([expected_session])
       expect(calls[0][:properties]['$mcp_parameters']['request']['params']['arguments']).to eq('message' => 'hi')
+    end
+
+    it 'never anchors a conversation on a conversation_id the tool declares itself' do
+      own = MCP::Server.new(name: 'spec-server', version: '9.9.9', tools: [PostHogMcpSpecOwnsConversationIdTool])
+      described_class.instrument(own, client, enable_conversation_id: true)
+      shared = '019fd2b0-1111-7111-8111-111111111111'
+      2.times do |i|
+        result = own.handle(rpc(i + 1, 'tools/call', { name: 'owns_conversation_id',
+                                                       arguments: { context: 'c', conversation_id: shared } }))
+        # The tool keeps its own argument.
+        expect(result[:result][:content][0][:text]).to eq("cid=#{shared}")
+      end
+
+      calls = drain_events(client).select { |e| e[:event] == '$mcp_tool_call' }
+      handles = calls.map { |c| c[:properties]['$mcp_conversation_id'] }
+      # Two users passing the same application-owned value must not be stitched
+      # into one conversation, which would bleed one's $set onto the other.
+      expect(handles).to all(match(PostHog::MCP::ConversationId::MINTED_CONVERSATION_ID))
+      expect(handles).not_to include(shared)
+      expect(handles.uniq.length).to eq(2)
+      expect(calls.map { |c| c[:properties]['$session_id'] })
+        .not_to include(PostHog::MCP.derive_session_id_from_conversation(shared))
     end
 
     it 'drops a minted handle when the call raises so sessions do not orphan' do

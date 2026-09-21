@@ -20,22 +20,29 @@ module PostHog
 
       module_function
 
-      def extract(args)
-        return nil unless args.is_a?(Hash)
-
-        value = args[PARAM_NAME] || args[PARAM_NAME.to_sym]
+      def normalize(value)
         return nil unless value.is_a?(String)
 
         trimmed = value.strip
         trimmed.empty? ? nil : trimmed
       end
 
+      def extract(args)
+        return nil unless args.is_a?(Hash)
+
+        normalize(args[PARAM_NAME] || args[PARAM_NAME.to_sym])
+      end
+
+      # @param supplied [String, nil] the `conversation_id` argument, and only
+      #   when this layer owns it. A tool that declares `conversation_id` in its
+      #   own schema is passed application data, which must not anchor analytics:
+      #   two users sharing such a value would be stitched into one conversation.
       # @return [Array(String, Boolean), Array(nil, false)] `[conversation_id, minted]`
-      def resolve(enabled, args, tool_name, missing_capability_tool_name)
+      def resolve(enabled, supplied, tool_name, missing_capability_tool_name)
         return [nil, false] if !enabled || tool_name == missing_capability_tool_name
 
-        supplied = extract(args)
-        return [supplied.downcase, false] if supplied && MINTED_CONVERSATION_ID.match?(supplied)
+        value = normalize(supplied)
+        return [value.downcase, false] if value && MINTED_CONVERSATION_ID.match?(value)
 
         [Ids.uuid_v7, true]
       end

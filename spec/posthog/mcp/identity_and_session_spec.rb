@@ -112,3 +112,25 @@ RSpec.describe PostHog::MCP::Session do
     expect(described_class.resolve(data, nil, token: token)[0]).to eq('ses_tok')
   end
 end
+
+RSpec.describe PostHog::MCP::TrackingData do
+  let(:data) { described_class.new(options: PostHog::MCP::Options.new, sink: nil) }
+
+  it 'lets exactly one racing caller claim a session initialize' do
+    # Check and mark must be one critical section: two threads opening the same
+    # session concurrently would otherwise both emit an $mcp_initialize.
+    50.times do |round|
+      session_id = "ses_#{round}"
+      gate = Queue.new
+      threads = Array.new(12) do
+        Thread.new do
+          gate.pop
+          data.claim_session_initialized(session_id)
+        end
+      end
+      12.times { gate << true }
+      expect(threads.map(&:value).count(true)).to eq(1)
+      expect(data.session_initialized?(session_id)).to be(true)
+    end
+  end
+end

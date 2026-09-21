@@ -146,27 +146,36 @@ module PostHog
         prepared
       end
 
-      # Pull the agent's intent off the `context` argument, strip the argument
-      # this integration injected, and flag the `get_more_tools` virtual tool.
+      # Pull the agent's intent off the `context` argument and its self-reported
+      # model off `llm_model`, strip the arguments this integration injected, and
+      # flag the `get_more_tools` virtual tool. Hand `intent`/`intent_source` and
+      # `llm_model`/`llm_model_source` straight to {#capture_tool_call}.
       #
       # Pass the tool's own `inputSchema` (the same Hash you handed to
-      # {#prepare_tool_list}) so a `context` field the tool declares itself is
-      # left in `args`: only an injected `context` is stripped. A composed
-      # (oneOf/allOf/anyOf) or `$ref` schema is never injected into, so its
-      # `context` is the tool's own and is left alone too. Without the schema
-      # there is no way to tell the two apart, so `context` is always stripped.
+      # {#prepare_tool_list}) so a field the tool declares itself is left in
+      # `args` and never read as analytics: only an injected argument is stripped
+      # and reported. A composed (oneOf/allOf/anyOf) or `$ref` schema is never
+      # injected into, so its fields are the tool's own and are left alone too.
+      # Without the schema there is no way to tell the two apart, so the injected
+      # names are always stripped.
       #
       # @param name [String] tool name
       # @param args [Hash, nil] the call's arguments
       # @param input_schema [Hash, nil] the tool's raw `inputSchema`
       # @return [PreparedToolCall]
       def prepare_tool_call(name, args = nil, input_schema: nil)
-        raw_context = args.is_a?(Hash) ? (args[:context] || args['context']) : nil
-        intent = raw_context.is_a?(String) && !raw_context.strip.empty? ? raw_context.strip : nil
+        intent = tool_declares?(input_schema, 'context') ? nil : Intent.normalize(argument(args, 'context'))
+        model = if tool_declares?(input_schema, ModelCapture::PARAM_NAME)
+                  nil
+                else
+                  ModelCapture.normalize(argument(args, ModelCapture::PARAM_NAME))
+                end
         PreparedToolCall.new(
-          args: tool_owns_context?(input_schema) ? args : strip_context(args),
+          args: strip_injected(args, input_schema),
           intent: intent,
           intent_source: intent ? 'context_parameter' : nil,
+          llm_model: model,
+          llm_model_source: model ? 'self_reported' : nil,
           is_missing_capability: name == @missing_capability_tool_name
         )
       end
@@ -210,16 +219,27 @@ module PostHog
         nil
       end
 
-      def tool_owns_context?(input_schema)
+      # True when the argument belongs to the tool rather than to this layer: it
+      # declares the field itself, or its schema is one we never inject into.
+      def tool_declares?(input_schema, param)
         return false unless input_schema
 
-        !SchemaMutation.injectable?(input_schema) || SchemaMutation.declares_param?(input_schema, 'context')
+        !SchemaMutation.injectable?(input_schema) || SchemaMutation.declares_param?(input_schema, param)
       end
 
-      def strip_context(args)
-        return args unless args.is_a?(Hash) && (args.key?(:context) || args.key?('context'))
+      def argument(args, param)
+        return nil unless args.is_a?(Hash)
 
-        args.except(:context, 'context')
+        args[param.to_sym] || args[param]
+      end
+
+      def strip_injected(args, input_schema)
+        return args unless args.is_a?(Hash)
+
+        keys = ['context', ModelCapture::PARAM_NAME].reject { |param| tool_declares?(input_schema, param) }
+                                                    .flat_map { |param| [param.to_sym, param] }
+                                                    .select { |key| args.key?(key) }
+        keys.empty? ? args : args.except(*keys)
       end
     end
   end

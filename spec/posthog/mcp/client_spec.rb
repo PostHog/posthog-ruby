@@ -92,7 +92,7 @@ RSpec.describe PostHog::MCP::Client do
 
     call = client.prepare_tool_call('search', { context: '  find it ', q: 'x' })
     expect(call.to_h).to eq(args: { q: 'x' }, intent: 'find it', intent_source: 'context_parameter',
-                            is_missing_capability: false)
+                            llm_model: nil, llm_model_source: nil, is_missing_capability: false)
     expect(client.prepare_tool_call('get_more_tools').is_missing_capability).to be(true)
   end
 
@@ -109,11 +109,32 @@ RSpec.describe PostHog::MCP::Client do
     expect(without[1][:inputSchema][:properties].keys).to eq([:context])
   end
 
+  it 'round-trips an injected llm_model and leaves a tool-declared one in args' do
+    injected = { type: 'object', properties: { title: { type: 'string' } } }
+    call = client.prepare_tool_call('add', { title: 'x', llm_model: ' claude-opus-4-8 ' }, input_schema: injected)
+    expect(call.args).to eq(title: 'x')
+    expect(call.llm_model).to eq('claude-opus-4-8')
+    expect(call.llm_model_source).to eq('self_reported')
+    # The stripped args must be safe to splat into a tool that takes keywords.
+    expect(->(title:) { title }.call(**call.args)).to eq('x')
+
+    own = { type: 'object', properties: { llm_model: { type: 'string' } } }
+    kept = client.prepare_tool_call('add', { llm_model: 'app-owned' }, input_schema: own)
+    expect(kept.args).to eq(llm_model: 'app-owned')
+    expect(kept.llm_model).to be_nil
+    expect(kept.llm_model_source).to be_nil
+
+    unknown = client.prepare_tool_call('add', { llm_model: 'unknown' }, input_schema: injected)
+    expect(unknown.args).to eq({})
+    expect(unknown.llm_model).to be_nil
+  end
+
   it 'leaves a composed or referenced schema, and the context argument it owns, alone' do
     composed = { type: 'object', allOf: [{ properties: { context: { type: 'string' } }, required: ['context'] }] }
     expect(client.prepare_tool_list([{ name: 'search', inputSchema: composed }])[0][:inputSchema]).to eq(composed)
     kept = client.prepare_tool_call('search', { context: 'application data' }, input_schema: composed)
     expect(kept.args).to eq(context: 'application data')
+    expect(kept.intent).to be_nil
 
     referenced = { type: 'object', :$ref => '#/$defs/payload' }
     expect(client.prepare_tool_list([{ name: 'search', inputSchema: referenced }])[0][:inputSchema]).to eq(referenced)
@@ -126,7 +147,10 @@ RSpec.describe PostHog::MCP::Client do
     expect(client.prepare_tool_list([{ name: 'search', inputSchema: own }])[0][:inputSchema]).to eq(own)
     kept = client.prepare_tool_call('search', { context: 'application data' }, input_schema: own)
     expect(kept.args).to eq(context: 'application data')
-    expect(kept.intent).to eq('application data')
+    # The tool declares `context`, so its value is the tool's own data: it stays in
+    # `args` and must not be reported as the agent's intent.
+    expect(kept.intent).to be_nil
+    expect(kept.intent_source).to be_nil
 
     injected = { type: 'object', properties: { title: { type: 'string' } } }
     stripped = client.prepare_tool_call('add', { title: 'x', context: 'agent intent' }, input_schema: injected)
