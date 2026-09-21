@@ -257,6 +257,46 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(sanitized['error']['$exception_list'][0]['value']).to eq('Project token [redacted]')
       expect(event['error']['$exception_list'][0]['value']).to include('phc_')
     end
+
+    it 'redacts credentials in the source lines a stack frame carries, keeping the source readable' do
+      frame = {
+        'filename' => 'app/tools/billing.rb', 'lineno' => 14, 'in_app' => true,
+        'pre_context' => ["  API_KEY = 'sk-proj-abc123XYZ789defGHI456jklMNO012pqr'", '  class << self'],
+        'context_line' => "      charge(API_KEY, 'sk-proj-zzz999AAA888bbbCCC777dddEEE666fff')",
+        'post_context' => ['    end', '  end']
+      }
+      event = { 'error' => { '$exception_list' => [{ 'type' => 'ArgumentError', 'value' => 'boom',
+                                                     'stacktrace' => { 'frames' => [frame] } }] } }
+      sanitized = described_class.sanitize_event(event)['error']['$exception_list'][0]['stacktrace']['frames'][0]
+
+      expect(sanitized['pre_context'][0]).to eq('  API_KEY = [redacted]')
+      # Replacement takes the whole non-space run, punctuation included, exactly as
+      # the word-splitting path does elsewhere: erring toward redacting more.
+      expect(sanitized['context_line']).to eq('      charge(API_KEY, [redacted]')
+      # Indentation survives: the generic string path would rejoin on single
+      # spaces and flatten a stack trace into something unreadable.
+      expect(sanitized['pre_context'][1]).to eq('  class << self')
+      expect(sanitized['post_context']).to eq(['    end', '  end'])
+      expect(sanitized['filename']).to eq('app/tools/billing.rb')
+      expect(sanitized['lineno']).to eq(14)
+      # The input is not mutated, as everywhere else in this module.
+      expect(frame['pre_context'][0]).to include('sk-proj-')
+    end
+
+    it 'leaves frames without source context, and odd stacktrace shapes, alone' do
+      bare = { 'filename' => 'lib/gem.rb', 'lineno' => 3, 'in_app' => false }
+      %w[frames].each do |_|
+        event = { 'error' => { '$exception_list' => [{ 'value' => 'x', 'stacktrace' => { 'frames' => [bare] } }] } }
+        expect(described_class.sanitize_event(event)['error']['$exception_list'][0]['stacktrace']['frames'])
+          .to eq([bare])
+      end
+      [nil, 'nope', { 'frames' => 'nope' }, { 'frames' => [nil, 42] }].each do |stacktrace|
+        event = { 'error' => { '$exception_list' => [{ 'value' => 'x', 'stacktrace' => stacktrace }] } }
+        expect { described_class.sanitize_event(event) }.not_to raise_error
+      end
+      expect(described_class.sanitize_event('error' => { '$exception_list' => ['not a hash'] })['error'])
+        .to eq('$exception_list' => ['not a hash'])
+    end
   end
 end
 # rubocop:enable Layout/LineLength

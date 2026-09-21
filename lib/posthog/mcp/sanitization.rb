@@ -24,6 +24,8 @@ module PostHog
       BASE64_DATA_URL_PREFIX_PATTERN = /\Adata:[^,\s]*;base64,/i
       BASE64_DATA_URL_PAYLOAD_PATTERN = %r{\A[A-Za-z0-9+/_-]+={0,2}\z}
       SIZE_GATE = 10_240
+      # Source lines an in-app stack frame carries around the raise.
+      SOURCE_CONTEXT_FIELDS = %w[pre_context context_line post_context].freeze
       POSTHOG_TOKEN_PATTERN = /\bph[a-z]_[A-Za-z0-9_-]{20,}\b/
       SENSITIVE_KEY_PATTERN = /\A(authorization|cookie|set-cookie|x-api-key|api[-_]?key|api[-_]?token|
         access[-_]?token|refresh[-_]?token|token|password|secret|client[-_]?secret|private[-_]?key)\z/ix
@@ -213,11 +215,51 @@ module PostHog
         list = error['$exception_list']
         return error unless list.is_a?(Array)
 
-        error.merge(
-          '$exception_list' => list.map do |exception|
-            exception.is_a?(Hash) ? exception.merge('value' => sanitize_captured_value(exception['value'])) : exception
-          end
-        )
+        error.merge('$exception_list' => list.map { |exception| sanitize_exception_entry(exception) })
+      end
+
+      # An in-app frame carries the source lines around the raise. They are the
+      # most useful part of a stack trace and also the part most likely to hold a
+      # hard-coded credential, and a caller can make a tool fail on demand, so
+      # they get the same redaction as every other captured string.
+      def sanitize_exception_entry(exception)
+        return exception unless exception.is_a?(Hash)
+
+        entry = exception.merge('value' => sanitize_captured_value(exception['value']))
+        stacktrace = entry['stacktrace']
+        frames = stacktrace.is_a?(Hash) ? stacktrace['frames'] : nil
+        return entry unless frames.is_a?(Array)
+
+        entry.merge('stacktrace' => stacktrace.merge('frames' => frames.map { |frame| sanitize_frame(frame) }))
+      end
+
+      def sanitize_frame(frame)
+        return frame unless frame.is_a?(Hash) && SOURCE_CONTEXT_FIELDS.any? { |field| frame.key?(field) }
+
+        sanitized = frame.dup
+        SOURCE_CONTEXT_FIELDS.each do |field|
+          next unless sanitized.key?(field)
+
+          value = sanitized[field]
+          sanitized[field] = if value.is_a?(Array)
+                               value.map { |line| sanitize_source_line(line) }
+                             else
+                               sanitize_source_line(value)
+                             end
+        end
+        sanitized
+      end
+
+      # Redact secrets in a line of source without disturbing its shape. The
+      # generic string path splits on whitespace and rejoins with single spaces,
+      # which would flatten the indentation that makes a stack trace readable, so
+      # replacement happens per non-space run and leaves the gaps untouched.
+      def sanitize_source_line(line)
+        return line unless line.is_a?(String)
+        return BINARY_REDACTED_VALUE if binary_like?(line)
+
+        redacted = SecretDetection.redact_private_key_blocks(line.gsub(POSTHOG_TOKEN_PATTERN, REDACTED_VALUE))
+        redacted.gsub(/\S+/) { |word| SecretDetection.secret?(word) ? REDACTED_VALUE : word }
       end
 
       def sanitize_response(response)
