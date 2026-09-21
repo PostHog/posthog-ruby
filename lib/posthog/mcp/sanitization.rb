@@ -108,7 +108,8 @@ module PostHog
       def sanitize_string(value)
         return BINARY_REDACTED_VALUE if binary_like?(value)
 
-        redact_secret_tokens(value.gsub(POSTHOG_TOKEN_PATTERN, REDACTED_VALUE))
+        value = value.gsub(POSTHOG_TOKEN_PATTERN, REDACTED_VALUE)
+        redact_secret_tokens(SecretDetection.redact_private_key_blocks(value))
       end
 
       # Redact credential-looking words, leaving surrounding text intact.
@@ -336,7 +337,22 @@ module PostHog
         REJECT_CHARS = "()[]{}<>'\"`,;".chars.to_set.freeze
         UUID_RE = /\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
         PATH_WORD_RE = /\A[a-z][a-z.]*\z/
-        PEM_PRIVATE_KEY_MARKER = 'PRIVATE KEY-----'
+        # A private key is redacted as a whole block, before anything is split into
+        # words. The body would mostly be caught word by word anyway - each base64
+        # line is high entropy on its own - but that is a heuristic, and a line
+        # that happens to look like a path (two lowercase `/`-separated segments)
+        # slips through it. Key material should not ride on a heuristic.
+        #
+        # Matched non-greedily, so several blocks in one value are handled
+        # separately, and terminated at end-of-string so a truncated block still
+        # loses its body. Covers the `RSA`/`EC`/`OPENSSH`/`ENCRYPTED` variants and
+        # the PGP `BLOCK` spelling.
+        PEM_PRIVATE_KEY_HINT = 'PRIVATE KEY'
+        PEM_PRIVATE_KEY_BLOCK = /
+          -----BEGIN[A-Z0-9\ ]*\ PRIVATE\ KEY(?:\ BLOCK)?-----
+          .*?
+          (?:-----END[A-Z0-9\ ]*\ PRIVATE\ KEY(?:\ BLOCK)?-----|\z)
+        /mx
         KNOWN_SECRET_MAX_SCAN_LENGTH = 200
         KNOWN_SECRET_RE = Regexp.union(
           /sk-ant-[A-Za-z0-9_-]{16,}/,
@@ -373,9 +389,11 @@ module PostHog
 
         module_function
 
+        # Whole private-key blocks are handled by {redact_private_key_blocks} before
+        # a value is ever split, so there is no marker check here: the marker
+        # contains a space and could never match a single word anyway.
         def secret?(value)
           return false unless value.is_a?(String) && !value.empty?
-          return true if value.include?(PEM_PRIVATE_KEY_MARKER)
 
           n = value.length
           return false if n < MIN_LENGTH
@@ -385,6 +403,14 @@ module PostHog
           false
         rescue StandardError
           false
+        end
+
+        # @return [String] the value with every `-----BEGIN … PRIVATE KEY-----`
+        #   block replaced, leaving surrounding text intact
+        def redact_private_key_blocks(value)
+          return value unless value.include?(PEM_PRIVATE_KEY_HINT)
+
+          value.gsub(PEM_PRIVATE_KEY_BLOCK, REDACTED_VALUE)
         end
 
         def path_or_url?(value)

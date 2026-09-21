@@ -32,6 +32,39 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(described_class.sanitize_captured_value("data:image/png;base64,#{'A%2BB/' * 2500}")).to eq(binary)
     end
 
+    it 'redacts a private key block whole, keeping the text around it' do
+      # This body line survives word-by-word entropy detection on its own: it has
+      # two lowercase `/`-separated segments, so it reads as a path. The block
+      # must not depend on that heuristic.
+      path_like = 'fnjv/87b1pybnOeVFm/c/oO4xX5sBmCi6GCRnw4WOAvKbBEtMobMdZVh6gSm5ni3'
+      pem = "-----BEGIN RSA PRIVATE KEY-----\n#{path_like}\nMIIEpAIBAAKCAQEAx7Vn9s\n-----END RSA PRIVATE KEY-----"
+      out = described_class.sanitize_captured_value("here you go:\n#{pem}\nthanks!")
+      expect(out).not_to include(path_like)
+      expect(out).not_to include('MIIEpAIBAAKCAQEAx7Vn9s')
+      expect(out).to include('here you go:', '[redacted]', 'thanks!')
+    end
+
+    it 'redacts every private key spelling, including truncated and repeated blocks' do
+      body = 'MIIEpAIBAAKCAQEAx7Vn9sQq2mKpL4tRbY8wZ3fH6jD1nC5vB0aX'
+      ['RSA PRIVATE KEY', 'EC PRIVATE KEY', 'PRIVATE KEY', 'ENCRYPTED PRIVATE KEY', 'OPENSSH PRIVATE KEY',
+       'PGP PRIVATE KEY BLOCK'].each do |label|
+        block = "-----BEGIN #{label}-----\n#{body}\n-----END #{label}-----"
+        expect(described_class.sanitize_captured_value(block)).not_to include(body)
+      end
+
+      # A block whose END marker never arrives still loses its body.
+      expect(described_class.sanitize_captured_value("-----BEGIN RSA PRIVATE KEY-----\n#{body}"))
+        .not_to include(body)
+      two = "-----BEGIN RSA PRIVATE KEY-----\n#{body}\n-----END RSA PRIVATE KEY-----"
+      expect(described_class.sanitize_captured_value("#{two}\nand again\n#{two}")).not_to include(body)
+    end
+
+    it 'leaves prose that merely mentions a private key alone' do
+      ['my private key is in 1password', 'rotate the PRIVATE KEY next week', 'see docs/private-key.md'].each do |text|
+        expect(described_class.sanitize_captured_value(text)).to eq(text)
+      end
+    end
+
     it 'passes non-strings through and redacts other vendors\' credentials per word' do
       expect(described_class.sanitize_captured_value(42)).to eq(42)
       expect(described_class.sanitize_captured_value(true)).to eq(true)
