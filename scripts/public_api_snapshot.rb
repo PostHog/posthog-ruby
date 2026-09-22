@@ -60,6 +60,8 @@ module PublicApiSnapshot
   def load_core_sdk
     add_load_path(CORE_LIB_DIR)
     require 'posthog'
+    # Opt-in integration shipped in the core gem; loaded here so its public surface is tracked too.
+    require 'posthog/mcp'
   end
 
   def captured_core_api
