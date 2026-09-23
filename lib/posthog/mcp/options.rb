@@ -52,13 +52,13 @@ module PostHog
       attr_reader :report_missing
       # @return [String] Name of the virtual tool. Default `get_more_tools`.
       attr_reader :missing_capability_tool_name
-      # @return [Boolean] Inject `conversation_id` and anchor `$session_id` on it. Default false.
+      # @return [Boolean] Inject `conversation_id` and anchor `$session_id` on it. Default true.
       attr_reader :enable_conversation_id
       # @return [Boolean] Emit a sibling `$exception` event for failed calls. Default true.
       attr_reader :enable_exception_autocapture
       # @return [Boolean, ContextOptions] Inject the required `context` argument. Default true.
       attr_reader :context
-      # @return [Boolean, ModelOptions] Capture `$mcp_llm_model`. Default false.
+      # @return [Boolean, ModelOptions] Capture `$mcp_llm_model`. Default true.
       attr_reader :capture_model
       # @return [#call, UserIdentity, Hash, nil] `(request, extra) -> UserIdentity | Hash | nil`, or a static identity.
       attr_reader :identify
@@ -70,8 +70,8 @@ module PostHog
       attr_reader :event_properties
 
       def initialize(logger: nil, report_missing: false, missing_capability_tool_name: nil,
-                     enable_conversation_id: false, enable_exception_autocapture: true, context: true,
-                     capture_model: false, identify: nil, intent_fallback: nil, before_send: nil,
+                     enable_conversation_id: true, enable_exception_autocapture: true, context: true,
+                     capture_model: true, identify: nil, intent_fallback: nil, before_send: nil,
                      event_properties: nil)
         @logger = logger
         @report_missing = report_missing == true

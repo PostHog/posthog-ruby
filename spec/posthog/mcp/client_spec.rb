@@ -96,15 +96,15 @@ RSpec.describe PostHog::MCP::Client do
     expect(client.prepare_tool_call('get_more_tools').is_missing_capability).to be(true)
   end
 
-  it 'advertises llm_model on every tool and on the virtual one when capture_model is on' do
+  it 'advertises llm_model on every tool and on the virtual one by default' do
     tools = [{ name: 'a', inputSchema: { type: 'object', properties: {} } }]
-    prepared = client.prepare_tool_list(tools, capture_model: true, report_missing: true)
+    prepared = client.prepare_tool_list(tools, report_missing: true)
     expect(prepared[0][:inputSchema][:properties].keys).to eq(%i[context llm_model])
     expect(prepared[1][:name]).to eq('get_more_tools')
     expect(prepared[1][:inputSchema][:properties].keys).to eq(%i[context llm_model])
     expect(prepared[1][:inputSchema][:required]).to contain_exactly('context', 'llm_model')
 
-    without = client.prepare_tool_list(tools, report_missing: true)
+    without = client.prepare_tool_list(tools, capture_model: false, report_missing: true)
     expect(without[0][:inputSchema][:properties].keys).to eq([:context])
     expect(without[1][:inputSchema][:properties].keys).to eq([:context])
   end
@@ -144,7 +144,8 @@ RSpec.describe PostHog::MCP::Client do
 
   it 'strips only the context argument it injected when given the tool schema' do
     own = { type: 'object', properties: { context: { type: 'string' } }, required: ['context'] }
-    expect(client.prepare_tool_list([{ name: 'search', inputSchema: own }])[0][:inputSchema]).to eq(own)
+    expect(client.prepare_tool_list([{ name: 'search', inputSchema: own }], capture_model: false)[0][:inputSchema])
+      .to eq(own)
     kept = client.prepare_tool_call('search', { context: 'application data' }, input_schema: own)
     expect(kept.args).to eq(context: 'application data')
     # The tool declares `context`, so its value is the tool's own data: it stays in

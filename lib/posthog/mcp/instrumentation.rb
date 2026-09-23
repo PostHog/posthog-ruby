@@ -506,9 +506,8 @@ module PostHog
           'Warning: an MCP request arrived over streamable HTTP with no session id, so PostHog generated a ' \
           'per-process $session_id that will fragment across requests and pods. In stateless mode the ' \
           'client must replay the Mcp-Session-Id header PostHog::MCP mints at initialize; for a custom Rack ' \
-          'stack add PostHog::MCP::RackMiddleware. Enabling conversation ids ' \
-          '(PostHog::MCP.instrument(server, enable_conversation_id: true)) also anchors the session without ' \
-          'any middleware. See https://posthog.com/docs/mcp-analytics/installation#ruby.'
+          'stack add PostHog::MCP::RackMiddleware. Conversation ids, which are enabled by default, also anchor ' \
+          'the session without any middleware. See https://posthog.com/docs/mcp-analytics/installation#ruby.'
         )
       end
 

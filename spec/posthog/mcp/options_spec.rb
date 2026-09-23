@@ -6,12 +6,18 @@ RSpec.describe PostHog::MCP::Options do
   it 'has JS/Python defaults' do
     options = described_class.new
     expect(options.report_missing).to be(false)
-    expect(options.enable_conversation_id).to be(false)
+    expect(options.enable_conversation_id).to be(true)
     expect(options.enable_exception_autocapture).to be(true)
     expect(options.context_enabled?).to be(true)
     expect(options.context_description).to be_nil
-    expect(options.capture_model_enabled?).to be(false)
+    expect(options.capture_model_enabled?).to be(true)
     expect(PostHog::MCP::Tools.missing_capability_tool_name(options)).to eq('get_more_tools')
+  end
+
+  it 'allows conversation and model capture to be disabled' do
+    options = described_class.new(enable_conversation_id: false, capture_model: false)
+    expect(options.enable_conversation_id).to be(false)
+    expect(options.capture_model_enabled?).to be(false)
   end
 
   it 'normalises hash forms' do

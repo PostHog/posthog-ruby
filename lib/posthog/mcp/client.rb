@@ -113,15 +113,15 @@ module PostHog
         emit(event)
       end
 
-      # Inject the `context` argument (and, with `capture_model`, `llm_model`) into
+      # Inject the `context` and `llm_model` arguments into
       # every tool descriptor (Hash with `inputSchema`) so agents state their intent,
       # and optionally append the `get_more_tools` virtual tool. Returns a new Array
       # of new Hashes. A tool whose schema is composed (oneOf/allOf/anyOf) or a
-      # `$ref` is passed through untouched.
+      # `$ref` is passed through untouched. Pass `capture_model: false` to opt out.
       #
       # @param tools [Array<Hash>] `tools/list` entries
       # @return [Array<Hash>]
-      def prepare_tool_list(tools, context: true, report_missing: false, capture_model: false)
+      def prepare_tool_list(tools, context: true, report_missing: false, capture_model: true)
         options = Options.new(context: context, capture_model: capture_model)
         prepared = tools.map do |tool|
           next tool unless tool.is_a?(Hash) && (options.context_enabled? || options.capture_model_enabled?)
