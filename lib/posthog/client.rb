@@ -44,8 +44,15 @@ module PostHog
       $is_server
       $lib
       $lib_version
+      $release_id
     ].flat_map { |key| [key, key.to_sym] }.freeze
     private_constant :MINIMAL_FLAG_CALLED_EVENT_PROPERTIES
+
+    # Holds the id that `posthog-cli release resolve` prints. Error tracking
+    # links an exception to its release by this id, because a Ruby app has no
+    # build step that could inject it.
+    RELEASE_ID_ENV_VAR = 'POSTHOG_RELEASE_ID'
+    private_constant :RELEASE_ID_ENV_VAR
 
     # Thread-safe tracking of client instances per API key for singleton warnings
     @instances_by_api_key = {}
@@ -217,6 +224,7 @@ module PostHog
 
       @before_send = opts[:before_send]
       @is_server = opts.fetch(:is_server, true) != false
+      @release_id = normalize_string_option(ENV.fetch(RELEASE_ID_ENV_VAR, nil), blank_as_nil: true)
       @deprecation_emitted_for = Concurrent::Set.new
     end
 
@@ -1137,6 +1145,8 @@ module PostHog
     def enqueue(action)
       return false if @disabled || shutdown?
 
+      # Every event type passes through here, and before_send still sees the id.
+      action = add_release_id(action)
       action = process_before_send(action)
       return false if action.nil? || action.empty?
 
@@ -1166,6 +1176,17 @@ module PostHog
         )
         false
       end
+    end
+
+    # A `$release_id` the caller or the request context already set wins.
+    def add_release_id(action)
+      return action if @release_id.nil?
+
+      properties = action[:properties]
+      return action unless properties.is_a?(Hash)
+      return action if properties.key?('$release_id') || properties.key?(:$release_id)
+
+      action.merge(properties: properties.merge('$release_id' => @release_id))
     end
 
     def normalize_string_option(value, blank_as_nil: false)

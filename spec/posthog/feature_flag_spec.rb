@@ -5549,6 +5549,15 @@ module PostHog
           expect(properties['$groups']).to eq(company: 'id_5')
         end
 
+        it 'keeps $release_id from POSTHOG_RELEASE_ID on minimal events' do
+          allow(ENV).to receive(:fetch).and_call_original
+          allow(ENV).to receive(:fetch).with('POSTHOG_RELEASE_ID', nil).and_return('release-abc')
+          stub_definitions(local_definitions)
+          c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+
+          expect(flag_called_properties(c, 'test-flag')['$release_id']).to eq('release-abc')
+        end
+
         it 'sends the full event when the flag has an experiment' do
           stub_definitions(local_definitions(has_experiment: true))
           c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
