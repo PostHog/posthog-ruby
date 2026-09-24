@@ -59,7 +59,7 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
     let(:transport) { MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true, enable_json_response: true) }
 
     it 'mints a session token on initialize, recovers it on replay, and stamps transport identity' do
-      PostHog::MCP.instrument(server, client)
+      PostHog::MCP.instrument(server, client, enable_conversation_id: false)
       response = transport.call(env_for(initialize_body, 'user-agent' => 'claude-code/2.1.0 (cli)', 'x-anthropic-client' => 'cli'))
       expect(response[0]).to eq(200)
       token = response[1]['mcp-session-id']
@@ -107,7 +107,7 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
     let(:transport) { MCP::Server::Transports::StreamableHTTPTransport.new(server, enable_json_response: true) }
 
     it 'hashes the transport session id deterministically across requests' do
-      PostHog::MCP.instrument(server, client)
+      PostHog::MCP.instrument(server, client, enable_conversation_id: false)
       response = transport.call(env_for(initialize_body))
       session_id = response[1]['mcp-session-id']
       expect(PostHog::MCP.decode_session_id(session_id)).to be_nil
@@ -121,7 +121,9 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
     end
 
     it 'runs get_more_tools through the real request lifecycle so in-flight entries are released' do
-      PostHog::MCP.instrument(server, client, report_missing: true)
+      PostHog::MCP.instrument(
+        server, client, report_missing: true, capture_model: false, enable_conversation_id: false
+      )
       session_id = transport.call(env_for(initialize_body))[1]['mcp-session-id']
       3.times do |i|
         response = transport.call(env_for(rpc(i + 2, 'tools/call', { name: 'get_more_tools', arguments: { context: 'csv export' } }),
@@ -145,7 +147,9 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
     let(:identify) { ->(_request, extra) { { distinct_id: extra['headers']['user-agent'] } } }
 
     before do
-      PostHogMcpHttpSpecCaptureTool.analytics = PostHog::MCP.instrument(server, client, identify: identify)
+      PostHogMcpHttpSpecCaptureTool.analytics = PostHog::MCP.instrument(
+        server, client, identify: identify, enable_conversation_id: false
+      )
       PostHogMcpHttpSpecCaptureTool.before_capture = nil
     end
 
@@ -229,7 +233,7 @@ RSpec.describe PostHog::MCP::RackMiddleware do
   end
 
   it 'mints from the instrumented server without reading the request body' do
-    PostHog::MCP.instrument(server, client)
+    PostHog::MCP.instrument(server, client, enable_conversation_id: false)
     env = { 'REQUEST_METHOD' => 'POST', 'rack.input' => PostHogMcpUnreadableInput.new }
     app = ->(_e) { [200, { 'content-type' => 'application/json' }, [server.handle_json(initialize_json)]] }
     status, headers, = described_class.new(app).call(env)
@@ -245,7 +249,7 @@ RSpec.describe PostHog::MCP::RackMiddleware do
   end
 
   it 'publishes the request headers so a server below it sees the HTTP context' do
-    PostHog::MCP.instrument(server, client)
+    PostHog::MCP.instrument(server, client, enable_conversation_id: false)
     env = env_for(initialize_json, 'user-agent' => 'claude-code/2.1.0 (cli)', 'x-anthropic-client' => 'cli')
     _, headers, = described_class.new(dispatching_app).call(env)
     token = headers['mcp-session-id']

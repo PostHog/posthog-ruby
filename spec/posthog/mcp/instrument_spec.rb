@@ -166,7 +166,7 @@ RSpec.describe PostHog::MCP do
         seen << data[:method]
         handler.call
       })
-      described_class.instrument(server, client)
+      described_class.instrument(server, client, capture_model: false, enable_conversation_id: false)
       server.handle(rpc(1, 'tools/list'))
       expect(seen).to eq(['tools/list'])
       expect(drain_events(client).map { |e| e[:event] }).to include('$mcp_tools_list')
@@ -177,7 +177,7 @@ RSpec.describe PostHog::MCP do
     before { allow(Kernel).to receive(:warn) }
 
     it 'captures initialize, tools/list and a successful tool call with $lib override' do
-      described_class.instrument(server, client)
+      described_class.instrument(server, client, capture_model: false, enable_conversation_id: false)
       response = server.handle(initialize_request)
       expect(response[:result][:protocolVersion]).to eq('2025-06-18')
       list = server.handle(rpc(2, 'tools/list'))
@@ -217,7 +217,7 @@ RSpec.describe PostHog::MCP do
     end
 
     it 'strips the injected context before the tool sees it but keeps a tool-owned context' do
-      described_class.instrument(server, client)
+      described_class.instrument(server, client, capture_model: false, enable_conversation_id: false)
       result = server.handle(rpc(1, 'tools/call', { name: 'owns_context', arguments: { context: 'mine' } }))
       expect(result[:result][:content][0][:text]).to eq('ctx=mine')
       list = server.handle(rpc(2, 'tools/list'))
@@ -247,7 +247,7 @@ RSpec.describe PostHog::MCP do
     end
 
     it 'treats isError results as errors and honours enable_exception_autocapture: false' do
-      described_class.instrument(server, client, enable_exception_autocapture: false)
+      described_class.instrument(server, client, enable_exception_autocapture: false, enable_conversation_id: false)
       server.handle(rpc(1, 'tools/call', { name: 'soft_fail', arguments: {} }))
       events = drain_events(client)
       expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
@@ -342,9 +342,9 @@ RSpec.describe PostHog::MCP do
         calls += 1
         { distinct_id: 'user-1', properties: { name: 'Alice' }, groups: { organization: 'org_123' } }
       end
-      described_class.instrument(server, client, identify: identify, event_properties: lambda { |_r, _e|
-        { env: 'production' }
-      })
+      event_properties = ->(_request, _extra) { { env: 'production' } }
+      described_class.instrument(server, client, identify: identify, enable_conversation_id: false,
+                                                 event_properties: event_properties)
       server.handle(initialize_request)
       3.times { |i| server.handle(rpc(i + 2, 'tools/call', { name: 'echo', arguments: { message: 'x' } })) }
       events = drain_events(client)
@@ -384,7 +384,9 @@ RSpec.describe PostHog::MCP do
       end
       shared = MCP::Server.new(name: 'spec-server', version: '9.9.9',
                                tools: [PostHogMcpSpecParkedTool, PostHogMcpSpecEchoTool])
-      PostHogMcpSpecParkedTool.analytics = described_class.instrument(shared, client, identify: identify)
+      PostHogMcpSpecParkedTool.analytics = described_class.instrument(
+        shared, client, identify: identify, enable_conversation_id: false
+      )
 
       alice = Thread.new { shared.handle(rpc(1, 'tools/call', { name: 'parked', arguments: { user: 'alice' } })) }
       PostHogMcpSpecParkedTool.entered.pop
@@ -420,7 +422,7 @@ RSpec.describe PostHog::MCP do
         payload['properties']['bloat'] = 'x' * 40_000
         payload
       end
-      described_class.instrument(server, client, before_send: before_send)
+      described_class.instrument(server, client, before_send: before_send, enable_conversation_id: false)
       server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
       events = drain_events(client)
       # The hook runs after truncation, so without a second pass the batch would
@@ -453,13 +455,13 @@ RSpec.describe PostHog::MCP do
   describe 'conversation ids, get_more_tools and llm_model' do
     before { allow(Kernel).to receive(:warn) }
 
-    it 'mints, prompts back, mirrors into structuredContent and anchors the session on an echo' do
-      described_class.instrument(server, client, enable_conversation_id: true)
+    it 'mints, prompts back, mirrors into structuredContent and anchors the session on an echo by default' do
+      described_class.instrument(server, client)
       list = server.handle(rpc(1, 'tools/list'))
       structured = list[:result][:tools].find { |t| t[:name] == 'structured' }
       expect(structured[:inputSchema][:properties]).to have_key(:conversation_id)
       expect(structured[:outputSchema][:properties]).to have_key(:_mcp_instructions)
-      expect(structured[:inputSchema][:required]).to eq(['context'])
+      expect(structured[:inputSchema][:required]).to contain_exactly('context', 'llm_model')
 
       first = server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi', context: 'c' } }))
       prompt_back = JSON.parse(first[:result][:content][1][:text])
@@ -524,7 +526,7 @@ RSpec.describe PostHog::MCP do
     end
 
     it 'advertises and intercepts get_more_tools as $mcp_missing_capability' do
-      described_class.instrument(server, client, report_missing: true)
+      described_class.instrument(server, client, report_missing: true, capture_model: false)
       list = server.handle(rpc(1, 'tools/list'))
       virtual = list[:result][:tools].last
       expect(virtual[:name]).to eq('get_more_tools')
@@ -585,8 +587,8 @@ RSpec.describe PostHog::MCP do
                                               '$mcp_llm_model_source' => 'self_reported')
     end
 
-    it 'captures llm_model from the injected argument or client metadata' do
-      described_class.instrument(server, client, capture_model: true)
+    it 'captures llm_model from the injected argument or client metadata by default' do
+      described_class.instrument(server, client)
       server.handle(rpc(1, 'tools/call',
                         { name: 'echo', arguments: { message: 'hi', llm_model: ' claude-opus-4-8 ' } }))
       server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi', llm_model: 'unknown' } }))

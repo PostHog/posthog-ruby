@@ -17,10 +17,13 @@ module PostHog
       # @param opts [Hash] {PostHog::Client} options plus:
       # @option opts [String] :missing_capability_tool_name name of the virtual tool (default `get_more_tools`)
       # @option opts [Boolean] :mcp_exception_autocapture emit a sibling `$exception` for failed calls (default true)
+      # @option opts [Boolean, ModelOptions] :capture_model capture the calling model (default true)
       def initialize(opts = {})
         opts = opts.transform_keys(&:to_sym)
         @missing_capability_tool_name = opts.delete(:missing_capability_tool_name) || Tools::GET_MORE_TOOLS_NAME
         @mcp_exception_autocapture = opts.delete(:mcp_exception_autocapture) != false
+        capture_model = opts.key?(:capture_model) ? opts.delete(:capture_model) : true
+        @capture_model_option = Options.new(capture_model: capture_model).capture_model
         super
         @mcp_sink = Sink.new(self)
         @mcp_options = Options.new(
@@ -113,16 +116,20 @@ module PostHog
         emit(event)
       end
 
-      # Inject the `context` argument (and, with `capture_model`, `llm_model`) into
+      # Inject the `context` and `llm_model` arguments into
       # every tool descriptor (Hash with `inputSchema`) so agents state their intent,
       # and optionally append the `get_more_tools` virtual tool. Returns a new Array
       # of new Hashes. A tool whose schema is composed (oneOf/allOf/anyOf) or a
-      # `$ref` is passed through untouched.
+      # `$ref` is passed through untouched. Pass `capture_model: false` here or
+      # to {#initialize} to disable model capture for this client, including
+      # extraction from later tool calls.
       #
       # @param tools [Array<Hash>] `tools/list` entries
       # @return [Array<Hash>]
-      def prepare_tool_list(tools, context: true, report_missing: false, capture_model: false)
+      def prepare_tool_list(tools, context: true, report_missing: false, capture_model: @capture_model_option)
         options = Options.new(context: context, capture_model: capture_model)
+        @capture_model_option = false unless options.capture_model_enabled?
+        options = Options.new(context: context, capture_model: false) if @capture_model_option == false
         prepared = tools.map do |tool|
           next tool unless tool.is_a?(Hash) && (options.context_enabled? || options.capture_model_enabled?)
 
@@ -165,7 +172,7 @@ module PostHog
       # @return [PreparedToolCall]
       def prepare_tool_call(name, args = nil, input_schema: nil)
         intent = tool_declares?(input_schema, 'context') ? nil : Intent.normalize(argument(args, 'context'))
-        model = if tool_declares?(input_schema, ModelCapture::PARAM_NAME)
+        model = if @capture_model_option == false || tool_declares?(input_schema, ModelCapture::PARAM_NAME)
                   nil
                 else
                   ModelCapture.normalize(argument(args, ModelCapture::PARAM_NAME))
@@ -199,6 +206,8 @@ module PostHog
       end
 
       def apply_model(event, llm_model, source)
+        return if @capture_model_option == false
+
         model = ModelCapture.normalize(llm_model)
         return unless model
 
@@ -236,9 +245,11 @@ module PostHog
       def strip_injected(args, input_schema)
         return args unless args.is_a?(Hash)
 
-        keys = ['context', ModelCapture::PARAM_NAME].reject { |param| tool_declares?(input_schema, param) }
-                                                    .flat_map { |param| [param.to_sym, param] }
-                                                    .select { |key| args.key?(key) }
+        params = ['context']
+        params << ModelCapture::PARAM_NAME unless @capture_model_option == false
+        keys = params.reject { |param| tool_declares?(input_schema, param) }
+                     .flat_map { |param| [param.to_sym, param] }
+                     .select { |key| args.key?(key) }
         keys.empty? ? args : args.except(*keys)
       end
     end
