@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.26.0
+
+### Minor Changes
+
+- 34f209d: Enable MCP model capture and conversation ids by default, matching the JavaScript and Python MCP SDKs. Pass `capture_model: false` or `enable_conversation_id: false` to opt out.
+
 ## 3.25.0
 
 ### Minor Changes
