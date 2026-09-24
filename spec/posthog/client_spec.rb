@@ -2197,6 +2197,88 @@ module PostHog
       end
     end
 
+    describe 'release id from POSTHOG_RELEASE_ID' do
+      let(:release_id) { '01928f3c-6f1d-7c5e-9a1b-2c3d4e5f6a7b' }
+      let(:release_id_env) { release_id }
+      let(:client) { Client.new(api_key: API_KEY, test_mode: true) }
+
+      before do
+        allow(ENV).to receive(:fetch).and_call_original
+        allow(ENV).to receive(:fetch).with('POSTHOG_RELEASE_ID', nil).and_return(release_id_env)
+      end
+
+      {
+        'capture' => ->(c) { c.capture(distinct_id: 'user', event: 'Event') },
+        'capture_exception' => ->(c) { c.capture_exception(StandardError.new('boom'), 'user') },
+        'identify' => ->(c) { c.identify(distinct_id: 'user', properties: { 'plan' => 'pro' }) },
+        'group_identify' => ->(c) { c.group_identify(group_type: 'company', group_key: 'id:5') },
+        'alias' => ->(c) { c.alias(distinct_id: 'user', alias: 'anon') }
+      }.each do |method_name, call|
+        it "sends $release_id on #{method_name} events" do
+          call.call(client)
+
+          expect(client.dequeue_last_message[:properties]['$release_id']).to eq(release_id)
+        end
+      end
+
+      it 'keeps $release_id out of the person and group properties' do
+        client.identify(distinct_id: 'user', properties: { 'plan' => 'pro' })
+        expect(client.dequeue_last_message[:$set]).to eq('plan' => 'pro')
+
+        client.group_identify(group_type: 'company', group_key: 'id:5', properties: { 'name' => 'Acme' })
+        expect(client.dequeue_last_message[:properties][:$group_set]).to eq('name' => 'Acme')
+      end
+
+      [
+        ['a string key', { '$release_id' => 'explicit' }, '$release_id'],
+        ['a symbol key', { '$release_id': 'explicit' }, :$release_id]
+      ].each do |description, properties, key|
+        it "keeps an explicit $release_id passed with #{description}" do
+          client.capture(distinct_id: 'user', event: 'Event', properties: properties)
+
+          sent = client.dequeue_last_message[:properties]
+          expect(sent[key]).to eq('explicit')
+          expect(sent.keys.count { |k| k.to_s == '$release_id' }).to eq(1)
+        end
+      end
+
+      it 'passes $release_id to before_send, which can remove it' do
+        client = Client.new(
+          api_key: API_KEY,
+          test_mode: true,
+          before_send: lambda do |event|
+            event[:properties].delete('$release_id')
+            event
+          end
+        )
+        client.capture(distinct_id: 'user', event: 'Event')
+
+        expect(client.dequeue_last_message[:properties]).not_to have_key('$release_id')
+      end
+
+      context 'when the value has surrounding whitespace' do
+        let(:release_id_env) { "  #{release_id}\n" }
+
+        it 'trims it' do
+          client.capture(distinct_id: 'user', event: 'Event')
+
+          expect(client.dequeue_last_message[:properties]['$release_id']).to eq(release_id)
+        end
+      end
+
+      [nil, '', "  \n"].each do |value|
+        context "when the variable is #{value.inspect}" do
+          let(:release_id_env) { value }
+
+          it 'omits $release_id' do
+            client.capture(distinct_id: 'user', event: 'Event')
+
+            expect(client.dequeue_last_message[:properties]).not_to have_key('$release_id')
+          end
+        end
+      end
+    end
+
     context 'common' do
       let(:message_id) { '123e4567-e89b-12d3-a456-426614174000' }
 
