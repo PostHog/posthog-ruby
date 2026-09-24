@@ -109,6 +109,41 @@ RSpec.describe PostHog::MCP::Client do
     expect(without[1][:inputSchema][:properties].keys).to eq([:context])
   end
 
+  it 'does not extract or strip a model after opting out during tool preparation' do
+    tools = [{ name: 'search', inputSchema: { type: 'object', properties: {} } }]
+    client.prepare_tool_list(tools, capture_model: false)
+
+    call = client.prepare_tool_call('search', { llm_model: 'private-model' }, input_schema: tools[0][:inputSchema])
+    expect(call.args).to eq(llm_model: 'private-model')
+    expect(call.llm_model).to be_nil
+    expect(call.llm_model_source).to be_nil
+
+    client.capture_tool_call('search', llm_model: call.llm_model, llm_model_source: call.llm_model_source)
+    expect(client.dequeue_last_message[:properties]).not_to have_key('$mcp_llm_model')
+
+    client.capture_tool_call('search', llm_model: 'explicit-model')
+    expect(client.dequeue_last_message[:properties]).not_to have_key('$mcp_llm_model')
+    expect(client.prepare_tool_list(tools)[0][:inputSchema][:properties]).not_to have_key(:llm_model)
+    expect(client.prepare_tool_list(tools, capture_model: true)[0][:inputSchema][:properties])
+      .not_to have_key(:llm_model)
+  end
+
+  it 'honours a constructor model opt-out even before preparing a tool list' do
+    quiet = described_class.new(api_key: 'phc_test', test_mode: true, capture_model: false)
+    call = quiet.prepare_tool_call('search', { llm_model: 'private-model' }, input_schema: { properties: {} })
+    expect(call.args).to eq(llm_model: 'private-model')
+    expect(call.llm_model).to be_nil
+    prepared = quiet.prepare_tool_list([{ name: 'search', inputSchema: { properties: {} } }])
+    expect(prepared[0][:inputSchema][:properties]).not_to have_key(:llm_model)
+  end
+
+  it 'uses the constructor model description for prepared tools' do
+    model = PostHog::MCP::ModelOptions.new(description: 'Which model?')
+    configured = described_class.new(api_key: 'phc_test', test_mode: true, capture_model: model)
+    prepared = configured.prepare_tool_list([{ name: 'search', inputSchema: { properties: {} } }])
+    expect(prepared[0][:inputSchema][:properties][:llm_model][:description]).to eq('Which model?')
+  end
+
   it 'round-trips an injected llm_model and leaves a tool-declared one in args' do
     injected = { type: 'object', properties: { title: { type: 'string' } } }
     call = client.prepare_tool_call('add', { title: 'x', llm_model: ' claude-opus-4-8 ' }, input_schema: injected)
