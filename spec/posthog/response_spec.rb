@@ -18,12 +18,12 @@ module PostHog
 
       subject { described_class.new(status, error) }
 
-      it 'sets the instance variable status' do
-        expect(subject.instance_variable_get(:@status)).to eq(status)
+      it 'exposes the supplied status' do
+        expect(subject.status).to eq(status)
       end
 
-      it 'sets the instance variable error' do
-        expect(subject.instance_variable_get(:@error)).to eq(error)
+      it 'exposes the supplied error' do
+        expect(subject.error).to eq(error)
       end
     end
   end

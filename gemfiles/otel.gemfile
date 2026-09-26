@@ -1,0 +1,7 @@
+# frozen_string_literal: true
+
+eval_gemfile '../Gemfile'
+
+gem 'opentelemetry-exporter-otlp-logs'
+gem 'opentelemetry-logs-sdk', '>= 0.6.0'
+gem 'opentelemetry-sdk'

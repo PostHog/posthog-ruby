@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'spec_helper'
+require 'posthog'
 require 'isolated/json_example'
 
 describe 'with active_support and oj' do

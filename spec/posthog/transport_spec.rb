@@ -16,18 +16,18 @@ module PostHog
 
       before { allow(Net::HTTP).to receive(:new) { net_http } }
 
-      it 'sets an initalized Net::HTTP read_timeout' do
-        expect(net_http).to receive(:use_ssl=)
+      it 'enables TLS by default' do
+        expect(net_http).to receive(:use_ssl=).with(true)
         described_class.new
       end
 
       it 'sets an initalized Net::HTTP read_timeout' do
-        expect(net_http).to receive(:read_timeout=)
+        expect(net_http).to receive(:read_timeout=).with(8)
         described_class.new
       end
 
       it 'sets an initalized Net::HTTP open_timeout' do
-        expect(net_http).to receive(:open_timeout=)
+        expect(net_http).to receive(:open_timeout=).with(4)
         described_class.new
       end
 
@@ -184,7 +184,7 @@ module PostHog
       context 'a real request' do
         RSpec.shared_examples('retried request') do |status_code, body|
           let(:status_code) { status_code }
-          let(:body) { body }
+          let(:response_body) { body }
           let(:retries) { 4 }
           let(:backoff_policy) { FakeBackoffPolicy.new([1000, 1000, 1000]) }
           subject do
@@ -200,20 +200,21 @@ module PostHog
               .times
               .with(1)
               .and_return(nil)
-            subject.send(api_key, batch)
+            expect(subject.send(api_key, batch).status).to eq(status_code)
+            expect(subject.instance_variable_get(:@http)).to have_received(:request).exactly(retries).times
           end
         end
 
         RSpec.shared_examples('non-retried request') do |status_code, body|
           let(:status_code) { status_code }
-          let(:body) { body }
+          let(:response_body) { body }
           let(:retries) { 4 }
-          let(:backoff) { 1 }
-          subject { described_class.new(retries: retries, backoff: backoff) }
+          subject { described_class.new(retries: retries) }
 
           it 'does not retry the request' do
             expect(subject).to receive(:sleep).never
-            subject.send(api_key, batch)
+            expect(subject.send(api_key, batch).status).to eq(status_code)
+            expect(subject.instance_variable_get(:@http)).to have_received(:request).once
           end
         end
 
@@ -318,7 +319,7 @@ module PostHog
           it_behaves_like('retried request', 500, '{}')
           it_behaves_like('retried request', 503, '{}')
 
-          # All 4xx errors other than 429 (rate limited) must be retried
+          it_behaves_like('retried request', 408, '{}')
           it_behaves_like('retried request', 429, '{}')
           it_behaves_like('non-retried request', 404, '{}')
           it_behaves_like('non-retried request', 400, '{}')
@@ -341,6 +342,24 @@ module PostHog
             expect(subject).to receive(:sleep).once.with(0.0).and_return(nil)
 
             subject.send(api_key, batch)
+          end
+
+          [
+            ['seconds', '2.5', 2.5],
+            ['a future HTTP date', 'Wed, 01 Jan 2025 00:00:05 GMT', 5.0],
+            ['a past HTTP date', 'Tue, 31 Dec 2024 23:59:59 GMT', 1.0],
+            ['a negative value', '-1', 1.0],
+            ['an invalid value', 'invalid', 1.0],
+            ['an empty value', '', 1.0]
+          ].each do |description, header, delay|
+            it "handles Retry-After with #{description}" do
+              allow(Time).to receive(:now).and_return(Time.utc(2025, 1, 1))
+              allow(response).to receive(:[]).with('Retry-After').and_return(header)
+              expect(subject).to receive(:sleep).once.with(delay)
+
+              expect(subject.send(api_key, batch).status).to eq(429)
+              expect(subject.instance_variable_get(:@http)).to have_received(:request).twice
+            end
           end
 
           it 'does not reuse a stale Retry-After header after retries are exhausted' do

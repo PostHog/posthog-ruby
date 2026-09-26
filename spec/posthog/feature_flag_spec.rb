@@ -1349,7 +1349,7 @@ module PostHog
               {
                 'aggregation_group_type_index' => 0,
                 'properties' => [],
-                'rollout_percentage' => 100
+                'rollout_percentage' => 50
               }
             ]
           }
@@ -1364,11 +1364,22 @@ module PostHog
 
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
+        poller = c.instance_variable_get(:@feature_flags_poller)
+        allow(poller).to receive(:_hash).and_call_original
+        allow(poller).to receive(:_hash).with('rollout-flag', 'acme').and_return(0.25)
+        allow(poller).to receive(:_hash).with('rollout-flag', 'other').and_return(0.75)
+        allow(poller).to receive(:_hash).with('rollout-flag', 'any-distinct-id').and_return(0.75)
+
         expect(c.get_feature_flag(
                  'rollout-flag', 'any-distinct-id',
                  groups: { 'company' => 'acme' },
                  group_properties: { 'company' => {} }
                )).to eq(true)
+        expect(c.get_feature_flag(
+                 'rollout-flag', 'any-distinct-id',
+                 groups: { 'company' => 'other' },
+                 group_properties: { 'company' => {} }
+               )).to eq(false)
         assert_not_requested :post, flags_endpoint
       end
     end
@@ -4853,7 +4864,11 @@ module PostHog
 
       c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
 
-      expect(c.get_remote_config_payload(encrypted_payload_flag_key))
+      expect(c.get_remote_config_payload(encrypted_payload_flag_key)).to eq('super secret payload in plaintext')
+      expect(WebMock).to have_requested(
+        :get,
+        "https://us.i.posthog.com/api/projects/@current/feature_flags/#{encrypted_payload_flag_key}/remote_config?token=testsecret"
+      ).once
       assert_not_requested :post, flags_endpoint
     end
 

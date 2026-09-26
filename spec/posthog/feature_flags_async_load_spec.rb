@@ -16,10 +16,16 @@ module PostHog
       }
     end
     let(:definitions_body) { { flags: [beta_flag_definition] }.to_json }
+    let(:release) { Queue.new }
 
-    # Stop the poller so it doesn't keep hitting (reset) WebMock stubs for the
-    # rest of the suite.
-    after { @client&.shutdown }
+    after do
+      release.close
+      if @caller
+        @caller.kill unless @caller.join(2)
+        @caller.join
+      end
+      @client&.shutdown
+    end
 
     def build_client(**opts)
       @client = Client.new(
@@ -36,42 +42,36 @@ module PostHog
       client.evaluate_flags('distinct-id', only_evaluate_locally: true).get_flag(key)
     end
 
-    def monotonic_now
-      Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    end
-
     describe 'Client.new' do
       it 'returns immediately, fetching flag definitions asynchronously' do
+        started = Queue.new
         stub_request(:get, definitions_endpoint).to_return do
-          sleep 1
+          started << true
+          release.pop
           { status: 200, body: definitions_body }
         end
 
-        started = monotonic_now
-        client = build_client
-        elapsed = monotonic_now - started
-
-        expect(elapsed).to be < 0.5
-
-        # no flag definitions yet
+        @caller = Thread.new { build_client }
+        eventually { expect(started).not_to be_empty }
+        expect(@caller.join(1)).to eq(@caller)
+        client = @caller.value
         expect(client.feature_flags_loaded?).to be(false)
 
-        # flag definitions loaded later, asynchronously
+        release << true
         eventually { expect(client.feature_flags_loaded?).to be(true) }
         expect(local_flag_value(client)).to be(true)
       end
 
       it 'keeps the default synchronous load when the option is not set' do
+        fetch_thread = nil
         stub_request(:get, definitions_endpoint).to_return do
-          sleep 0.3
+          fetch_thread = Thread.current
           { status: 200, body: definitions_body }
         end
 
-        started = monotonic_now
         client = @client = Client.new(api_key: API_KEY, secret_key: API_KEY, test_mode: true)
-        elapsed = monotonic_now - started
 
-        expect(elapsed).to be >= 0.3
+        expect(fetch_thread).to eq(Thread.current)
         expect(client.feature_flags_loaded?).to be(true)
         expect(local_flag_value(client)).to be(true)
       end
@@ -82,20 +82,16 @@ module PostHog
         fetches_started = Concurrent::AtomicFixnum.new(0)
         stub_request(:get, definitions_endpoint).to_return do
           fetches_started.increment
-          sleep 1
+          release.pop
           { status: 200, body: definitions_body }
         end
 
         client = build_client
         eventually { expect(fetches_started.value).to eq(1) }
+        @caller = Thread.new { Array.new(3) { local_flag_value(client) } }
 
-        started = monotonic_now
-        values = Array.new(3) { local_flag_value(client) }
-        elapsed = monotonic_now - started
-
-        # the poller's initial load is still sleeping in the stub
-        expect(values).to eq([nil, nil, nil])
-        expect(elapsed).to be < 0.5
+        expect(@caller.join(1)).to eq(@caller)
+        expect(@caller.value).to eq([nil, nil, nil])
         expect(fetches_started.value).to eq(1)
       end
     end
@@ -107,16 +103,19 @@ module PostHog
           if attempts.increment == 1
             { status: 500, body: 'error' }
           else
+            release.pop
             { status: 200, body: definitions_body }
           end
         end
 
         client = build_client(feature_flags_polling_interval: 0.2)
-
+        eventually { expect(attempts.value).to be >= 2 }
+        expect(client.feature_flags_loaded?).to be(false)
         expect(local_flag_value(client)).to be_nil
+
+        release.close
         eventually { expect(client.feature_flags_loaded?).to be(true) }
         expect(local_flag_value(client)).to be(true)
-        expect(attempts.value).to be >= 2
       end
     end
 
@@ -126,16 +125,15 @@ module PostHog
         client = build_client
         eventually { expect(client.feature_flags_loaded?).to be(true) }
 
+        fetch_thread = nil
         stub_request(:get, definitions_endpoint).to_return do
-          sleep 0.3
+          fetch_thread = Thread.current
           { status: 200, body: { flags: [beta_flag_definition.merge(key: 'newer-feature')] }.to_json }
         end
 
-        started = monotonic_now
         client.reload_feature_flags
-        elapsed = monotonic_now - started
 
-        expect(elapsed).to be >= 0.3
+        expect(fetch_thread).to eq(Thread.current)
         expect(local_flag_value(client, 'newer-feature')).to be(true)
       end
     end

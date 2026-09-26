@@ -8,6 +8,13 @@ RSpec.configure do |config|
   config.before(:each) do
     PostHog::Logging.logger = Logger.new(File::NULL) # Suppress all logging
     PostHog::Client.reset_instance_tracking!
+    @existing_posthog_clients = ObjectSpace.each_object(PostHog::Client).to_a
+  end
+
+  config.after(:each) do
+    (ObjectSpace.each_object(PostHog::Client).to_a - @existing_posthog_clients).each do |client|
+      client.shutdown(timeout: 0)
+    end
   end
 end
 
@@ -83,12 +90,12 @@ module AsyncHelper
   def eventually(options = {})
     timeout = options[:timeout] || 2
     interval = options[:interval] || 0.1
-    time_limit = Time.now + timeout
+    time_limit = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
     loop do
       yield
       return
     rescue RSpec::Expectations::ExpectationNotMetError => e
-      raise e if Time.now >= time_limit
+      raise e if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= time_limit
 
       sleep interval
     end
