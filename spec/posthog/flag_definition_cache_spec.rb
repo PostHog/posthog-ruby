@@ -436,11 +436,18 @@ module PostHog
 
         stub_request(:get, local_eval_url)
           .to_return(status: 200, body: sample_flags_data.to_json)
-        create_client_with_cache(provider: provider)
+        client = create_client_with_cache(provider: provider, stub_api: false)
+        expect(provider.stored_data[:flags].first[:active]).to be(true)
 
-        expect(provider.stored_data).not_to be_nil
+        updated = Marshal.load(Marshal.dump(sample_flags_data))
+        updated['flags'].first['active'] = false
+        stub_request(:get, local_eval_url).to_return(status: 200, body: updated.to_json)
+        client.reload_feature_flags
+
+        expect(provider.on_received_call_count).to eq(2)
         expect(provider.stored_data[:flags].length).to eq(2)
-        expect(provider.stored_data[:flags].first[:key]).to eq('test-flag')
+        expect(provider.stored_data[:flags].first).to include(key: 'test-flag', active: false)
+        expect(client.get_feature_flag('test-flag', 'user', only_evaluate_locally: true)).to be(false)
       end
 
       it 'roundtrip: data stored after API fetch can be loaded via JSON serialization' do

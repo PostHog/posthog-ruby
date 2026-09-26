@@ -35,7 +35,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         expect(described_class.install).to be_nil
         described_class.install # idempotent; should not warn again
 
-        expect(logger).to have_received(:warn).once
+        expect(logger).to have_received(:warn).with(/OpenTelemetry gems are missing/).once
       end
     end
 
@@ -51,7 +51,7 @@ RSpec.describe PostHog::Rails::Logs::Setup do
         PostHog::Logging.logger = logger
 
         expect(described_class.install).to be_nil
-        expect(logger).to have_received(:warn).once
+        expect(logger).to have_received(:warn).with(/no project token could be resolved/).once
       end
     end
 
@@ -154,10 +154,10 @@ RSpec.describe PostHog::Rails::Logs::Setup do
   end
 
   describe '.shutdown' do
-    it 'bounds the final flush with a timeout so a hung exporter cannot eat the SIGTERM grace period' do
+    it 'passes a two-second shutdown budget to the provider' do
       provider = double('provider')
       described_class.instance_variable_set(:@provider, provider)
-      expect(provider).to receive(:shutdown).with(timeout: described_class::SHUTDOWN_TIMEOUT_SECONDS)
+      expect(provider).to receive(:shutdown).with(timeout: 2)
 
       described_class.shutdown
     end

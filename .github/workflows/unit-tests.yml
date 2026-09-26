@@ -39,6 +39,29 @@ jobs:
       - name: Run RSpec tests
         run: bundle exec rspec
 
+  logs-integration:
+    name: Logs integration (Ruby ${{ matrix.ruby-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ruby-version: [3.3, 3.4]
+      fail-fast: false
+    env:
+      BUNDLE_GEMFILE: gemfiles/otel.gemfile
+      RAILS_ENV: test
+      GH_ACTIONS_UNIT_TESTS: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@984c0c890880bbf811283d6f09c4607c62d210a4 # v1.323.0
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler: 4.0.13
+          bundler-cache: true
+      - name: Require real OpenTelemetry dependencies
+        run: bundle exec ruby -e "require 'opentelemetry-sdk'; require 'opentelemetry-logs-sdk'; require 'opentelemetry/exporter/otlp_logs'"
+      - name: Run RSpec with real logs dependencies
+        run: bundle exec rspec
+
   rubocop:
     name: RuboCop
     runs-on: ubuntu-latest

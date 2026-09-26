@@ -19,13 +19,18 @@ RSpec.describe PostHog::MCP::SessionToken do
 
   it 'round-trips, omits absent fields, and clamps client fields to 200 chars' do
     token = described_class.encode(session_id: 'ses_0199aabb')
+    expect(JSON.parse(Base64.urlsafe_decode64(token))).to eq('sid' => 'ses_0199aabb')
     expect(described_class.decode(token).to_h).to eq(session_id: 'ses_0199aabb', client_name: nil, client_version: nil,
                                                      protocol_version: nil)
 
-    token = described_class.encode(session_id: 'ses_x', client_name: 'a' * 500, client_version: 'b' * 500)
-    decoded = described_class.decode(token)
-    expect(decoded.client_name.length).to eq(200)
-    expect(decoded.client_version.length).to eq(200)
+    token = described_class.encode(session_id: 'ses_x', client_name: 'a' * 500, client_version: 'b' * 500,
+                                   protocol_version: 'c' * 500)
+    expect(JSON.parse(Base64.urlsafe_decode64(token))).to eq(
+      'sid' => 'ses_x', 'cn' => 'a' * 200, 'cv' => 'b' * 200, 'pv' => 'c' * 200
+    )
+    decoded = described_class.decode(wire({ sid: 'ses_x', cn: 'a' * 500, cv: 'b' * 500, pv: 'c' * 500 }))
+    expect(decoded.to_h).to eq(session_id: 'ses_x', client_name: 'a' * 200, client_version: 'b' * 200,
+                               protocol_version: 'c' * 200)
 
     token = described_class.encode(session_id: 'ses_0199aabb', client_name: 'Клиент 😀 客户端', client_version: '1.0')
     expect(token).to match(/\A[A-Za-z0-9_-]+\z/)
@@ -48,6 +53,11 @@ RSpec.describe PostHog::MCP::SessionToken do
     huge = wire({ sid: 'ses_x', cn: 'y' * 8000 })
     expect(huge.length).to be > 4096
     expect(described_class.decode(huge)).to be_nil
+  end
+
+  it 'accepts a 128-character session id but rejects 129 characters' do
+    expect(described_class.decode(wire({ sid: 's' * 128 })).session_id).to eq('s' * 128)
+    expect(described_class.decode(wire({ sid: 's' * 129 }))).to be_nil
   end
 
   it 'drops malformed client fields but keeps the session id' do

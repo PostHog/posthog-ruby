@@ -475,18 +475,19 @@ module PostHog
         expect(client.dequeue_last_message[:properties][:caller_time]).to eq('2024-07-16T13:30:00.123+09:30')
       end
 
-      it 'does not error with the required options' do
-        expect do
-          client.capture Queued::CAPTURE
-          client.dequeue_last_message
-        end.to_not raise_error
-      end
+      [
+        { distinct_id: 'user', event: 'checkout', properties: { plan: 'pro' } },
+        { 'distinct_id' => 'user', 'event' => 'checkout', 'properties' => { 'plan' => 'pro' } }
+      ].each do |attributes|
+        it "enqueues capture with #{attributes.keys.first.class} keys" do
+          expect(client.capture(attributes)).to be(true)
+          expect(client.queued_messages).to eq(1)
+          message = client.dequeue_last_message
 
-      it 'does not error when given string keys' do
-        expect do
-          client.capture Utils.stringify_keys(Queued::CAPTURE)
-          client.dequeue_last_message
-        end.to_not raise_error
+          expect(message).to include(distinct_id: 'user', event: 'checkout')
+          expect(message[:properties].transform_keys(&:to_s)).to include('plan' => 'pro')
+          expect(client.queued_messages).to eq(0)
+        end
       end
 
       it 'converts time and date properties into iso8601 format' do
@@ -1525,18 +1526,19 @@ module PostHog
         expect { client.identify({}) }.to raise_error(ArgumentError)
       end
 
-      it 'does not error with the required options' do
-        expect do
-          client.identify Queued::IDENTIFY
-          client.dequeue_last_message
-        end.to_not raise_error
-      end
+      [
+        { distinct_id: 'user', properties: { plan: 'pro' } },
+        { 'distinct_id' => 'user', 'properties' => { 'plan' => 'pro' } }
+      ].each do |attributes|
+        it "enqueues identify with #{attributes.keys.first.class} keys" do
+          expect(client.identify(attributes)).to be(true)
+          expect(client.queued_messages).to eq(1)
+          message = client.dequeue_last_message
 
-      it 'does not error with the required options as strings' do
-        expect do
-          client.identify Utils.stringify_keys(Queued::IDENTIFY)
-          client.dequeue_last_message
-        end.to_not raise_error
+          expect(message).to include(distinct_id: 'user', event: '$identify')
+          expect(message[:$set].transform_keys(&:to_s)).to eq('plan' => 'pro')
+          expect(client.queued_messages).to eq(0)
+        end
       end
 
       it 'converts time and date properties into iso8601 format' do
@@ -1568,8 +1570,14 @@ module PostHog
     end
 
     describe '#group_identify' do
-      it 'errors without group key or group type' do
-        expect { client.group_identify({}) }.to raise_error(ArgumentError)
+      [
+        [{ group_type: 'organization' }, 'group_key must be given'],
+        [{ group_key: 'id:5' }, 'group type must be given']
+      ].each do |attributes, message|
+        it "rejects missing group identity: #{message}" do
+          expect { client.group_identify(attributes) }.to raise_error(ArgumentError, message)
+          expect(client.queued_messages).to eq(0)
+        end
       end
 
       it 'identifies group with unique id' do
@@ -1584,6 +1592,7 @@ module PostHog
         )
         msg = client.dequeue_last_message
 
+        expect(msg[:properties][:$group_key]).to eq('id:5')
         expect(msg[:distinct_id]).to eq('$organization_id:5')
         expect(msg[:event]).to eq('$groupidentify')
         expect(msg[:properties][:$group_type]).to eq('organization')
@@ -1627,12 +1636,19 @@ module PostHog
         expect { client.alias alias: 1234 }.to raise_error(ArgumentError)
       end
 
-      it 'does not error with the required options' do
-        expect { client.alias ALIAS.dup }.to_not raise_error
-      end
+      [
+        { distinct_id: 'user', alias: 'anonymous' },
+        { 'distinct_id' => 'user', 'alias' => 'anonymous' }
+      ].each do |attributes|
+        it "enqueues alias with #{attributes.keys.first.class} keys" do
+          expect(client.alias(attributes)).to be(true)
+          expect(client.queued_messages).to eq(1)
+          message = client.dequeue_last_message
 
-      it 'does not error with the required options as strings' do
-        expect { client.alias Utils.stringify_keys(ALIAS) }.to_not raise_error
+          expect(message).to include(distinct_id: 'user', event: '$create_alias')
+          expect(message[:properties]).to include(distinct_id: 'user', alias: 'anonymous')
+          expect(client.queued_messages).to eq(0)
+        end
       end
 
       it 'sets distinct_id property' do
@@ -1705,13 +1721,14 @@ module PostHog
         it 'completes when the process forks' do
           client.identify Queued::IDENTIFY
 
-          Process.fork do
+          pid = Process.fork do
             client.capture Queued::CAPTURE
-            client.flush
-            expect(client.queued_messages).to eq(0)
+            flushed = client.flush(timeout: 1)
+            exit!(flushed && client.queued_messages.zero? ? 0 : 1)
           end
 
-          Process.wait
+          _, status = Process.wait2(pid)
+          expect(status).to be_success
         end
 
         it 'completes after fork when the async worker has a partial batch' do

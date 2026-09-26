@@ -159,6 +159,11 @@ RSpec.describe PostHog::Rails::Logs::Appender do
   end
 
   describe 'rate limiting' do
+    before do
+      allow(Process).to receive(:clock_gettime).and_call_original
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(0)
+    end
+
     let(:rate_limiter) { PostHog::Rails::Logs::RateLimiter.new(2) }
 
     subject(:appender) { described_class.new(otel_logger, level: Logger::INFO, rate_limiter: rate_limiter) }
@@ -173,6 +178,7 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       5.times { |i| appender.info("msg #{i}") }
 
       expect(otel_logger.emitted.size).to eq(3)
+      expect(otel_logger.emitted.first(2).map { |record| record[:body] }).to eq(['msg 0', 'msg 1'])
       notice = otel_logger.emitted.last
       expect(notice[:body]).to include('rate cap reached (2 records/minute)')
       expect(notice[:severity_text]).to eq('WARN')
@@ -189,6 +195,11 @@ RSpec.describe PostHog::Rails::Logs::Appender do
   end
 
   describe 'before_send' do
+    before do
+      allow(Process).to receive(:clock_gettime).and_call_original
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(0)
+    end
+
     it 'sends the record returned by the callback' do
       before_send = proc { |record| record.merge(body: record[:body].gsub('secret', '[redacted]')) }
       appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
@@ -282,11 +293,17 @@ RSpec.describe PostHog::Rails::Logs::Appender do
     end
 
     it 'drops the record (rather than sending it unscrubbed) when the callback raises' do
-      before_send = proc { |_record| raise 'scrubber bug' }
+      before_send = proc do |record|
+        raise 'scrubber bug' if record[:body].include?('secret')
+
+        record
+      end
       appender = described_class.new(otel_logger, level: Logger::INFO, before_send: before_send)
 
       expect { appender.info('the secret token') }.not_to raise_error
       expect(otel_logger.emitted).to be_empty
+      appender.info('safe later record')
+      expect(otel_logger.emitted.map { |record| record[:body] }).to eq(['safe later record'])
     end
 
     # Cross-SDK spec: before_send runs before the rate cap, so callback-dropped
@@ -338,7 +355,8 @@ RSpec.describe PostHog::Rails::Logs::Appender do
       broadcast = ActiveSupport::BroadcastLogger.new(Logger.new(IO::NULL), appender)
 
       expect { broadcast.info('outer') }.not_to raise_error
-      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(['outer'])
+      broadcast.info('later')
+      expect(otel_logger.emitted.map { |r| r[:body] }).to eq(%w[outer later])
     end
   end
 

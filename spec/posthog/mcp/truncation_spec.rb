@@ -76,7 +76,7 @@ RSpec.describe PostHog::MCP::Truncation do
 
     it 'bounds user-supplied properties so the event fits the core client budget' do
       event = described_class.truncate_event('event_type' => 'custom', 'properties' => { 'rows' => (1..10_000).to_a })
-      expect(described_class.json_byte_size(event)).to be <= described_class::MAX_EVENT_BYTES
+      expect(JSON.generate(event).bytesize).to be <= described_class::MAX_EVENT_BYTES
       expect(event['properties']['rows'].length).to be <= described_class::MAX_BREADTH + 1
     end
 
@@ -88,7 +88,7 @@ RSpec.describe PostHog::MCP::Truncation do
 
       event = described_class.truncate_event('response' => content)
       expect(event['response']['content'][0]['text']).to end_with('...')
-      expect(described_class.json_byte_size(event)).to be <= described_class::MAX_EVENT_BYTES
+      expect(JSON.generate(event).bytesize).to be <= described_class::MAX_EVENT_BYTES
     end
 
     it 'keeps events within the byte budget without mutating the input' do
@@ -105,9 +105,9 @@ RSpec.describe PostHog::MCP::Truncation do
       cases.each do |input|
         event = input.merge('timestamp' => timestamp, 'event_type' => 'mcp:tools/call', 'is_error' => false)
         before = Marshal.load(Marshal.dump(event))
-        expect(described_class.json_byte_size(event)).to be > described_class::MAX_EVENT_BYTES
+        expect(JSON.generate(event).bytesize).to be > described_class::MAX_EVENT_BYTES
         out = described_class.truncate_event(event)
-        expect(described_class.json_byte_size(out)).to be <= described_class::MAX_EVENT_BYTES
+        expect(JSON.generate(out).bytesize).to be <= described_class::MAX_EVENT_BYTES
         expect(out['timestamp']).to eq(timestamp)
         expect(out['event_type']).to eq('mcp:tools/call')
         expect(event).to eq(before)
