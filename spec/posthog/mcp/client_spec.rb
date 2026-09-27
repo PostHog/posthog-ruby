@@ -3,6 +3,20 @@
 require_relative 'spec_helper'
 
 RSpec.describe PostHog::MCP::Client do
+  describe 'lifecycle' do
+    [{ test_mode: true }, { sync_mode: true }, {}].each do |options|
+      it "constructs and shuts down with #{options.inspect}" do
+        stub_request(:post, 'https://us.i.posthog.com/batch/').to_return(status: 200, body: '{}')
+        mcp_client = described_class.new({ api_key: 'phc_lifecycle' }.merge(options))
+        mcp_client.capture_tool_call('echo', distinct_id: 'user')
+
+        expect(mcp_client.shutdown(timeout: 2)).to be(true)
+        expect(mcp_client.shutdown(timeout: 2)).to be(true)
+        expect(mcp_client.capture(event: 'after shutdown', distinct_id: 'user')).to be(false)
+      end
+    end
+  end
+
   let(:client) { described_class.new(api_key: 'phc_test', test_mode: true) }
 
   it 'captures tool calls with $lib override, anonymous distinct id and error scalars' do
