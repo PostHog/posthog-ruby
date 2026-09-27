@@ -4,6 +4,31 @@ require_relative 'spec_helper'
 
 RSpec.describe PostHog::MCP::Client do
   describe 'lifecycle' do
+    [PostHog::Client, described_class].each do |client_class|
+      [{ test_mode: true }, { disable_singleton_warning: true }].each do |options|
+        it "preserves live-client warnings after #{client_class} shuts down with #{options.inspect}" do
+          clients = []
+          logger = PostHog::Logging.logger
+          allow(logger).to receive(:warn)
+          live = PostHog::Client.new(api_key: 'phc_shared_lifecycle')
+          clients << live
+          unregistered = client_class.new({ api_key: 'phc_shared_lifecycle' }.merge(options))
+          clients << unregistered
+
+          expect(unregistered.shutdown(timeout: 2)).to be(true)
+          expect(unregistered.shutdown(timeout: 2)).to be(true)
+          clients << PostHog::Client.new(api_key: 'phc_shared_lifecycle')
+          expect(logger).to have_received(:warn).with(a_string_including('Multiple PostHog client instances')).once
+
+          clients.each { |instance| instance.shutdown(timeout: 2) }
+          clients << PostHog::Client.new(api_key: 'phc_shared_lifecycle')
+          expect(logger).to have_received(:warn).with(a_string_including('Multiple PostHog client instances')).once
+        ensure
+          clients.each { |instance| instance.shutdown(timeout: 2) }
+        end
+      end
+    end
+
     [{ test_mode: true }, { sync_mode: true }, {}].each do |options|
       it "constructs and shuts down with #{options.inspect}" do
         stub_request(:post, 'https://us.i.posthog.com/batch/').to_return(status: 200, body: '{}')
