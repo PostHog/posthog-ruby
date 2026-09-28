@@ -8,13 +8,6 @@ RSpec.configure do |config|
   config.before(:each) do
     PostHog::Logging.logger = Logger.new(File::NULL) # Suppress all logging
     PostHog::Client.reset_instance_tracking!
-    @existing_posthog_clients = ObjectSpace.each_object(PostHog::Client).to_a
-  end
-
-  config.after(:each) do
-    (ObjectSpace.each_object(PostHog::Client).to_a - @existing_posthog_clients).each do |client|
-      client.shutdown(timeout: 0)
-    end
   end
 end
 
