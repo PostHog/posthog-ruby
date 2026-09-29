@@ -187,7 +187,8 @@ module PostHog
 
       # Warn when multiple clients are created with the same API key (can cause dropped events)
       unless @disabled || opts[:test_mode] || opts[:disable_singleton_warning]
-        previous_count = self.class._increment_instance_count(@api_key)
+        previous_count = PostHog::Client._increment_instance_count(@api_key)
+        @instance_registered = true
         if previous_count >= 1
           logger.warn(
             'Multiple PostHog client instances detected for the same API key. ' \
@@ -947,7 +948,7 @@ module PostHog
 
       flushed = false
       begin
-        self.class._decrement_instance_count(@api_key) unless @disabled
+        PostHog::Client._decrement_instance_count(@api_key) if @instance_registered
         @feature_flags_poller&.shutdown_poller
         flushed =
           if @sync_mode
