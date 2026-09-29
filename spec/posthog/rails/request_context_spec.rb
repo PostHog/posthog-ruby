@@ -182,8 +182,8 @@ RSpec.describe PostHog::Rails::RequestContext do
   it 'prefers authenticated Rails user context over tracing headers for exceptions' do
     PostHog::Rails.config.auto_capture_exceptions = true
 
-    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
-      client.capture_exception(exception, distinct_id, properties)
+    allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|
+      client.capture_exception(*args, **kwargs)
     end
 
     user = Struct.new(:id).new('rails-user')
@@ -223,7 +223,9 @@ RSpec.describe PostHog::Rails::RequestContext do
       )
     end.to raise_error(StandardError, 'boom')
 
+    expect(client.queued_messages).to eq(1)
     message = client.dequeue_last_message
+    expect(message[:properties]['$exception_list'].first['mechanism']['handled']).to be(false)
     expect(message[:event]).to eq('$exception')
     expect(message[:distinct_id]).to eq('rails-user')
     expect(message[:properties]['$session_id']).to eq('exception-session')
@@ -257,8 +259,8 @@ RSpec.describe PostHog::Rails::RequestContext do
       end
     end
 
-    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
-      client.capture_exception(exception, distinct_id, properties)
+    allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|
+      client.capture_exception(*args, **kwargs)
     end
 
     [
@@ -305,7 +307,9 @@ RSpec.describe PostHog::Rails::RequestContext do
         )
       end.to raise_error(StandardError, "boom #{scenario.fetch(:description)}")
 
+      expect(client.queued_messages).to eq(1)
       message = client.dequeue_last_message
+      expect(message[:properties]['$exception_list'].first['mechanism']['handled']).to be(false)
       expect(message[:event]).to eq('$exception')
       expect(message[:distinct_id]).to eq(scenario.fetch(:expected_distinct_id))
       expect(message[:properties]['$session_id']).to eq('exception-session')
@@ -315,8 +319,8 @@ RSpec.describe PostHog::Rails::RequestContext do
   it 'captures exceptions with tracing context and re-raises' do
     PostHog::Rails.config.auto_capture_exceptions = true
 
-    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
-      client.capture_exception(exception, distinct_id, properties)
+    allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|
+      client.capture_exception(*args, **kwargs)
     end
 
     app = lambda do |_env|
@@ -335,7 +339,9 @@ RSpec.describe PostHog::Rails::RequestContext do
       )
     end.to raise_error(StandardError, 'boom')
 
+    expect(client.queued_messages).to eq(1)
     message = client.dequeue_last_message
+    expect(message[:properties]['$exception_list'].first['mechanism']['handled']).to be(false)
     expect(message[:event]).to eq('$exception')
     expect(message[:distinct_id]).to eq('exception-user')
     expect(message[:properties]['$session_id']).to eq('exception-session')
@@ -348,8 +354,8 @@ RSpec.describe PostHog::Rails::RequestContext do
     PostHog::Rails.config.auto_capture_exceptions = true
     PostHog::Rails.config.use_tracing_headers = false
 
-    allow(PostHog).to receive(:capture_exception) do |exception, distinct_id, properties|
-      client.capture_exception(exception, distinct_id, properties)
+    allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|
+      client.capture_exception(*args, **kwargs)
     end
 
     app = lambda do |_env|
@@ -368,7 +374,9 @@ RSpec.describe PostHog::Rails::RequestContext do
       )
     end.to raise_error(StandardError, 'boom')
 
+    expect(client.queued_messages).to eq(1)
     message = client.dequeue_last_message
+    expect(message[:properties]['$exception_list'].first['mechanism']['handled']).to be(false)
     expect(message[:event]).to eq('$exception')
     expect(message[:distinct_id]).not_to eq('disabled-header-user')
     expect(message[:properties]['$process_person_profile']).to be false

@@ -27,9 +27,15 @@ RSpec.describe PostHog::MCP::Ids do
     end
 
     it 'is time-ordered and unique' do
+      allow(Process).to receive(:clock_gettime).and_call_original
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_REALTIME,
+                                                     :millisecond).and_return(1_700_000_000_000)
       first = Array.new(25) { described_class.uuid_v7 }
-      sleep 0.005
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_REALTIME,
+                                                     :millisecond).and_return(1_700_000_000_001)
       second = Array.new(25) { described_class.uuid_v7 }
+      expect(first.map { |uuid| uuid.delete('-')[0, 12].to_i(16) }.uniq).to eq([1_700_000_000_000])
+      expect(second.map { |uuid| uuid.delete('-')[0, 12].to_i(16) }.uniq).to eq([1_700_000_000_001])
       expect((first + second).uniq.length).to eq(50)
       expect(first.max).to be < second.min
     end

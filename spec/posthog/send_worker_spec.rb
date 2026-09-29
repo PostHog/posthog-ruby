@@ -7,11 +7,26 @@ module PostHog
     around do |example|
       PostHog::Transport.stub = true
       example.call
+    ensure
       PostHog::Transport.stub = false
     end
 
+    after do
+      Array(@worker_threads).each do |worker, thread|
+        worker.shutdown
+        thread.kill unless thread.join(1)
+        thread.join
+      end
+    end
+
+    def start_worker(worker)
+      thread = Thread.new { worker.run }
+      (@worker_threads ||= []) << [worker, thread]
+      thread
+    end
+
     def run_worker_until_idle(worker, queue)
-      worker_thread = Thread.new { worker.run }
+      worker_thread = start_worker(worker)
       eventually { expect(queue).to be_empty }
       worker.shutdown
       expect(worker_thread.join(1)).to eq(worker_thread)
@@ -73,15 +88,6 @@ module PostHog
     end
 
     describe '#run' do
-      before :all do
-        PostHog::Defaults::Request::BACKOFF = 0.1
-      end
-
-      after :all do
-        PostHog::Defaults::Request.send(:remove_const, :BACKOFF)
-        PostHog::Defaults::Request::BACKOFF = 30.0
-      end
-
       it 'does not error if the request fails' do
         expect do
           allow_any_instance_of(PostHog::Transport).to(
@@ -102,29 +108,33 @@ module PostHog
           receive(:send).and_return(PostHog::Response.new(400, 'Some error'))
         )
 
+        entered = Queue.new
+        release = Queue.new
         status = error = nil
-        on_error =
-          proc do |yielded_status, yielded_error|
-            sleep 0.2 # Make this take longer than thread spin-up (below)
-            status = yielded_status
-            error = yielded_error
-          end
+        on_error = proc do |yielded_status, yielded_error|
+          entered << true
+          release.pop
+          status = yielded_status
+          error = yielded_error
+        end
 
         queue = Queue.new
         queue << {}
         worker = described_class.new(queue, 'secret', on_error: on_error, flush_interval_seconds: 0)
 
-        # This is to ensure that Client#flush doesn't finish before calling
-        # the error handler.
-        worker_thread = Thread.new { worker.run }
-        sleep 0.1 # First give thread time to spin-up.
-        sleep 0.01 while worker.is_requesting?
+        worker_thread = start_worker(worker)
+        eventually { expect(entered).not_to be_empty }
+        expect(worker.is_requesting?).to eq(true)
+        release << true
+        eventually { expect(worker.is_requesting?).to eq(false) }
         worker.shutdown
-        worker_thread.join(1)
+        expect(worker_thread.join(1)).to eq(worker_thread)
 
         expect(queue).to be_empty
         expect(status).to eq(400)
         expect(error).to eq('Some error')
+      ensure
+        release&.push(true)
       end
 
       it 'clears the in-flight batch if the error handler raises' do
@@ -143,7 +153,7 @@ module PostHog
         )
         worker.instance_variable_set(:@transport, transport)
 
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
         eventually do
           expect(queue).to be_empty
           expect(worker.is_requesting?).to eq(false)
@@ -204,7 +214,9 @@ module PostHog
 
       it 'waits for flush_interval_seconds before sending a partial batch' do
         sends = []
+        sent_at = nil
         allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
+          sent_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           sends << batch.length
           PostHog::Response.new(200, 'Success')
         end
@@ -214,14 +226,12 @@ module PostHog
         worker = described_class.new(queue, 'testsecret', batch_size: 10, flush_interval_seconds: 0.05)
 
         started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
         eventually { expect(sends).to eq([1]) }
         worker.shutdown
         expect(worker_thread.join(1)).to eq(worker_thread)
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
-
         expect(sends).to eq([1])
-        expect(elapsed).to be >= 0.05
+        expect(sent_at - started_at).to be >= 0.05
       end
 
       it 'sends immediately when the batch size is reached' do
@@ -237,7 +247,7 @@ module PostHog
         worker = described_class.new(queue, 'testsecret', batch_size: 2, flush_interval_seconds: 60)
 
         started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
         eventually { expect(sends).to eq([2]) }
         worker.shutdown
         expect(worker_thread.join(1)).to eq(worker_thread)
@@ -259,7 +269,7 @@ module PostHog
         worker = described_class.new(queue, 'testsecret', batch_size: 2, flush_interval_seconds: 60)
 
         started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
         eventually { expect(worker.is_requesting?).to eq(true) }
 
         queue << Requested::CAPTURE.merge(event: 'Second event')
@@ -283,7 +293,7 @@ module PostHog
 
         queue = Queue.new
         worker = described_class.new(queue, 'testsecret', batch_size: 1, flush_interval_seconds: 60)
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
 
         eventually { expect(worker_thread).to be_alive }
         queue << Requested::CAPTURE
@@ -296,28 +306,33 @@ module PostHog
 
       it 'does not keep a stale flush request while idle' do
         sends = []
+        sent_at = nil
         allow_any_instance_of(PostHog::Transport).to receive(:send) do |_transport, _api_key, batch|
+          sent_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           sends << batch.length
           PostHog::Response.new(200, 'Success')
         end
 
         queue = Queue.new
         worker = described_class.new(queue, 'testsecret', batch_size: 10, flush_interval_seconds: 0.05)
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
         eventually { expect(worker_thread).to be_alive }
 
+        cleared = Queue.new
+        allow(worker).to receive(:clear_flush_request_without_lock).and_wrap_original do |method|
+          method.call
+          cleared << true
+        end
         worker.request_flush
-        sleep 0.01
-        queue << Requested::CAPTURE
+        eventually { expect(cleared).not_to be_empty }
         started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        queue << Requested::CAPTURE
         worker.notify
 
         eventually { expect(sends).to eq([1]) }
         worker.shutdown
         expect(worker_thread.join(1)).to eq(worker_thread)
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
-
-        expect(elapsed).to be >= 0.05
+        expect(sent_at - started_at).to be >= 0.05
       end
 
       it 'flushes immediately when requested' do
@@ -331,7 +346,7 @@ module PostHog
         queue << Requested::CAPTURE
         worker = described_class.new(queue, 'testsecret', batch_size: 10, flush_interval_seconds: 60)
 
-        worker_thread = Thread.new { worker.run }
+        worker_thread = start_worker(worker)
         eventually { expect(worker.is_requesting?).to eq(true) }
         worker.request_flush
 
@@ -351,8 +366,11 @@ module PostHog
       end
 
       it 'returns true if there is a current batch' do
+        entered = Queue.new
+        release = Queue.new
         allow_any_instance_of(PostHog::Transport).to receive(:send) do
-          sleep(0.2)
+          entered << true
+          release.pop
           PostHog::Response.new(200, 'Success')
         end
 
@@ -360,13 +378,17 @@ module PostHog
         queue << Requested::CAPTURE
         worker = described_class.new(queue, 'testsecret', flush_interval_seconds: 0)
 
-        worker_thread = Thread.new { worker.run }
-        eventually { expect(worker.is_requesting?).to eq(true) }
+        worker_thread = start_worker(worker)
+        eventually { expect(entered).not_to be_empty }
+        expect(worker.is_requesting?).to eq(true)
+        release << true
 
         eventually { expect(worker.is_requesting?).to eq(false) }
         worker.shutdown
-        worker_thread.join
+        expect(worker_thread.join(1)).to eq(worker_thread)
         expect(worker.is_requesting?).to eq(false)
+      ensure
+        release&.push(true)
       end
     end
   end

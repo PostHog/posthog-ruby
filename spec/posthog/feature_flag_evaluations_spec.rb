@@ -161,7 +161,9 @@ module PostHog
       it 'get_flag_payload does not fire an event' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
-        snapshot.get_flag_payload('variant-flag')
+        2.times { expect(snapshot.get_flag_payload('variant-flag')).to eq('key' => 'value') }
+        expect(snapshot.only_accessed.keys).to eq([])
+        expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
         msgs = drain_messages(client)
         expect(msgs.any? { |m| m[:event] == '$feature_flag_called' }).to be(false)
       end
@@ -307,6 +309,12 @@ module PostHog
         end
         expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
         expect(warned.any? { |m| m.include?('Both `flags` and `send_feature_flags`') }).to be(true)
+        event = drain_messages(client).find { |message| message[:event] == 'test-event' }
+        expect(event[:properties]).to include(
+          '$feature/variant-flag' => 'variant-value',
+          '$feature/disabled-flag' => false,
+          '$active_feature_flags' => %w[boolean-flag variant-flag]
+        )
       end
 
       it 'logs and ignores flags: when given a non-snapshot value (no NoMethodError)' do
@@ -539,7 +547,7 @@ module PostHog
         stub_flags(flags_response)
         c = Client.new(api_key: API_KEY, test_mode: true)
         out = capture_stderr do
-          5.times { c.is_feature_enabled('boolean-flag', "user-#{rand(1000)}") }
+          5.times { |index| c.is_feature_enabled('boolean-flag', "user-#{index}") }
         end
         count = out.scan('`is_feature_enabled` is deprecated').length
         expect(count).to eq(1)
@@ -599,7 +607,9 @@ module PostHog
         stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
           .to_return(status: 200, body: local_definitions.to_json)
         c = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
-        c.evaluate_flags('user-1', flag_keys: %w[local-flag])
+        snapshot = c.evaluate_flags('user-1', flag_keys: %w[local-flag])
+        expect(snapshot.keys).to eq(['local-flag'])
+        expect(snapshot.get_flag('local-flag')).to be(true)
         expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
       end
 

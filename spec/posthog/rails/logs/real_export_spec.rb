@@ -23,11 +23,17 @@ otel_available =
 # >= 0.6.0, so an older pairing raises NoMethodError during encode — no HTTP
 # request is ever made and the expectations below fail. (logs-sdk >= 0.6.0
 # requires Ruby 3.3+, so this spec only runs where those gems are installed.)
-RSpec.describe 'PostHog Logs real OTLP export', if: otel_available do
+RSpec.describe 'PostHog Logs real OTLP export' do
+  before { skip 'Install the gemfiles/otel.gemfile bundle to run real OTLP integration' unless otel_available }
+
   let(:endpoint) { 'https://logs.example.test/i/v1/logs' }
 
   it 'encodes a record and POSTs it to the OTLP endpoint with the bearer token' do
-    stub = stub_request(:post, endpoint).to_return(status: 200, body: '')
+    request_body = nil
+    stub = stub_request(:post, endpoint).to_return do |request|
+      request_body = request.headers['Content-Encoding'] == 'gzip' ? Zlib.gunzip(request.body) : request.body
+      { status: 200, body: '' }
+    end
 
     provider = OpenTelemetry::SDK::Logs::LoggerProvider.new
     exporter = OpenTelemetry::Exporter::OTLP::Logs::LogsExporter.new(
@@ -46,12 +52,20 @@ RSpec.describe 'PostHog Logs real OTLP export', if: otel_available do
 
     # force_flush exports synchronously; SUCCESS proves encode + transport ran.
     expect(provider.force_flush).to eq(OpenTelemetry::SDK::Logs::Export::SUCCESS)
-    expect(stub).to have_been_requested
+    expect(stub).to have_been_requested.once
+    payload = Opentelemetry::Proto::Collector::Logs::V1::ExportLogsServiceRequest.decode(request_body)
+    scopes = payload.resource_logs.flat_map { |resource| resource.scope_logs.to_a }
+    expect(scopes.map { |scope| scope.scope.name }).to eq(['posthog-rails-test'])
+    records = scopes.flat_map { |scope| scope.log_records.to_a }
+    expect(records.map { |record| record.body.string_value }).to eq(['real export smoke'])
+    expect(records.map(&:severity_number)).to eq([:SEVERITY_NUMBER_INFO])
     expect(a_request(:post, endpoint).with(
              headers: {
                'Authorization' => 'Bearer phc_test',
                'Content-Type' => 'application/x-protobuf'
              }
-           )).to have_been_made
+           )).to have_been_made.once
+  ensure
+    provider&.shutdown(timeout: 1)
   end
 end

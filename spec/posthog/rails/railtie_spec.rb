@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
 
 # Load the full Rails stack so the boot-order test can simulate real load order.
 require 'logger'
@@ -25,10 +26,18 @@ RSpec.describe PostHog::Rails::Railtie do
     after { PostHog.client = nil }
 
     it 'allows PostHog.init before Railtie initializers run' do
-      client = PostHog.init(api_key: 'phc_test', test_mode: true)
+      script = <<~RUBY
+        require 'posthog'
+        require 'rails'
+        require 'posthog/rails'
+        Rails.logger = Logger.new(File::NULL)
+        client = PostHog.init(api_key: 'phc_test', test_mode: true)
+        abort 'facade did not install its client' unless client.is_a?(PostHog::Client) && PostHog.client.equal?(client)
+        client.shutdown
+      RUBY
+      stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib', '-e', script)
 
-      expect(client).to be_a(PostHog::Client)
-      expect(PostHog.client).to eq(client)
+      expect(status).to be_success, "#{stdout}\n#{stderr}"
     end
   end
 
@@ -106,6 +115,18 @@ RSpec.describe PostHog::Rails::Railtie do
       expect do
         railtie.instance_exec(app, &initializer.block)
       end.not_to raise_error
+
+      stack = ActionDispatch::MiddlewareStack.new
+      stack.use(ActionDispatch::ShowExceptions)
+      stack.use(ActionDispatch::DebugExceptions)
+      middleware_proxy.merge_into(stack)
+      expect(stack.middlewares.map(&:klass)).to eq([
+                                                     PostHog::Rails::RequestContext,
+                                                     ActionDispatch::ShowExceptions,
+                                                     PostHog::Rails::CaptureExceptions,
+                                                     ActionDispatch::DebugExceptions,
+                                                     PostHog::Rails::RescuedExceptionInterceptor
+                                                   ])
     end
 
     it 'inserts middleware before and after the target when it is present' do

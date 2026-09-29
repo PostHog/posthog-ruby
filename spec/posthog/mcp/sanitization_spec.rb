@@ -285,14 +285,14 @@ RSpec.describe PostHog::MCP::Sanitization do
 
     it 'leaves frames without source context, and odd stacktrace shapes, alone' do
       bare = { 'filename' => 'lib/gem.rb', 'lineno' => 3, 'in_app' => false }
-      %w[frames].each do |_|
-        event = { 'error' => { '$exception_list' => [{ 'value' => 'x', 'stacktrace' => { 'frames' => [bare] } }] } }
-        expect(described_class.sanitize_event(event)['error']['$exception_list'][0]['stacktrace']['frames'])
-          .to eq([bare])
-      end
+      event = { 'error' => { '$exception_list' => [{ 'value' => 'x', 'stacktrace' => { 'frames' => [bare] } }] } }
+      expect(described_class.sanitize_event(event)['error']['$exception_list'][0]['stacktrace']['frames'])
+        .to eq([bare])
       [nil, 'nope', { 'frames' => 'nope' }, { 'frames' => [nil, 42] }].each do |stacktrace|
         event = { 'error' => { '$exception_list' => [{ 'value' => 'x', 'stacktrace' => stacktrace }] } }
-        expect { described_class.sanitize_event(event) }.not_to raise_error
+        original = Marshal.load(Marshal.dump(event))
+        expect(described_class.sanitize_event(event)['error']['$exception_list'][0]['stacktrace']).to eq(stacktrace)
+        expect(event).to eq(original)
       end
       expect(described_class.sanitize_event('error' => { '$exception_list' => ['not a hash'] })['error'])
         .to eq('$exception_list' => ['not a hash'])

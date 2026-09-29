@@ -76,15 +76,28 @@ module PostHog
         )
       end
 
-      it 'returns exponentially increasing durations' do
-        expect(subject.next_interval).to be_within(500).of(1000)
-        expect(subject.next_interval).to be_within(1000).of(2000)
-        expect(subject.next_interval).to be_within(2000).of(4000)
-        expect(subject.next_interval).to be_within(4000).of(8000)
+      it 'returns exponentially increasing durations without jitter' do
+        allow(subject).to receive(:rand).and_return(0.0)
+
+        expect(Array.new(4) { subject.next_interval }).to eq([1000, 2000, 4000, 8000])
       end
 
-      it 'caps maximum duration at max_timeout_secs' do
-        10.times { subject.next_interval }
+      [
+        [0.25, [1000, 1750, 3500, 7000]],
+        [0.75, [1375, 2750, 5500, 10_000]]
+      ].each do |random, expected|
+        it "applies bounded jitter with random value #{random}" do
+          allow(subject).to receive(:rand).and_return(random)
+
+          expect(Array.new(4) { subject.next_interval }).to eq(expected)
+        end
+      end
+
+      it 'caps maximum duration at max_timeout_ms' do
+        allow(subject).to receive(:rand).and_return(0.0)
+        4.times { subject.next_interval }
+
+        expect(subject.next_interval).to eq(10_000)
         expect(subject.next_interval).to eq(10_000)
       end
     end

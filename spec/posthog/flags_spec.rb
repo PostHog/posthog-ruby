@@ -1198,9 +1198,9 @@ module PostHog
       expect(locally_evaluated).to be true
 
       # Make flag-a inactive - should break the chain
-      flags = poller.instance_variable_get(:@feature_flags)
+      flags = Marshal.load(Marshal.dump(poller.instance_variable_get(:@feature_flags)))
       flags[0][:active] = false
-      poller.instance_variable_set(:@feature_flags, flags)
+      stub_feature_flags(flags)
 
       result, locally_evaluated = poller.get_feature_flag('flag-d', 'test-user', {}, {}, {}, true)
       expect(result).to be false
@@ -1266,9 +1266,9 @@ module PostHog
       expect(locally_evaluated).to be true
 
       # Email condition satisfied but flag dependency not satisfied (base-flag inactive)
-      flags = poller.instance_variable_get(:@feature_flags)
+      flags = Marshal.load(Marshal.dump(poller.instance_variable_get(:@feature_flags)))
       flags[0][:active] = false
-      poller.instance_variable_set(:@feature_flags, flags)
+      stub_feature_flags(flags)
 
       result, locally_evaluated = poller.get_feature_flag('mixed-flag', 'test-user-3',
                                                           {}, { 'email' => 'test@example.com' }, {}, true)
@@ -1303,7 +1303,7 @@ module PostHog
                                    properties: [
                                      {
                                        key: 'base-flag',
-                                       operator: 'exact',
+                                       operator: 'flag_evaluates_to',
                                        value: true,
                                        type: 'flag'
                                        # No dependency_chain property - should handle gracefully
@@ -1316,7 +1316,14 @@ module PostHog
                            }
                          ])
 
-      # Should return [nil, false] when dependency_chain is missing (falls back to remote)
+      property = { key: 'base-flag', operator: 'flag_evaluates_to', value: true, type: 'flag' }
+      expect do
+        poller.evaluate_flag_dependency(property, {}, 'test-user', {}, {})
+      end.to raise_error(PostHog::InconclusiveMatchError, /missing required 'dependency_chain'/)
+      expect(poller.evaluate_flag_dependency(
+               property.merge(dependency_chain: ['base-flag']), {}, 'test-user', {}, {}
+             )).to be(true)
+
       result, locally_evaluated = poller.get_feature_flag('missing-chain-flag', 'test-user', {}, {}, {}, true)
       expect(result).to be_nil
       expect(locally_evaluated).to be false
@@ -1435,9 +1442,9 @@ module PostHog
       expect(locally_evaluated).to be true
 
       # Make one dependency inactive - should fail AND condition
-      flags = poller.instance_variable_get(:@feature_flags)
+      flags = Marshal.load(Marshal.dump(poller.instance_variable_get(:@feature_flags)))
       flags[0][:active] = false # Make flag-a inactive
-      poller.instance_variable_set(:@feature_flags, flags)
+      stub_feature_flags(flags)
 
       result, locally_evaluated = poller.get_feature_flag('multi-dependency-flag', 'test-user', {}, {}, {}, true)
       expect(result).to be false

@@ -180,23 +180,34 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       alice = initialize_as('alice')
       bob = initialize_as('bob')
       bob_finished = Queue.new
+      bob_thread = nil
       PostHogMcpHttpSpecCaptureTool.before_capture = lambda do
         # Runs inside Alice's tool body: let Bob's whole request finish before Alice captures.
         PostHogMcpHttpSpecCaptureTool.before_capture = nil
-        Thread.new do
+        bob_thread = Thread.new do
           call_capture_tool_as('bob', bob, id: 3)
           bob_finished << true
         end
-        bob_finished.pop
+        eventually { expect(bob_finished).not_to be_empty }
+        expect(bob_thread.join(2)).to eq(bob_thread)
+        bob_thread.value
       end
       call_capture_tool_as('alice', alice)
 
       events = drain_events(client)
+      expect(events.count { |event| event[:event] == 'in_tool_event' }).to eq(2)
+      expect(events.count { |event| event[:event] == '$mcp_tool_call' }).to eq(2)
       expect(attribution(events, 'in_tool_event')).to eq(
         'alice' => PostHog::MCP.decode_session_id(alice).session_id,
         'bob' => PostHog::MCP.decode_session_id(bob).session_id
       )
       expect(attribution(events, 'in_tool_event')).to eq(attribution(events, '$mcp_tool_call'))
+    ensure
+      if bob_thread
+        bob_thread.kill unless bob_thread.join(2)
+        bob_thread.join
+      end
+      PostHogMcpHttpSpecCaptureTool.before_capture = nil
     end
   end
 end
@@ -273,10 +284,11 @@ RSpec.describe PostHog::MCP::RackMiddleware do
     expect(headers['mcp-session-id']).to be_nil
     expect(env['posthog_mcp.session']).to be_nil
 
-    # A JSON-RPC error rides on a 200, and nothing below minted a token for it.
-    rejected = JSON.generate({ jsonrpc: '2.0', id: 1, error: { code: -32_602, message: 'Unsupported protocol version' } })
-    env = env_for(initialize_json)
-    _, headers, = described_class.new(dispatching_app(body: rejected)).call(env)
+    rejected = JSON.parse(initialize_json)
+    rejected['params']['clientInfo'] = nil
+    env = env_for(JSON.generate(rejected))
+    _, headers, body = described_class.new(dispatching_app).call(env)
+    expect(JSON.parse(body.first).dig('error', 'code')).to eq(-32_602)
     expect(headers['mcp-session-id']).to be_nil
     expect(env['posthog_mcp.session']).to be_nil
   end
@@ -321,17 +333,32 @@ RSpec.describe PostHog::MCP::RackMiddleware do
     expect(env['posthog_mcp.session']).to be_nil
   end
 
+  it 'preserves an application-owned response session header after minting' do
+    app = lambda do |env|
+      env['posthog_mcp.mint'].call(client_name: 'c', protocol_version: '2025-06-18')
+      [200, { 'Mcp-Session-Id' => 'application-session' }, ['{}']]
+    end
+
+    _, headers, = described_class.new(app).call(env_for(initialize_json))
+
+    expect(headers).to eq('Mcp-Session-Id' => 'application-session')
+  end
+
   it 'attaches the token to a streaming body and never clobbers a replayed header' do
     PostHog::MCP.instrument(server, client)
     streaming = Class.new do
       def initialize(json) = @json = json
       def each = yield("data: #{@json}\n\n")
     end
+    stream = nil
     sse = lambda do |_env|
-      [200, { 'content-type' => 'text/event-stream' }, streaming.new(server.handle_json(initialize_json))]
+      stream = streaming.new(server.handle_json(initialize_json))
+      expect(stream).not_to receive(:each)
+      [200, { 'content-type' => 'text/event-stream' }, stream]
     end
-    _, headers, = described_class.new(sse).call(env_for(initialize_json))
+    _, headers, body = described_class.new(sse).call(env_for(initialize_json))
     expect(headers['mcp-session-id']).not_to be_nil
+    expect(body).to equal(stream)
 
     token = PostHog::MCP.encode_session_id(session_id: 'ses_replayed')
     replay = env_for('{}', 'mcp-session-id' => token)

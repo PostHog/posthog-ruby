@@ -33,8 +33,13 @@ RSpec.describe PostHog::Rails::Logs::RateLimiter do
     4.times { limiter.record }
     expect(limiter.record).to eq(:reject)
 
-    stub_monotonic_time(described_class::WINDOW_SECONDS)
-    expect(limiter.record).to eq(:allow)
+    stub_monotonic_time(59.999)
+    expect(limiter.record).to eq(:reject)
+
+    stub_monotonic_time(60.0)
+    expect(Array.new(3) { limiter.record }).to all(eq(:allow))
+    expect(limiter.record).to eq(:reject_first)
+    expect(limiter.record).to eq(:reject)
   end
 
   it 'counts concurrent records without losing increments' do

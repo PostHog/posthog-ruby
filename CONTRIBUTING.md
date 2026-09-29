@@ -39,6 +39,16 @@ bundle exec rubocop
 bundle exec rake public_api:check
 ```
 
+The JSON compatibility specs run in separate Ruby processes as part of the default suite.
+The real Rails logs export and fork tests require Ruby 3.3+ and the optional OpenTelemetry bundle:
+
+```bash
+BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle install
+BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle exec rspec
+```
+
+Without that bundle, those two integration tests are reported as pending. CI runs both bundles.
+
 The public API snapshot covers both `posthog-ruby` and `posthog-rails`. If you intentionally change either API, update the snapshot and review the diff:
 
 ```bash

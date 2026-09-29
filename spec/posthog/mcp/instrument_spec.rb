@@ -126,8 +126,14 @@ RSpec.describe PostHog::MCP do
       expect(Kernel).to receive(:warn).with(a_string_including('experimental')).once
       handle = described_class.instrument(server, client)
       expect(handle).to be_a(PostHog::MCP::Analytics)
-      expect(described_class.instrument(server, client)).to be_a(PostHog::MCP::Analytics)
-      expect(described_class.tracking_data(server).server_name).to eq('spec-server')
+      data = described_class.tracking_data(server)
+      other_client = new_test_client
+      expect(described_class.instrument(server, other_client)).to be_a(PostHog::MCP::Analytics)
+      expect(described_class.tracking_data(server)).to equal(data)
+      expect(data.server_name).to eq('spec-server')
+      server.handle(initialize_request)
+      expect(drain_events(client).map { |event| event[:event] }).to eq(['$mcp_initialize'])
+      expect(drain_events(other_client)).to be_empty
     end
 
     it 'returns a no-op handle for unsupported servers and when no client is available' do
@@ -216,7 +222,33 @@ RSpec.describe PostHog::MCP do
       expect(events.map { |e| e[:properties]['$session_id'] }.uniq.length).to eq(1)
     end
 
-    it 'strips the injected context before the tool sees it but keeps a tool-owned context' do
+    it 'strips injected arguments before calling a strict keyword tool' do
+      strict_tool = Class.new(MCP::Tool) do
+        tool_name 'strict_echo'
+        input_schema(properties: { message: { type: 'string' } }, required: ['message'])
+        define_singleton_method(:call) do |message:|
+          MCP::Tool::Response.new([{ type: 'text', text: message }])
+        end
+      end
+      strict_server = MCP::Server.new(name: 'strict', tools: [strict_tool])
+      described_class.instrument(strict_server, client)
+      arguments = { message: 'hi', context: 'testing', llm_model: 'test-model',
+                    conversation_id: '0198d3a7-1111-7222-8333-444455556666' }
+
+      2.times do |index|
+        strict_server.handle(rpc(10, 'tools/list')) if index.positive?
+        response = strict_server.handle(rpc(index, 'tools/call', { name: 'strict_echo', arguments: arguments.dup }))
+        expect(response.dig(:result, :content)).to eq([{ type: 'text', text: 'hi' }])
+      end
+      calls = events_named(drain_events(client), '$mcp_tool_call')
+      expect(calls.length).to eq(2)
+      calls.each do |call|
+        expect(call[:properties].dig('$mcp_parameters', 'request', 'params', 'arguments')).to eq('message' => 'hi')
+        expect(call[:properties]['$mcp_intent']).to eq('testing')
+      end
+    end
+
+    it 'keeps a tool-owned context' do
       described_class.instrument(server, client, capture_model: false, enable_conversation_id: false)
       result = server.handle(rpc(1, 'tools/call', { name: 'owns_context', arguments: { context: 'mine' } }))
       expect(result[:result][:content][0][:text]).to eq('ctx=mine')
@@ -373,6 +405,16 @@ RSpec.describe PostHog::MCP do
       expect(events[1][:properties]).not_to have_key('$mcp_intent')
     end
 
+    it 'drops telemetry when before_send raises without breaking the tool response' do
+      described_class.instrument(server, client, enable_conversation_id: false,
+                                                 before_send: ->(_payload) { raise 'filter failed' })
+
+      response = server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
+
+      expect(response.dig(:result, :content)).to eq([{ type: 'text', text: 'Echo: hi' }])
+      expect(drain_events(client)).to be_empty
+    end
+
     it 'attributes a request to the identity it resolved, not to one a later request installed' do
       PostHogMcpSpecParkedTool.entered = Queue.new
       PostHogMcpSpecParkedTool.release = Queue.new
@@ -389,12 +431,13 @@ RSpec.describe PostHog::MCP do
       )
 
       alice = Thread.new { shared.handle(rpc(1, 'tools/call', { name: 'parked', arguments: { user: 'alice' } })) }
-      PostHogMcpSpecParkedTool.entered.pop
+      eventually { expect(PostHogMcpSpecParkedTool.entered).not_to be_empty }
       # Bob's request lands whole - identify included - while Alice is parked in
       # her tool body. Over stdio both share the server-wide session, so Bob's
       # identify re-points that session's cache entry at Bob.
       shared.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi', user: 'bob' } }))
       PostHogMcpSpecParkedTool.release << true
+      expect(alice.join(2)).to eq(alice)
       expect(alice.value[:result][:content][0][:text]).to eq('done')
 
       events = drain_events(client)
@@ -415,11 +458,18 @@ RSpec.describe PostHog::MCP do
       custom = events_named(events, 'inside_tool').first
       expect(custom[:distinct_id]).to eq('alice')
       expect(custom[:properties]['$set']).to eq('email' => 'alice@example.com')
+    ensure
+      PostHogMcpSpecParkedTool.release&.close
+      if alice
+        alice.kill unless alice.join(2)
+        alice.join
+      end
+      PostHogMcpSpecParkedTool.analytics = nil
     end
 
     it 'shrinks a payload a before_send hook grew past the transport limit' do
       before_send = lambda do |payload|
-        payload['properties']['bloat'] = 'x' * 40_000
+        payload['properties']['bloat'] = '😀"\\' * 10_000
         payload
       end
       described_class.instrument(server, client, before_send: before_send, enable_conversation_id: false)
@@ -430,17 +480,28 @@ RSpec.describe PostHog::MCP do
       expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
       events.each do |event|
         expect(JSON.generate(event).bytesize).to be <= PostHog::Defaults::Message::MAX_BYTES
-        expect(event[:properties]['bloat']).to start_with('x')
+        expect(event[:properties]['bloat']).to start_with('😀')
       end
+      batch = PostHog::MessageBatch.new(events.length)
+      events.each { |event| batch << event }
+      expect(batch.length).to eq(events.length)
     end
 
-    it 'never lets analytics failures reach the tool' do
-      described_class.instrument(server, client, identify: ->(_r, _e) { raise 'identify exploded' },
-                                                 event_properties: ->(_r, _e) { raise 'props exploded' },
-                                                 intent_fallback: ->(_r, _e) { raise 'intent exploded' })
-      result = server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
-      expect(result[:result][:content][0][:text]).to eq('Echo: hi')
-      expect(drain_events(client).map { |e| e[:event] }).to include('$mcp_tool_call')
+    %i[identify event_properties intent_fallback].each do |callback|
+      it "never lets #{callback} failures reach the tool" do
+        calls = 0
+        failing_callback = lambda do |_request, _extra|
+          calls += 1
+          raise "#{callback} exploded"
+        end
+        described_class.instrument(server, client, **{ callback => failing_callback })
+
+        result = server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
+
+        expect(result[:result][:content][0][:text]).to eq('Echo: hi')
+        expect(calls).to be >= 1
+        expect(drain_events(client).map { |event| event[:event] }).to include('$mcp_tool_call')
+      end
     end
 
     it 'uses intent_fallback when no context arrives' do

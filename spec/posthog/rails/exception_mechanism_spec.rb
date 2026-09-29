@@ -256,6 +256,7 @@ RSpec.describe 'automatic exception capture mechanisms' do
 
     it 'prevents Rails error subscriber from capturing the same job exception again' do
       PostHog::Rails.config.auto_instrument_active_job = true
+      allow(PostHog).to receive(:capture_exception).and_return(true)
       error = nil
 
       begin
@@ -264,6 +265,8 @@ RSpec.describe 'automatic exception capture mechanisms' do
         error = e
       end
 
+      expect(error).to be_a(StandardError)
+      expect(error.message).to eq('job failed')
       PostHog::Rails::ErrorSubscriber.new.report(
         error,
         handled: false,

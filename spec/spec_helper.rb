@@ -83,12 +83,12 @@ module AsyncHelper
   def eventually(options = {})
     timeout = options[:timeout] || 2
     interval = options[:interval] || 0.1
-    time_limit = Time.now + timeout
+    time_limit = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
     loop do
       yield
       return
     rescue RSpec::Expectations::ExpectationNotMetError => e
-      raise e if Time.now >= time_limit
+      raise e if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= time_limit
 
       sleep interval
     end
