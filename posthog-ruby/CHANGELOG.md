@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.26.1
+
+### Patch Changes
+
+- 161de85: Fix instance tracking for client subclasses so `PostHog::MCP::Client` can initialize outside test mode and shut down without raising. Clients that skip registration no longer remove another client's duplicate-instance warning on shutdown.
+
 ## 3.26.0
 
 ### Minor Changes
