@@ -363,6 +363,45 @@ RSpec.describe PostHog::MCP do
       expect(listing['$mcp_error_message']).to eq('tools/list returned no tools')
       expect(events.map { |e| e[:event] }).to include('$exception')
     end
+
+    describe 'tools/list response capture' do
+      let(:names) { %w[echo boom owns_context structured soft_fail] }
+      let(:modern_meta) do
+        { _meta: { 'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+                   'io.modelcontextprotocol/clientCapabilities' => {} } }
+      end
+
+      def stringify_result_keys(target)
+        target.configuration = MCP::Configuration.new(around_request: lambda { |_data, &handler|
+          handler.call.transform_keys(&:to_s)
+        })
+      end
+
+      [
+        { label: 'cache hints, symbol keys', options: { ttl_ms: 5000, cache_scope: 'public' },
+          response: { 'ttlMs' => 5000, 'cacheScope' => 'public' } },
+        { label: 'cache hints, string keys', options: { ttl_ms: 5000, cache_scope: 'public' }, string_keys: true,
+          response: { 'ttlMs' => 5000, 'cacheScope' => 'public' } },
+        { label: 'only tools', response: nil },
+        { label: 'first page', options: { page_size: 2 }, listed: 2, response: :next_cursor },
+        { label: 'modern wire, gem defaults', modern: true, response: { 'ttlMs' => 0, 'cacheScope' => 'private' } }
+      ].each do |row|
+        it "records only the envelope: #{row[:label]}" do
+          list_server = MCP::Server.new(name: 'spec-server', tools: tools, **row.fetch(:options, {}))
+          stringify_result_keys(list_server) if row[:string_keys]
+          described_class.instrument(list_server, client)
+          result = list_server.handle(rpc(1, 'tools/list', row[:modern] ? modern_meta : nil))[:result]
+          listed = names.first(row.fetch(:listed, names.length))
+          expected = row[:response] == :next_cursor ? { 'nextCursor' => result[:nextCursor] } : row[:response]
+
+          properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
+          expect(properties['$mcp_response']).to eq(expected)
+          expect(properties.key?('$mcp_response')).to eq(!expected.nil?)
+          expect(properties['$mcp_listed_tool_names']).to eq(listed)
+          expect((result[:tools] || result['tools']).map { |tool| tool[:name] || tool['name'] }).to eq(listed)
+        end
+      end
+    end
   end
 
   describe 'identify, event_properties and before_send' do

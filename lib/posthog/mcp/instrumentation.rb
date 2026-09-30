@@ -226,9 +226,17 @@ module PostHog
 
         safely do
           session_id = prepare_request(@request)
-          record_tools_list(session_id, names: names, response: result, empty: empty)
+          record_tools_list(session_id, names: names, response: tools_list_envelope(result), empty: empty)
         end
         result
+      end
+
+      # `resultType` is a lifecycle discriminator the gem stamps on every modern-wire reply, not envelope data.
+      def tools_list_envelope(result)
+        return nil unless result.is_a?(Hash)
+
+        envelope = result.reject { |key, value| %w[tools resultType].include?(key.to_s) || value.nil? }
+        envelope unless envelope.empty?
       end
 
       def dispatch_initialize
