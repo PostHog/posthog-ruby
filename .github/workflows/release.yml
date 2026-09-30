@@ -120,8 +120,10 @@ jobs:
           ruby-version: ruby
           bundler: 4.0.13
 
-      - name: Update Gemfile.lock
-        run: bundle lock
+      - name: Update lockfiles
+        run: |
+          bundle lock
+          BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle lock
 
       - name: Check for version bump changes
         id: check-changes
