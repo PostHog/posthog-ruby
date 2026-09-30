@@ -226,9 +226,17 @@ module PostHog
 
         safely do
           session_id = prepare_request(@request)
-          record_tools_list(session_id, names: names, response: result, empty: empty)
+          record_tools_list(session_id, names: names, response: tools_list_envelope(result), empty: empty)
         end
         result
+      end
+
+      def tools_list_envelope(result)
+        return nil unless result.is_a?(Hash)
+
+        tools_key = SchemaMutation.key_for(result, :tools)
+        envelope = result.reject { |key, value| key == tools_key || value.nil? }
+        envelope unless envelope.empty?
       end
 
       def dispatch_initialize

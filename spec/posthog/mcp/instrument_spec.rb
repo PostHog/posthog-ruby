@@ -363,6 +363,52 @@ RSpec.describe PostHog::MCP do
       expect(listing['$mcp_error_message']).to eq('tools/list returned no tools')
       expect(events.map { |e| e[:event] }).to include('$exception')
     end
+
+    describe 'tools/list response capture' do
+      let(:names) { %w[echo boom owns_context structured soft_fail] }
+
+      def stringify_keys_via_around_request(target)
+        target.configuration = MCP::Configuration.new(around_request: lambda { |_data, &handler|
+          handler.call.transform_keys(&:to_s)
+        })
+      end
+
+      { 'symbol keys' => false, 'string keys' => true }.each do |label, stringify|
+        it "records only the envelope with #{label}" do
+          list_server = MCP::Server.new(name: 'spec-server', tools: tools, ttl_ms: 5000, cache_scope: 'public')
+          stringify_keys_via_around_request(list_server) if stringify
+          described_class.instrument(list_server, client)
+          result = list_server.handle(rpc(1, 'tools/list'))[:result]
+
+          properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
+          expect(properties['$mcp_response']).to eq('ttlMs' => 5000, 'cacheScope' => 'public')
+          expect(properties['$mcp_listed_tool_names']).to eq(names)
+          expect((result[:tools] || result['tools']).length).to eq(5)
+        end
+      end
+
+      it 'records the cursor of a paginated result and no tool descriptors' do
+        paged = MCP::Server.new(name: 'spec-server', tools: tools, page_size: 2)
+        described_class.instrument(paged, client)
+        result = paged.handle(rpc(1, 'tools/list'))[:result]
+
+        properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
+        expect(result[:nextCursor]).to be_a(String)
+        expect(properties['$mcp_response']).to eq('nextCursor' => result[:nextCursor])
+        expect(properties['$mcp_listed_tool_names']).to eq(names.first(2))
+        expect(result[:tools].map { |tool| tool[:name] }).to eq(names.first(2))
+      end
+
+      it 'omits $mcp_response when the result has only tools' do
+        described_class.instrument(server, client)
+        result = server.handle(rpc(1, 'tools/list'))[:result]
+
+        properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
+        expect(properties).not_to have_key('$mcp_response')
+        expect(properties['$mcp_listed_tool_names']).to eq(names)
+        expect(result[:tools].length).to eq(5)
+      end
+    end
   end
 
   describe 'identify, event_properties and before_send' do
