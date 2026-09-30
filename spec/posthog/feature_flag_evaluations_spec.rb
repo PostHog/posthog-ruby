@@ -128,6 +128,40 @@ module PostHog
         expect(snapshot.enabled?('not-a-flag')).to be(false)
       end
 
+      it 'enabled? resolves a missing flag to the caller-supplied default' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+        expect(snapshot.enabled?('not-a-flag', default_value: true)).to be(true)
+        expect(snapshot.enabled?('not-a-flag', default_value: false)).to be(false)
+      end
+
+      it 'enabled? prefers an existing flag value over the caller-supplied default' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+        expect(snapshot.enabled?('disabled-flag', default_value: true)).to be(false)
+        expect(snapshot.enabled?('variant-flag', default_value: false)).to be(true)
+        expect(snapshot.enabled?('boolean-flag', default_value: false)).to be(true)
+      end
+
+      it 'enabled? uses the caller default on an empty snapshot' do
+        snapshot = client.evaluate_flags('')
+        expect(snapshot.enabled?('anything', default_value: true)).to be(true)
+        expect(snapshot.enabled?('anything')).to be(false)
+      end
+
+      it 'enabled? still reports the evaluated response, not the default, on $feature_flag_called' do
+        stub_flags(flags_response)
+        snapshot = client.evaluate_flags('user-1')
+        snapshot.enabled?('not-a-flag', default_value: true)
+
+        msgs = drain_messages(client).select do |m|
+          m[:event] == '$feature_flag_called' && m[:properties]['$feature_flag'] == 'not-a-flag'
+        end
+        expect(msgs.length).to eq(1)
+        expect(msgs.first[:properties]['$feature_flag_response']).to be_nil
+        expect(msgs.first[:properties]['$feature_flag_error']).to eq('flag_missing')
+      end
+
       it 'enabled? and get_flag on a variant flag dedupe to a single event with the variant response' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
