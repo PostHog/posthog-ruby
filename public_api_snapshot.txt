@@ -56,7 +56,7 @@ constant PostHog::Defaults::Request::RETRIES: Integer
 constant PostHog::Defaults::Request::SSL: Boolean
 class PostHog::FeatureFlagEvaluations
 instance_method PostHog::FeatureFlagEvaluations#distinct_id()
-instance_method PostHog::FeatureFlagEvaluations#enabled?(key)
+instance_method PostHog::FeatureFlagEvaluations#enabled?(key, default_value: ...)
 instance_method PostHog::FeatureFlagEvaluations#evaluated_at()
 instance_method PostHog::FeatureFlagEvaluations#flag_definitions_loaded_at()
 instance_method PostHog::FeatureFlagEvaluations#get_flag(key)
