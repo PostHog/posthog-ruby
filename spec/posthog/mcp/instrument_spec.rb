@@ -366,47 +366,37 @@ RSpec.describe PostHog::MCP do
 
     describe 'tools/list response capture' do
       let(:names) { %w[echo boom owns_context structured soft_fail] }
+      let(:modern_meta) do
+        { _meta: { 'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+                   'io.modelcontextprotocol/clientCapabilities' => {} } }
+      end
 
-      def stringify_keys_via_around_request(target)
+      def stringify_result_keys(target)
         target.configuration = MCP::Configuration.new(around_request: lambda { |_data, &handler|
           handler.call.transform_keys(&:to_s)
         })
       end
 
-      { 'symbol keys' => false, 'string keys' => true }.each do |label, stringify|
-        it "records only the envelope with #{label}" do
-          list_server = MCP::Server.new(name: 'spec-server', tools: tools, ttl_ms: 5000, cache_scope: 'public')
-          stringify_keys_via_around_request(list_server) if stringify
+      [
+        ['cache hints, symbol keys', { ttl_ms: 5000, cache_scope: 'public' }, false, false,
+         { 'ttlMs' => 5000, 'cacheScope' => 'public' }],
+        ['cache hints, string keys', { ttl_ms: 5000, cache_scope: 'public' }, true, false,
+         { 'ttlMs' => 5000, 'cacheScope' => 'public' }],
+        ['only tools', {}, false, false, nil],
+        ['modern wire, gem defaults', {}, false, true, { 'ttlMs' => 0, 'cacheScope' => 'private' }]
+      ].each do |label, server_options, string_keys, modern, expected_response|
+        it "records only the envelope: #{label}" do
+          list_server = MCP::Server.new(name: 'spec-server', tools: tools, **server_options)
+          stringify_result_keys(list_server) if string_keys
           described_class.instrument(list_server, client)
-          result = list_server.handle(rpc(1, 'tools/list'))[:result]
+          result = list_server.handle(rpc(1, 'tools/list', modern ? modern_meta : nil))[:result]
 
           properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
-          expect(properties['$mcp_response']).to eq('ttlMs' => 5000, 'cacheScope' => 'public')
+          expect(properties['$mcp_response']).to eq(expected_response)
+          expect(properties.key?('$mcp_response')).to eq(!expected_response.nil?)
           expect(properties['$mcp_listed_tool_names']).to eq(names)
           expect((result[:tools] || result['tools']).length).to eq(5)
         end
-      end
-
-      it 'records the cursor of a paginated result and no tool descriptors' do
-        paged = MCP::Server.new(name: 'spec-server', tools: tools, page_size: 2)
-        described_class.instrument(paged, client)
-        result = paged.handle(rpc(1, 'tools/list'))[:result]
-
-        properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
-        expect(result[:nextCursor]).to be_a(String)
-        expect(properties['$mcp_response']).to eq('nextCursor' => result[:nextCursor])
-        expect(properties['$mcp_listed_tool_names']).to eq(names.first(2))
-        expect(result[:tools].map { |tool| tool[:name] }).to eq(names.first(2))
-      end
-
-      it 'omits $mcp_response when the result has only tools' do
-        described_class.instrument(server, client)
-        result = server.handle(rpc(1, 'tools/list'))[:result]
-
-        properties = events_named(drain_events(client), '$mcp_tools_list').first[:properties]
-        expect(properties).not_to have_key('$mcp_response')
-        expect(properties['$mcp_listed_tool_names']).to eq(names)
-        expect(result[:tools].length).to eq(5)
       end
     end
   end

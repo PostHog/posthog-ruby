@@ -231,11 +231,11 @@ module PostHog
         result
       end
 
+      # `resultType` is a lifecycle discriminator the gem stamps on every modern-wire reply, not envelope data.
       def tools_list_envelope(result)
         return nil unless result.is_a?(Hash)
 
-        tools_key = SchemaMutation.key_for(result, :tools)
-        envelope = result.reject { |key, value| key == tools_key || value.nil? }
+        envelope = result.reject { |key, value| %w[tools resultType].include?(key.to_s) || value.nil? }
         envelope unless envelope.empty?
       end
 
