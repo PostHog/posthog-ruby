@@ -298,5 +298,39 @@ RSpec.describe PostHog::MCP::Sanitization do
         .to eq('$exception_list' => ['not a hash'])
     end
   end
+
+  describe 'sanitizing strings longer than truncation keeps' do
+    window = 131_072
+    token = 'phc_123456789012345678901234567890'
+    secret = 'aB3$xY7&kL9#mN2@pQ5!rS8%tU1^vW4*zC6~eF0+'
+    pem_body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n" * 200
+    filler = ->(length) { ('lorem ipsum ' * ((length / 12) + 1))[0, length] }
+
+    {
+      'plain text' => [filler.call(5_000_000), "#{filler.call(window - 2)}..."],
+      'a token cut at the window edge' => [filler.call(window - 32) + token, "#{filler.call(window - 32)}..."],
+      'an attachment' => [['x' * 2_250_000].pack('m0'), binary],
+      # Redacting shrinks this head below twice what truncation keeps, and a cut
+      # at the window would leave a 17-character token fragment too short to match.
+      'tokens with one cut at the window edge' => [
+        "#{filler.call(12)}a. #{"#{token} " * 4_000}and more",
+        "#{filler.call(12)}a. #{'[redacted] ' * 4_000}and more"
+      ],
+      'a secret word straddling the window' => [
+        "#{filler.call(window - 20)}#{secret} and more",
+        "#{filler.call(window - 20)}..."
+      ],
+      'a private key straddling the window' => [
+        "#{filler.call(window - 32)}-----BEGIN PRIVATE KEY-----\n#{pem_body}-----END PRIVATE KEY----- and more",
+        "#{filler.call(window - 32)}[redacted] and more"
+      ]
+    }.each do |name, (value, expected)|
+      %i[sanitize_captured_value sanitize_free_text sanitize_source_line].each do |sanitizer|
+        it "#{sanitizer} scans only the window truncation can keep: #{name}" do
+          expect(described_class.public_send(sanitizer, value)).to eq(expected)
+        end
+      end
+    end
+  end
 end
 # rubocop:enable Layout/LineLength

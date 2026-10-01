@@ -3,6 +3,7 @@
 require 'json'
 require 'set'
 require 'uri'
+require 'posthog/mcp/truncation'
 
 module PostHog
   module MCP
@@ -24,6 +25,10 @@ module PostHog
       BASE64_DATA_URL_PREFIX_PATTERN = /\Adata:[^,\s]*;base64,/i
       BASE64_DATA_URL_PAYLOAD_PATTERN = %r{\A[A-Za-z0-9+/_-]+={0,2}\z}
       SIZE_GATE = 10_240
+      SCANNED_HEAD_LENGTH = 4 * Truncation::MAX_STRING_LENGTH
+      # Twice what truncation keeps, so a PII match split where the head was cut
+      # sits past the part truncation keeps.
+      MIN_REDACTED_HEAD_LENGTH = 2 * Truncation::MAX_STRING_LENGTH
       # Source lines an in-app stack frame carries around the raise.
       SOURCE_CONTEXT_FIELDS = %w[pre_context context_line post_context].freeze
       POSTHOG_TOKEN_PATTERN = /\bph[a-z]_[A-Za-z0-9_-]{20,}\b/
@@ -110,8 +115,51 @@ module PostHog
       def sanitize_string(value)
         return BINARY_REDACTED_VALUE if binary_like?(value)
 
+        redact_captured_head(value, method(:redact_credentials))
+      end
+
+      # Sanitizes agent-narrated free text (`$mcp_intent`): structured PII on top
+      # of the credential passes every captured string gets, which run first so a
+      # PII pattern never cuts a token in half and leaves the halves behind.
+      def sanitize_free_text(value)
+        return sanitize_captured_value(value) unless value.is_a?(String)
+        return BINARY_REDACTED_VALUE if binary_like?(value)
+
+        redact_captured_head(value, method(:redact_credentials), method(:redact_pii))
+      end
+
+      def redact_credentials(value)
         value = value.gsub(POSTHOG_TOKEN_PATTERN, REDACTED_VALUE)
         redact_secret_tokens(SecretDetection.redact_private_key_blocks(value))
+      end
+
+      # Redacts only the head of a string longer than truncation could keep, so
+      # the cost follows the captured part rather than the whole string. The kept
+      # part must read exactly as if the whole string were redacted, so the head
+      # ends just after a space. No token or word crosses one, and a head holding
+      # a private-key block start is never cut, so `redact` of the head is an
+      # exact prefix of `redact` of the whole, and the rest can be redacted on its
+      # own. `finish` (PII) has matches that can cross the cut, all of bounded
+      # length; redaction shrinks text, so a finished head too short to cover
+      # truncation's cut falls back to finishing the whole string.
+      def redact_captured_head(value, redact, finish = :itself.to_proc)
+        head = captured_head(value)
+        return finish.call(redact.call(value)) unless head
+
+        redacted = redact.call(head)
+        if redacted.length >= MIN_REDACTED_HEAD_LENGTH
+          finished = finish.call(redacted)
+          return finished + Truncation::TRUNCATION_SUFFIX if finished.length >= MIN_REDACTED_HEAD_LENGTH
+        end
+        finish.call(redacted + redact.call(value[head.length..]))
+      end
+
+      def captured_head(value)
+        return nil unless value.length > SCANNED_HEAD_LENGTH
+
+        space = value.rindex(' ', SCANNED_HEAD_LENGTH - 1)
+        head = space && value[0, space + 1]
+        head unless head.nil? || head.include?(SecretDetection::PEM_BLOCK_START)
       end
 
       # Redact credential-looking words, leaving surrounding text intact.
@@ -202,9 +250,7 @@ module PostHog
         result = event.dup
         result['response'] = sanitize_response(result['response']) unless result['response'].nil?
         result['parameters'] = sanitize_captured_value(result['parameters']) unless result['parameters'].nil?
-        unless result['user_intent'].nil?
-          result['user_intent'] = redact_pii(sanitize_captured_value(result['user_intent']))
-        end
+        result['user_intent'] = sanitize_free_text(result['user_intent']) unless result['user_intent'].nil?
         result['error'] = sanitize_exception_values(result['error']) unless result['error'].nil?
         result
       end
@@ -258,6 +304,10 @@ module PostHog
         return line unless line.is_a?(String)
         return BINARY_REDACTED_VALUE if binary_like?(line)
 
+        redact_captured_head(line, method(:redact_source_credentials))
+      end
+
+      def redact_source_credentials(line)
         redacted = SecretDetection.redact_private_key_blocks(line.gsub(POSTHOG_TOKEN_PATTERN, REDACTED_VALUE))
         redacted.gsub(/\S+/) { |word| SecretDetection.secret?(word) ? REDACTED_VALUE : word }
       end
@@ -390,6 +440,7 @@ module PostHog
         # loses its body. Covers the `RSA`/`EC`/`OPENSSH`/`ENCRYPTED` variants and
         # the PGP `BLOCK` spelling.
         PEM_PRIVATE_KEY_HINT = 'PRIVATE KEY'
+        PEM_BLOCK_START = '-----BEGIN'
         PEM_PRIVATE_KEY_BLOCK = /
           -----BEGIN[A-Z0-9\ ]*\ PRIVATE\ KEY(?:\ BLOCK)?-----
           .*?
