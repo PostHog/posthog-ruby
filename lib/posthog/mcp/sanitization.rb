@@ -136,22 +136,18 @@ module PostHog
       # Redacts only the head of a string longer than truncation could keep, so
       # the cost follows the captured part rather than the whole string. The kept
       # part must read exactly as if the whole string were redacted, so the head
-      # ends just after a space. No token or word crosses one, and a head holding
-      # a private-key block start is never cut, so `redact` of the head is an
-      # exact prefix of `redact` of the whole, and the rest can be redacted on its
-      # own. `finish` (PII) has matches that can cross the cut, all of bounded
-      # length; redaction shrinks text, so a finished head too short to cover
-      # truncation's cut falls back to finishing the whole string.
+      # ends just after a space, which no token or word crosses, and a head holding
+      # a private-key block start is never cut. `finish` (PII) has matches that
+      # can cross the cut, all of bounded length, so the head must stay twice as
+      # long as truncation keeps; when redaction shrinks it below that, the whole
+      # string is redacted instead.
       def redact_captured_head(value, redact, finish = :itself.to_proc)
         head = captured_head(value)
-        return finish.call(redact.call(value)) unless head
-
-        redacted = redact.call(head)
-        if redacted.length >= MIN_REDACTED_HEAD_LENGTH
-          finished = finish.call(redacted)
+        if head
+          finished = finish.call(redact.call(head))
           return finished + Truncation::TRUNCATION_SUFFIX if finished.length >= MIN_REDACTED_HEAD_LENGTH
         end
-        finish.call(redacted + redact.call(value[head.length..]))
+        finish.call(redact.call(value))
       end
 
       def captured_head(value)

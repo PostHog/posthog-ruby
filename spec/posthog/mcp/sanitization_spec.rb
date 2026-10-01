@@ -340,6 +340,19 @@ RSpec.describe PostHog::MCP::Sanitization do
         end
       end
     end
+
+    # The head redacts to almost nothing, and the rest holds no space: it must be
+    # redacted word by word as part of the whole string, not as one long word.
+    env_tail = "Result: #{"ANTHROPIC_KEY=sk-ant-api03-#{'Ab3' * 20}\n" * 5_000}"
+    {
+      sanitize_captured_value: "Result: #{'[redacted] ' * 5_000}",
+      sanitize_free_text: "Result: #{'[redacted] ' * 5_000}",
+      sanitize_source_line: "Result: #{"[redacted]\n" * 5_000}"
+    }.each do |sanitizer, expected|
+      it "#{sanitizer} redacts newline-separated keys after a head that redacts short" do
+        expect(described_class.public_send(sanitizer, env_tail)).to eq(expected)
+      end
+    end
   end
 end
 # rubocop:enable Layout/LineLength
