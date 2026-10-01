@@ -426,7 +426,7 @@ module PostHog
         MIN_ENTROPY_BITS = 3.8
         MIN_CHAR_CLASSES = 3
         HEX_DIGITS = '0123456789abcdefABCDEF'.chars.to_set.freeze
-        REJECT_CHARS = "()[]{}<>'\"`,;".chars.to_set.freeze
+        REJECT_CHARS = /[()\[\]{}<>'"`,;]/
         UUID_RE = /\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
         PATH_WORD_RE = /\A[a-z][a-z.]*\z/
         # A private key is redacted as a whole block, before anything is split into
@@ -514,11 +514,11 @@ module PostHog
         end
 
         def high_entropy_secret?(value)
-          return false if value.include?(' ') || path_or_url?(value) || UUID_RE.match?(value)
+          return false if value.include?(' ') || REJECT_CHARS.match?(value)
+          return false if path_or_url?(value) || UUID_RE.match?(value)
 
           counts = value.each_char.tally
           distinct = counts.keys
-          return false if distinct.any? { |ch| REJECT_CHARS.include?(ch) }
 
           has_lower = has_upper = has_digit = has_symbol = false
           hex_only = true

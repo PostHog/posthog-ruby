@@ -74,6 +74,15 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(described_class.sanitize_captured_value('revenue warehouse unreachable (period=q3)'))
         .to eq('revenue warehouse unreachable (period=q3)')
     end
+
+    it 'passes a large image inlined in HTML quickly' do
+      # An HTML email embeds its images as `data:` URIs, one word as long as the
+      # image, so the secret check sees it whole.
+      html = %(<p>Hi</p> <img src="data:image/png;base64,#{'iVBORw0KGgo' * 3_000_000}" alt="logo"/>)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(described_class.sanitize_captured_value(html)).to eq(html)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
+    end
   end
 
   describe '.stringify_keys' do
