@@ -84,7 +84,7 @@ module PostHog
           sink = resolved_client ? Sink.new(resolved_client) : nil
           data = TrackingData.new(options: opts, sink: sink, server_name: safe_call(server, :name),
                                   server_version: safe_call(server, :version))
-          install_extensions!
+          install_extensions!(opts)
           server.instance_variable_set(:@__posthog_mcp, data)
           register_missing_capability_tool(server, data)
           Analytics.new(server)
@@ -155,6 +155,7 @@ module PostHog
       # @api private
       def reset_for_tests!
         @experimental_notice_shown = false
+        @extensions_installed = false
       end
 
       private
@@ -193,14 +194,22 @@ module PostHog
         Log.warn(data.options, "Warning: could not register the #{name} tool - #{e.class}: #{e.message}")
       end
 
-      def install_extensions!
+      def install_extensions!(options)
         return if @extensions_installed
 
         ::MCP::Server.prepend(ServerExtension)
-        if defined?(::MCP::Server::Transports::StreamableHTTPTransport)
-          ::MCP::Server::Transports::StreamableHTTPTransport.prepend(TransportExtension)
-        end
+        install_transport_extension(options)
         @extensions_installed = true
+      end
+
+      # The `mcp` gem autoloads its Streamable HTTP transport and that file raises
+      # LoadError without `rack`, which a stdio-only server legitimately lacks.
+      def install_transport_extension(options)
+        return unless defined?(::MCP::Server::Transports::StreamableHTTPTransport)
+
+        ::MCP::Server::Transports::StreamableHTTPTransport.prepend(TransportExtension)
+      rescue LoadError => e
+        Log.debug(options, "Skipping the Streamable HTTP transport extension - #{e.message}")
       end
     end
   end
