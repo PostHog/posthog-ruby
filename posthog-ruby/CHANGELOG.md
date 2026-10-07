@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.26.3
+
+### Patch Changes
+
+- 4970ac8: Fix `PostHog::MCP.instrument` raising `LoadError` at boot on stdio-only MCP servers that don't have the `rack` gem installed. A missing `rack` now only skips the Streamable HTTP transport extension.
+
 ## 3.26.2
 
 ### Patch Changes
