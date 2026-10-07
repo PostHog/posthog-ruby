@@ -3,6 +3,7 @@
 # rubocop:disable Layout/LineLength
 
 require_relative 'spec_helper'
+require 'open3'
 
 class PostHogMcpSpecEchoTool < MCP::Tool
   tool_name 'echo'
@@ -146,6 +147,37 @@ RSpec.describe PostHog::MCP do
       server.handle(initialize_request)
       expect(client.queued_messages).to eq(0)
       handle.capture('custom')
+    end
+
+    it 'instruments a stdio-only server when the rack gem cannot be loaded' do
+      script = <<~RUBY
+        module Kernel
+          alias_method :require_without_rack_block, :require
+          def require(name)
+            raise LoadError, 'cannot load such file -- rack' if name == 'rack'
+
+            require_without_rack_block(name)
+          end
+        end
+        require 'posthog/mcp'
+        class EchoTool < MCP::Tool
+          tool_name 'echo'
+          input_schema(properties: { message: { type: 'string' } })
+          def self.call(message: nil, **) = MCP::Tool::Response.new([{ type: 'text', text: message }])
+        end
+        client = PostHog::Client.new(api_key: 'phc_test', test_mode: true)
+        server = MCP::Server.new(name: 'stdio', version: '1.0.0', tools: [EchoTool])
+        messages = []
+        handle = PostHog::MCP.instrument(server, client, logger: ->(m) { messages << m })
+        server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hi' } } })
+        events = []
+        events << client.dequeue_last_message while client.queued_messages.positive?
+        puts [handle.class, events.map { |e| e[:event] }.include?('$mcp_tool_call'), messages.grep(/rack/).size].inspect
+      RUBY
+
+      stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', '-e', script)
+      expect(status.success?).to be(true), stderr
+      expect(stdout.lines.last).to eq("[PostHog::MCP::Analytics, true, 1]\n")
     end
 
     it 'falls back to the posthog-rails facade client when present' do
