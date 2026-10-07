@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.18.7
+
+### Patch Changes
+
+- 2952fbf: Update the pinned `posthog-ruby` dependency from 3.23.7 to 3.26.2 to include the latest core SDK fixes and features.
+
 ## 3.18.6
 
 ### Patch Changes
