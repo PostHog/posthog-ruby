@@ -4,7 +4,7 @@ This repository uses [Changesets](https://github.com/changesets/changesets) for 
 
 The gems have independent version numbers, but releases follow their dependency direction:
 
-- A releasable change to `posthog-ruby` must include changesets for both `posthog-ruby` and `posthog-rails`. Select a Rails patch release when only its core SDK dependency changes, so Rails users receive the updated SDK.
+- A releasable change to `posthog-ruby` must include changesets for both `posthog-ruby` and `posthog-rails`. Select a Rails patch release when only its core SDK dependency changes and the update is backwards compatible, so Rails users receive the updated SDK.
 - A Rails-only change needs a changeset for `posthog-rails`; it does not require a `posthog-ruby` changeset or release.
 - If both packages have code changes, choose each package's release type based on its changes.
 
