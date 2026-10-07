@@ -148,6 +148,30 @@ RSpec.describe PostHog::MCP do
       handle.capture('custom')
     end
 
+    context 'when the rack gem is not installed (stdio-only server)' do
+      let(:logger_messages) { [] }
+
+      before do
+        allow(Kernel).to receive(:warn)
+        PostHog::MCP.instance_variable_set(:@extensions_installed, false)
+        allow(MCP::Server::Transports::StreamableHTTPTransport).to receive(:prepend)
+          .and_raise(LoadError, "The 'rack' gem is required to use the StreamableHTTPTransport.")
+      end
+
+      after { PostHog::MCP.instance_variable_set(:@extensions_installed, false) }
+
+      it 'skips the HTTP extension, still instruments the server, and logs it' do
+        handle = described_class.instrument(server, client, logger: ->(message) { logger_messages << message })
+        expect(handle).to be_a(PostHog::MCP::Analytics)
+        expect(described_class.tracking_data(server)).not_to be_nil
+        expect(logger_messages).to include(a_string_including('rack'))
+
+        server.handle(initialize_request)
+        server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
+        expect(drain_events(client).map { |e| e[:event] }).to eq(%w[$mcp_initialize $mcp_tool_call])
+      end
+    end
+
     it 'falls back to the posthog-rails facade client when present' do
       allow(Kernel).to receive(:warn)
       facade_client = PostHog::Client.new(api_key: 'phc_facade', test_mode: true)
