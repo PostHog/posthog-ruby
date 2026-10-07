@@ -15,7 +15,7 @@ group :development, :test do
   gem 'activesupport', '~> 7.1'
   gem 'commander', '~> 5.0'
   gem 'mcp', '>= 1.4'
-  gem 'oj', '~> 3.17.6'
+  gem 'oj', '~> 3.17.7'
   gem 'prettier'
   gem 'railties', '~> 7.1'
   gem 'rake', '~> 13.4.2'
