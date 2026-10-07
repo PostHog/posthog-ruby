@@ -2,7 +2,13 @@
 
 This repository uses [Changesets](https://github.com/changesets/changesets) for version management and changelog generation, with GitHub Actions publishing `posthog-ruby` and `posthog-rails` to RubyGems.
 
-The gems are versioned and released independently. Add the changeset to the package that changed (`posthog-ruby` or `posthog-rails`); if both changed, select both packages. `posthog-rails` is not bumped automatically when `posthog-ruby` changes, so Rails releases must be selected intentionally.
+The gems have independent version numbers, but releases follow their dependency direction:
+
+- A releasable change to `posthog-ruby` must include changesets for both `posthog-ruby` and `posthog-rails`. Select a Rails patch release when only its core SDK dependency changes and the update is backwards compatible, so Rails users receive the updated SDK.
+- A Rails-only change needs a changeset for `posthog-rails`; it does not require a `posthog-ruby` changeset or release.
+- If both packages have code changes, choose each package's release type based on its changes.
+
+`posthog-rails` is not bumped automatically when `posthog-ruby` changes. Contributors must explicitly include it in the changeset.
 
 ## How to release
 
@@ -15,7 +21,7 @@ pnpm changeset
 ```
 
 This will prompt you to:
-- select the changed package or packages (`posthog-ruby` and/or `posthog-rails`)
+- select both packages for a core Ruby change, or only `posthog-rails` for a Rails-only change
 - select the release type (`patch`, `minor`, or `major`) for each package
 - write a summary of the change
 
@@ -40,7 +46,7 @@ No release label is required. When the PR is merged to `main`, the release workf
    - Publish only the packages whose versions changed
    - Create package-specific git tags and GitHub releases, for example `posthog-ruby-v3.13.1` or `posthog-rails-v3.14.0`
 
-When both packages changed, the workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`. The Rails gemspec pins its `posthog-ruby` dependency to the exact core SDK version present in the release commit, so Rails-only releases intentionally keep using the latest core SDK version recorded on `main`.
+When both packages are released, the workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`. The Rails gemspec pins its `posthog-ruby` dependency to the exact core SDK version present in the release commit. Including a Rails changeset with each core Ruby release updates that pin in the published Rails gem; a Rails-only release uses the core SDK version already recorded on `main`.
 
 ## Manual trigger
 
