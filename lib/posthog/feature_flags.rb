@@ -1477,7 +1477,7 @@ module PostHog
 
           # Parse response body to hash
           begin
-            response = JSON.parse(res.body, { symbolize_names: true })
+            response = JSON.parse(res.body, symbolize_names: true)
             # Only add status (and etag if requested) if response is a hash
             extra_fields = { status: status_code }
             extra_fields[:etag] = etag if include_etag

@@ -491,6 +491,14 @@ module PostHog
       JSON.parse(File.read(File.join(__dir__, 'fixtures', 'test-flags-v4.json')), symbolize_names: true)
     end
     describe '#get_feature_flag' do
+      it 'parses flag responses with keyword JSON options' do
+        body = { featureFlags: { 'enabled-flag' => true }, featureFlagPayloads: {} }.to_json
+        stub_request(:post, flags_endpoint).to_return(status: 200, body: body)
+        expect(JSON).to receive(:parse).with(body, symbolize_names: true).and_call_original
+
+        expect(client.get_feature_flag('enabled-flag', 'test-distinct-id')).to eq(true)
+      end
+
       it 'calls the $feature_flag_called event with additional properties' do
         stub_request(:post, flags_endpoint)
           .to_return(status: 200, body: flags_v4_response.to_json)
