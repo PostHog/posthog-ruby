@@ -3,6 +3,7 @@
 # rubocop:disable Layout/LineLength
 
 require_relative 'spec_helper'
+require 'open3'
 
 class PostHogMcpSpecEchoTool < MCP::Tool
   tool_name 'echo'
@@ -148,26 +149,35 @@ RSpec.describe PostHog::MCP do
       handle.capture('custom')
     end
 
-    context 'when the rack gem is not installed (stdio-only server)' do
-      let(:logger_messages) { [] }
+    it 'instruments a stdio-only server when the rack gem cannot be loaded' do
+      script = <<~RUBY
+        module Kernel
+          alias_method :require_without_rack_block, :require
+          def require(name)
+            raise LoadError, 'cannot load such file -- rack' if name == 'rack'
 
-      before do
-        allow(Kernel).to receive(:warn)
-        allow(MCP::Server::Transports::StreamableHTTPTransport).to receive(:prepend)
-          .and_raise(LoadError, "The 'rack' gem is required to use the StreamableHTTPTransport.")
-      end
+            require_without_rack_block(name)
+          end
+        end
+        require 'posthog/mcp'
+        class EchoTool < MCP::Tool
+          tool_name 'echo'
+          input_schema(properties: { message: { type: 'string' } })
+          def self.call(message: nil, **) = MCP::Tool::Response.new([{ type: 'text', text: message }])
+        end
+        client = PostHog::Client.new(api_key: 'phc_test', test_mode: true)
+        server = MCP::Server.new(name: 'stdio', version: '1.0.0', tools: [EchoTool])
+        messages = []
+        handle = PostHog::MCP.instrument(server, client, logger: ->(m) { messages << m })
+        server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hi' } } })
+        events = []
+        events << client.dequeue_last_message while client.queued_messages.positive?
+        puts [handle.class, events.map { |e| e[:event] }.include?('$mcp_tool_call'), messages.grep(/rack/).size].inspect
+      RUBY
 
-      it 'skips the HTTP extension, still instruments the server, and logs it' do
-        handle = described_class.instrument(server, client, capture_model: false, enable_conversation_id: false,
-                                                            logger: ->(message) { logger_messages << message })
-        expect(handle).to be_a(PostHog::MCP::Analytics)
-        expect(described_class.tracking_data(server)).not_to be_nil
-        expect(logger_messages).to include(a_string_including('rack'))
-
-        server.handle(initialize_request)
-        server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi' } }))
-        expect(drain_events(client).map { |e| e[:event] }).to eq(%w[$mcp_initialize $mcp_tool_call])
-      end
+      stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', '-e', script)
+      expect(status.success?).to be(true), stderr
+      expect(stdout.lines.last).to eq("[PostHog::MCP::Analytics, true, 1]\n")
     end
 
     it 'falls back to the posthog-rails facade client when present' do

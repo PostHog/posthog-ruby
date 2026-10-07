@@ -155,7 +155,6 @@ module PostHog
       # @api private
       def reset_for_tests!
         @experimental_notice_shown = false
-        @extensions_installed = false
       end
 
       private
