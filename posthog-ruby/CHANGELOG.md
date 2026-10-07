@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.26.4
+
+### Patch Changes
+
+- 5adef1c: Fix feature flag and remote config response parsing with JSON 3, restoring remote flag evaluation and local definition loading.
+
 ## 3.26.3
 
 ### Patch Changes

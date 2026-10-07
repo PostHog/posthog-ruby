@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.18.8
+
+### Patch Changes
+
+- 5adef1c: Fix feature flag and remote config response parsing with JSON 3, restoring remote flag evaluation and local definition loading.
+
 ## 3.18.7
 
 ### Patch Changes
