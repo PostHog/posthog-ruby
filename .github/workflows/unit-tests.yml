@@ -39,6 +39,29 @@ jobs:
       - name: Run RSpec tests
         run: bundle exec rspec
 
+  latest-rails:
+    name: RSpec (latest Rails / stable Ruby)
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: gemfiles/otel.gemfile
+      RAILS_VERSION: '>= 5.2'
+      RAILS_ENV: test
+      GH_ACTIONS_UNIT_TESTS: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Use stable Ruby
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: ruby
+          bundler: 4.0.13
+      - name: Resolve latest Rails and dependencies
+        run: bundle update --all
+      - name: Report resolved versions and require logs dependencies
+        run: |
+          bundle exec ruby -rrails -rjson -ropentelemetry-sdk -ropentelemetry-logs-sdk -ropentelemetry/exporter/otlp_logs -e 'puts "Ruby #{RUBY_VERSION}, Rails #{Rails.version}, JSON #{JSON::VERSION}"'
+      - name: Run RSpec tests
+        run: bundle exec rspec
+
   logs-integration:
     name: Logs integration (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
