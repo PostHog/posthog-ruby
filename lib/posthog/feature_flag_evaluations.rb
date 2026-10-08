@@ -82,9 +82,10 @@ module PostHog
 
     # @param key [String, Symbol] The feature flag key.
     # @param default_value [Boolean, nil] Returned when the flag has no value in this
-    #   snapshot — it was never loaded, the evaluation failed, or no flag with that key
-    #   exists. A flag that does have a value, including `false` and variant strings,
-    #   always wins over this default. Defaults to `nil`, which keeps the historical
+    #   snapshot — it was never loaded, the `/flags` request failed, or no flag with that
+    #   key exists. A flag that does have a value, including `false` and variant strings,
+    #   always wins over this default; so does a flag the server returned but marked as
+    #   failed, which resolves to `false`. Defaults to `nil`, which keeps the historical
     #   `false` result for a missing flag.
     # @return [Boolean] true when the flag is enabled, false when disabled, and the
     #   caller-supplied default (or false when none was supplied) when the flag is missing.

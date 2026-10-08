@@ -149,6 +149,22 @@ module PostHog
         expect(snapshot.enabled?('anything')).to be(false)
       end
 
+      it 'enabled? uses the caller default when the /flags request fails' do
+        stub_request(:post, FLAGS_ENDPOINT).to_return(status: 500, body: 'error')
+        snapshot = client.evaluate_flags('user-1')
+        expect(snapshot.enabled?('boolean-flag', default_value: true)).to be(true)
+        expect(snapshot.enabled?('boolean-flag')).to be(false)
+      end
+
+      it 'enabled? keeps a flag marked failed by /flags as false, ignoring the caller default' do
+        stub_flags(
+          flags: { 'failed-flag' => { key: 'failed-flag', enabled: false, variant: nil, failed: true } },
+          errorsWhileComputingFlags: true
+        )
+        snapshot = client.evaluate_flags('user-1')
+        expect(snapshot.enabled?('failed-flag', default_value: true)).to be(false)
+      end
+
       it 'enabled? still reports the evaluated response, not the default, on $feature_flag_called' do
         stub_flags(flags_response)
         snapshot = client.evaluate_flags('user-1')
