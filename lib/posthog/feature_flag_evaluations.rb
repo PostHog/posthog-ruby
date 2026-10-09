@@ -81,11 +81,20 @@ module PostHog
     end
 
     # @param key [String, Symbol] The feature flag key.
-    # @return [Boolean] true when the flag is enabled, false when disabled or missing.
-    def enabled?(key)
+    # @param default_value [Boolean, nil] Returned when the flag has no value in this
+    #   snapshot — it was never loaded, the `/flags` request failed, or no flag with that
+    #   key exists. A flag that does have a value, including `false` and variant strings,
+    #   always wins over this default; so does a flag the server returned but marked as
+    #   failed, which resolves to `false`. Defaults to `nil`, which keeps the historical
+    #   `false` result for a missing flag.
+    # @return [Boolean] true when the flag is enabled, false when disabled, and the
+    #   caller-supplied default (or false when none was supplied) when the flag is missing.
+    def enabled?(key, default_value: nil)
       key = key.to_s
       flag = @flags[key]
       _record_access(key, flag)
+      return !!default_value if flag.nil? && !default_value.nil?
+
       flag&.enabled ? true : false
     end
 
