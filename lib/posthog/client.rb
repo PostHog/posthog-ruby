@@ -85,9 +85,9 @@ module PostHog
 
     # @param opts [Hash] Client configuration.
     # @option opts [String, nil] :api_key Your project's API key. Missing or blank values disable the client.
-    # @option opts [String, nil] :secret_key The credential used for local feature flag evaluation and remote
-    #   config. Accepts either a Personal API Key (`phx_...`) or a Project Secret API Key (`phs_...`). Required
-    #   for local feature flag evaluation.
+    # @option opts [String, nil] :secret_key The credential used to fetch local feature flag definitions and remote
+    #   config. Accepts either a Personal API Key (`phx_...`) or a Project Secret API Key (`phs_...`). Not required
+    #   for local evaluation when definitions are read from +:flag_definition_cache_provider+.
     # @option opts [String, nil] :personal_api_key
     #   @deprecated Use +:secret_key+ instead. Retained as an alias; when both are supplied, +:secret_key+ wins.
     # @option opts [String] :host Fully qualified hostname of the PostHog server. Defaults to `https://us.i.posthog.com`.
@@ -180,6 +180,7 @@ module PostHog
       @feature_flags_poller = nil
       @secret_key = secret_key
       @personal_api_key = secret_key
+      @flag_definition_cache_provider = opts[:flag_definition_cache_provider]
 
       if @disabled && !opts[:silence_disabled_client_error]
         logger.error('api_key is missing or empty after trimming whitespace; check your project API key')
@@ -214,7 +215,7 @@ module PostHog
             opts[:host],
             opts[:feature_flag_request_timeout_seconds] || Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS,
             opts[:on_error],
-            flag_definition_cache_provider: opts[:flag_definition_cache_provider],
+            flag_definition_cache_provider: @flag_definition_cache_provider,
             feature_flag_request_max_retries: opts[:feature_flag_request_max_retries],
             async_load: opts[:feature_flags_async_load] == true,
             user_agent: @headers['User-Agent'],
@@ -883,9 +884,9 @@ module PostHog
     def reload_feature_flags
       return if @disabled
 
-      unless @secret_key
+      unless @secret_key || @flag_definition_cache_provider
         logger.error(
-          'You need to specify a secret_key to locally evaluate feature flags'
+          'You need to specify a secret_key or flag_definition_cache_provider to locally evaluate feature flags'
         )
         return
       end

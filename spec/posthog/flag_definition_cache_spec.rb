@@ -130,6 +130,186 @@ module PostHog
       client.instance_variable_get(:@feature_flags_poller)
     end
 
+    describe 'cache consumers without a secret key' do
+      let(:definitions_request) do
+        stub_request(:get, local_eval_url).to_return(status: 200, body: sample_flags_data.to_json)
+      end
+      let(:flags_request) do
+        stub_request(:post, 'https://us.i.posthog.com/flags/?v=2')
+          .to_return(status: 200, body: { featureFlags: {} }.to_json)
+      end
+      let(:disabled_flags_data) do
+        sample_flags_data.merge('flags' => sample_flags_data['flags'].map { |flag| flag.merge('active' => false) })
+      end
+
+      before do
+        definitions_request
+        flags_request
+        provider.should_fetch_return_value = false
+        provider.stored_data = sample_flags_data
+      end
+
+      after do
+        @client&.shutdown
+        expect(definitions_request).not_to have_been_requested
+        expect(flags_request).not_to have_been_requested
+      end
+
+      def build_cache_consumer(**opts)
+        @client = Client.new(
+          api_key: API_KEY,
+          test_mode: true,
+          flag_definition_cache_provider: provider,
+          **opts
+        )
+      end
+
+      def cached_flag_value(client, only_evaluate_locally: false)
+        client.evaluate_flags(
+          'some-user',
+          flag_keys: ['test-flag'],
+          person_properties: { 'region' => 'USA' },
+          only_evaluate_locally: only_evaluate_locally
+        ).get_flag('test-flag')
+      end
+
+      it 'loads cached definitions at construction and evaluates through public entry points' do
+        expect(provider).to receive(:should_fetch_flag_definitions?).ordered.and_call_original
+        expect(provider).to receive(:flag_definitions).ordered.and_call_original
+        client = build_cache_consumer
+
+        expect(client.feature_flags_loaded?).to be(true)
+        expect(cached_flag_value(client)).to be(true)
+        expect(client.get_feature_flag('disabled-flag', 'some-user')).to be(false)
+        expect(client.get_feature_flag('test-flag', 'some-user', person_properties: { region: 'USA' })).to be(true)
+        expect(client.get_all_flags('some-user', person_properties: { region: 'USA' }))
+          .to eq('test-flag' => true, 'disabled-flag' => false)
+        expect(provider.get_call_count).to eq(1)
+        expect(provider.on_received_call_count).to eq(0)
+      end
+
+      it 'refreshes definitions synchronously through public reload' do
+        client = build_cache_consumer
+        expect(cached_flag_value(client)).to be(true)
+        provider.stored_data = disabled_flags_data
+
+        client.reload_feature_flags
+
+        expect(provider.get_call_count).to eq(2)
+        expect(cached_flag_value(client)).to be(false)
+      end
+
+      it 'refreshes cached definitions through the existing polling task and stops on shutdown' do
+        client = build_cache_consumer(feature_flags_polling_interval: 0.05)
+        provider.stored_data = disabled_flags_data
+
+        eventually { expect(cached_flag_value(client)).to be(false) }
+        expect(provider.get_call_count).to be >= 2
+        client.shutdown
+        expect(provider.shutdown_call_count).to eq(1)
+        expect(get_poller(client).instance_variable_get(:@task).running?).to be(false)
+      end
+
+      it 'loads cached definitions on the background thread when async loading is enabled' do
+        release = Queue.new
+        started = Queue.new
+        fetch_thread = nil
+        allow(provider).to receive(:flag_definitions) do
+          fetch_thread = Thread.current
+          started << true
+          release.pop
+          sample_flags_data
+        end
+        client = build_cache_consumer(feature_flags_async_load: true)
+        eventually { expect(started).not_to be_empty }
+
+        expect(client.feature_flags_loaded?).to be(false)
+        expect(cached_flag_value(client, only_evaluate_locally: true)).to be_nil
+        expect(fetch_thread).not_to eq(Thread.current)
+        release << true
+        eventually { expect(client.feature_flags_loaded?).to be(true) }
+        expect(cached_flag_value(client)).to be(true)
+      ensure
+        release&.close
+      end
+
+      it 'retries loading on first evaluation after an initial cache miss' do
+        provider.stored_data = nil
+        client = build_cache_consumer
+        expect(client.feature_flags_loaded?).to be(false)
+        provider.stored_data = sample_flags_data
+
+        expect(cached_flag_value(client)).to be(true)
+        expect(client.feature_flags_loaded?).to be(true)
+        expect(provider.get_call_count).to eq(2)
+      end
+
+      {
+        'cache miss' => proc { |cache| cache.stored_data = nil },
+        'cache read failure' => proc { |cache| cache.get_error = RuntimeError.new('Redis timeout') },
+        'positive fetch decision' => proc { |cache| cache.should_fetch_return_value = true },
+        'fetch decision failure' => proc { |cache| cache.should_fetch_error = RuntimeError.new('Redis unavailable') }
+      }.each do |scenario, configure_provider|
+        it "skips direct fetches and warns on an initial #{scenario}" do
+          configure_provider.call(provider)
+          expect(Logging.logger).to receive(:warn).with(/secret_key.*fetch flag definitions/)
+          client = build_cache_consumer
+
+          expect(client.feature_flags_loaded?).to be(false)
+          expect(provider.get_call_count).to eq(scenario.include?('decision') ? 0 : 1)
+          expect(provider.on_received_call_count).to eq(0)
+        end
+
+        it "preserves the last snapshot on reload after a #{scenario}" do
+          provider.stored_data = sample_flags_data.merge('property_matching_version' => 2)
+          client = build_cache_consumer
+          configure_provider.call(provider)
+          reads_before_reload = provider.get_call_count
+
+          client.reload_feature_flags
+
+          expect(client.feature_flags_loaded?).to be(true)
+          expect(cached_flag_value(client)).to be(true)
+          expect(get_poller(client)._evaluation_snapshot[:property_matching_version]).to eq(2)
+          expect(provider.get_call_count).to eq(reads_before_reload) if scenario.include?('decision')
+          expect(provider.on_received_call_count).to eq(0)
+        end
+      end
+
+      it 'hydrates matching metadata and resets to legacy when a fresh snapshot omits the version' do
+        data = sample_flags_data.merge('property_matching_version' => 2)
+        data['flags'] = [{
+          'key' => 'versioned-flag', 'active' => true,
+          'filters' => { 'groups' => [{ 'properties' => [{ 'key' => 'value', 'value' => false }] }] }
+        }]
+        provider.stored_data = data
+        client = build_cache_consumer
+        expect(client.get_feature_flag('versioned-flag', 'user', person_properties: { value: 'banana' })).to be(false)
+
+        provider.stored_data = data.except('property_matching_version')
+        client.reload_feature_flags
+
+        expect(client.get_feature_flag('versioned-flag', 'user', person_properties: { value: 'banana' })).to be(true)
+      end
+
+      it 'does not consult the provider without a project API key' do
+        client = build_cache_consumer(api_key: nil)
+        client.reload_feature_flags
+
+        expect(client.feature_flags_loaded?).to be(false)
+        expect(provider.should_fetch_call_count).to eq(0)
+      end
+
+      it 'keeps local evaluation disabled without either a secret key or a provider' do
+        client = build_cache_consumer(flag_definition_cache_provider: nil)
+        client.reload_feature_flags
+
+        expect(client.feature_flags_loaded?).to be(false)
+        expect(cached_flag_value(client, only_evaluate_locally: true)).to be_nil
+        expect(get_poller(client).instance_variable_get(:@task).running?).to be(false)
+      end
+    end
+
     describe 'cache initialization' do
       it 'uses cached data when should_fetch? returns false and cache has data' do
         provider.should_fetch_return_value = false
