@@ -1260,7 +1260,8 @@ module PostHog
 
       if @flag_definition_cache_provider
         begin
-          should_fetch = @flag_definition_cache_provider.should_fetch_flag_definitions?
+          # Cache-only readers must not acquire or renew fetch leadership.
+          should_fetch = @secret_key && @flag_definition_cache_provider.should_fetch_flag_definitions?
         rescue StandardError => e
           logger.error("[FEATURE FLAGS] Cache provider should_fetch error: #{e}")
           should_fetch = true
@@ -1271,6 +1272,10 @@ module PostHog
         begin
           cached_data = @flag_definition_cache_provider.flag_definitions
           if cached_data
+            unless cached_data.is_a?(Hash) && get_by_symbol_or_string_key(cached_data, 'flags').is_a?(Array)
+              raise ArgumentError, 'Cached flag definitions must contain a flags array'
+            end
+
             logger.debug '[FEATURE FLAGS] Using cached flag definitions from external cache'
             _apply_flag_definitions(cached_data)
             return

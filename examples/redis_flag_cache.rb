@@ -19,6 +19,10 @@
 #     flag_definition_cache_provider: cache
 #   )
 #
+# For cache-only readers, omit secret_key and use the same provider. The SDK
+# reads cached definitions without calling the leader-election method. Keep
+# at least one worker with secret_key configured to publish fresh definitions.
+#
 # Requirements:
 #   gem install redis
 
@@ -33,8 +37,8 @@ require 'securerandom'
 # from making N redundant API calls.
 #
 # Uses leader election:
-# - One instance "wins" and becomes responsible for fetching
-# - Other instances read from the shared cache
+# - One instance with secret_key "wins" and becomes responsible for fetching
+# - Other instances read from the shared cache; workers without secret_key do not compete
 # - If the leader dies, the lock expires (TTL) and another instance takes over
 #
 # Uses Lua scripts for atomic operations, following Redis distributed lock
@@ -90,7 +94,8 @@ class RedisFlagCache
 
   # Determine if this instance should fetch flag definitions from PostHog.
   #
-  # Atomically either acquires the lock (if free) or extends it (if we own it).
+  # Called by the SDK only for workers with secret_key configured. Atomically
+  # either acquires the lock (if free) or extends it (if we own it).
   #
   # @return [Boolean] true if this instance is the leader and should fetch
   def should_fetch_flag_definitions?

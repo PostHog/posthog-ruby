@@ -153,6 +153,8 @@ module PostHog
         @client&.shutdown
         expect(definitions_request).not_to have_been_requested
         expect(flags_request).not_to have_been_requested
+        expect(provider.should_fetch_call_count).to eq(0)
+        expect(provider.on_received_call_count).to eq(0)
       end
 
       def build_cache_consumer(**opts)
@@ -174,8 +176,8 @@ module PostHog
       end
 
       it 'loads cached definitions at construction and evaluates through public entry points' do
-        expect(provider).to receive(:should_fetch_flag_definitions?).ordered.and_call_original
-        expect(provider).to receive(:flag_definitions).ordered.and_call_original
+        expect(provider).not_to receive(:should_fetch_flag_definitions?)
+        expect(provider).to receive(:flag_definitions).and_call_original
         client = build_cache_consumer
 
         expect(client.feature_flags_loaded?).to be(true)
@@ -247,8 +249,8 @@ module PostHog
       {
         'cache miss' => proc { |cache| cache.stored_data = nil },
         'cache read failure' => proc { |cache| cache.get_error = RuntimeError.new('Redis timeout') },
-        'positive fetch decision' => proc { |cache| cache.should_fetch_return_value = true },
-        'fetch decision failure' => proc { |cache| cache.should_fetch_error = RuntimeError.new('Redis unavailable') }
+        'malformed cache' => proc { |cache| cache.stored_data = { 'flags' => 'invalid' } },
+        'cache without flags' => proc { |cache| cache.stored_data = {} }
       }.each do |scenario, configure_provider|
         it "skips direct fetches and warns on an initial #{scenario}" do
           configure_provider.call(provider)
@@ -256,7 +258,7 @@ module PostHog
           client = build_cache_consumer
 
           expect(client.feature_flags_loaded?).to be(false)
-          expect(provider.get_call_count).to eq(scenario.include?('decision') ? 0 : 1)
+          expect(provider.get_call_count).to eq(1)
           expect(provider.on_received_call_count).to eq(0)
         end
 
@@ -271,8 +273,36 @@ module PostHog
           expect(client.feature_flags_loaded?).to be(true)
           expect(cached_flag_value(client)).to be(true)
           expect(get_poller(client)._evaluation_snapshot[:property_matching_version]).to eq(2)
-          expect(provider.get_call_count).to eq(reads_before_reload) if scenario.include?('decision')
+          expect(provider.get_call_count).to eq(reads_before_reload + 1)
           expect(provider.on_received_call_count).to eq(0)
+        end
+      end
+
+      {
+        'positive fetch decision' => proc { |cache| cache.should_fetch_return_value = true },
+        'fetch decision failure' => proc { |cache| cache.should_fetch_error = RuntimeError.new('Redis unavailable') }
+      }.each do |scenario, configure_provider|
+        it "reads cached definitions without consulting a provider with a #{scenario}" do
+          configure_provider.call(provider)
+          client = build_cache_consumer
+
+          expect(cached_flag_value(client)).to be(true)
+          provider.stored_data = disabled_flags_data
+          client.reload_feature_flags
+
+          expect(cached_flag_value(client)).to be(false)
+          expect(provider.get_call_count).to eq(2)
+        end
+      end
+
+      [nil, '', '   '].each do |key|
+        it "reads the cache when privileged keys normalize to nil from #{key.inspect}" do
+          provider.should_fetch_return_value = true
+          client = build_cache_consumer(secret_key: key, personal_api_key: key)
+
+          expect(client.feature_flags_loaded?).to be(true)
+          expect(cached_flag_value(client)).to be(true)
+          expect(provider.get_call_count).to eq(1)
         end
       end
 
@@ -298,6 +328,7 @@ module PostHog
 
         expect(client.feature_flags_loaded?).to be(false)
         expect(provider.should_fetch_call_count).to eq(0)
+        expect(provider.get_call_count).to eq(0)
       end
 
       it 'keeps local evaluation disabled without either a secret key or a provider' do
@@ -307,6 +338,64 @@ module PostHog
         expect(client.feature_flags_loaded?).to be(false)
         expect(cached_flag_value(client, only_evaluate_locally: true)).to be_nil
         expect(get_poller(client).instance_variable_get(:@task).running?).to be(false)
+      end
+    end
+
+    describe 'shared fetch leadership' do
+      it 'lets a keyed publisher refresh while a keyless reader uses the same cache' do
+        reader_provider = provider
+        publisher_provider = MockCacheProvider.new
+        shared_data = sample_flags_data
+        leader = nil
+        [reader_provider, publisher_provider].each do |cache|
+          allow(cache).to receive(:flag_definitions).and_wrap_original do |method|
+            method.call
+            shared_data
+          end
+          allow(cache).to receive(:should_fetch_flag_definitions?).and_wrap_original do |method|
+            method.call
+            leader ||= cache
+            leader == cache
+          end
+        end
+        allow(publisher_provider).to receive(:on_flag_definitions_received).and_wrap_original do |method, data|
+          method.call(data)
+          shared_data = JSON.parse(JSON.dump(data))
+        end
+        definition_request = stub_request(:get, local_eval_url)
+                             .to_return(status: 200, body: sample_flags_data.to_json)
+        reader = Client.new(api_key: API_KEY, test_mode: true, flag_definition_cache_provider: reader_provider)
+        publisher = Client.new(
+          api_key: API_KEY, secret_key: API_KEY, test_mode: true,
+          flag_definition_cache_provider: publisher_provider
+        )
+        expect(leader).to eq(publisher_provider)
+        expect(definition_request).to have_been_requested.once
+
+        updated_data = sample_flags_data.merge(
+          'flags' => sample_flags_data['flags'].map { |flag| flag.merge('active' => false) },
+          'property_matching_version' => 2, 'minimal_flag_called_events' => true
+        )
+        stub_request(:get, local_eval_url).to_return(status: 200, body: updated_data.to_json)
+        reader.reload_feature_flags
+        publisher.reload_feature_flags
+        reader.reload_feature_flags
+
+        expect(reader.get_feature_flag('test-flag', 'user', only_evaluate_locally: true)).to be(false)
+        expect(publisher.get_feature_flag('test-flag', 'user', only_evaluate_locally: true)).to be(false)
+        expect(reader_provider.should_fetch_call_count).to eq(0)
+        expect(reader_provider.on_received_call_count).to eq(0)
+        expect(reader_provider.get_call_count).to eq(3)
+        expect(publisher_provider.should_fetch_call_count).to eq(2)
+        expect(publisher_provider.on_received_call_count).to eq(2)
+        snapshot = get_poller(reader)._evaluation_snapshot
+        expect(snapshot[:property_matching_version]).to eq(2)
+        expect(snapshot[:minimal_flag_called_events]).to be(true)
+        expect(snapshot[:group_type_mapping][:'0']).to eq('company')
+        expect(snapshot[:cohorts][:'1'][:type]).to eq('AND')
+      ensure
+        reader&.shutdown
+        publisher&.shutdown
       end
     end
 

@@ -28,8 +28,9 @@ module PostHog
   # @!method should_fetch_flag_definitions?
   #   Return +true+ if this instance should fetch new definitions from the
   #   API, +false+ to read from cache instead. Use for distributed lock
-  #   coordination so only one worker fetches at a time. A +true+ decision requires
-  #   +:secret_key+; without it, the fetch is skipped and in-memory definitions are preserved.
+  #   coordination so only one worker fetches at a time. Called only when
+  #   +:secret_key+ is configured. Without it, the SDK reads +flag_definitions+
+  #   directly without acquiring or renewing fetch leadership.
   #   @return [Boolean]
   #
   # @!method on_flag_definitions_received(data)
@@ -56,8 +57,9 @@ module PostHog
   # - +shutdown+ errors are logged; shutdown continues
   #
   # API fallback requires +:secret_key+. Without it, the SDK logs a warning and
-  # keeps any previously loaded definitions. Polling and manual reloads continue
-  # consulting the provider so consumers can pick up later cache updates.
+  # keeps any previously loaded definitions. Cache-only readers skip the fetch
+  # decision and never publish. Polling and manual reloads continue reading the
+  # cache so consumers can pick up later updates.
   #
   # == Example
   #
