@@ -267,6 +267,37 @@ RSpec.describe PostHog::Rails::Railtie do
         )
       end
 
+      it 'passes a flag definition cache provider from the init block to the client' do
+        stub_request(:get, %r{https://us\.i\.posthog\.com/flags/definitions})
+          .to_return(status: 200, body: { flags: [], group_type_mapping: {}, cohorts: {} }.to_json)
+        provider = double(
+          'FlagCache',
+          flag_definitions: nil,
+          should_fetch_flag_definitions?: true,
+          on_flag_definitions_received: nil,
+          shutdown: nil
+        )
+
+        PostHog.init do |config|
+          config.api_key = 'phc_test'
+          config.secret_key = 'phs_test'
+          config.flag_definition_cache_provider = provider
+          config.test_mode = true
+        end
+
+        expect(provider).to have_received(:on_flag_definitions_received).with(hash_including(:flags))
+      end
+
+      it 'validates the flag definition cache provider interface' do
+        expect do
+          PostHog.init do |config|
+            config.api_key = 'phc_test'
+            config.flag_definition_cache_provider = Object.new
+            config.test_mode = true
+          end
+        end.to raise_error(ArgumentError, /flag_definitions/)
+      end
+
       it 'uses the Rails user agent for event and feature flag requests' do
         batch_request = stub_request(:post, 'https://us.i.posthog.com/batch/').to_return(status: 200, body: '{}')
         flags_request = stub_request(:post, 'https://us.i.posthog.com/flags/?v=2')

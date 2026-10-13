@@ -347,6 +347,16 @@ module PostHog
         @base_options[:before_send] = value
       end
 
+      # An object implementing the {PostHog::FlagDefinitionCacheProvider} interface so multiple
+      # Rails processes (Puma workers, Sidekiq, Kubernetes pods) can share flag definitions
+      # through an external cache instead of each polling PostHog independently.
+      #
+      # @param value [Object, nil]
+      # @return [Object, nil]
+      def flag_definition_cache_provider=(value)
+        @base_options[:flag_definition_cache_provider] = value
+      end
+
       # @return [Hash] Core SDK options suitable for {PostHog::Client.new}.
       def to_client_options
         @base_options

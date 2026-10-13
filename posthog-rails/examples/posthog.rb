@@ -132,6 +132,16 @@ PostHog.init do |config|
   # Feature flag request timeout in seconds (default: 3)
   config.feature_flag_request_timeout_seconds = 3
 
+  # Distributed flag definition cache (optional, for local evaluation)
+  # Share flag definitions across processes (Puma workers, Sidekiq, pods) via an
+  # external cache so only one process polls PostHog. Pass any object implementing
+  # the PostHog::FlagDefinitionCacheProvider interface. A Redis implementation is
+  # in the posthog-ruby repo under examples/redis_flag_cache.rb.
+  # config.flag_definition_cache_provider = RedisFlagCache.new(
+  #   Redis.new(url: ENV.fetch('REDIS_URL')),
+  #   service_key: "#{Rails.application.class.module_parent_name.underscore}-#{Rails.env}"
+  # )
+
   # Error callback - called when PostHog encounters an error
   # config.on_error = proc { |status, message|
   #   Rails.logger.error("[PostHog] Error #{status}: #{message}")
