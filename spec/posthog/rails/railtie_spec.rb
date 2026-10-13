@@ -286,6 +286,8 @@ RSpec.describe PostHog::Rails::Railtie do
         end
 
         expect(provider).to have_received(:on_flag_definitions_received).with(hash_including(:flags))
+      ensure
+        PostHog.client&.shutdown
       end
 
       it 'validates the flag definition cache provider interface' do
