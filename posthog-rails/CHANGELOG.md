@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.19.0
+
+### Minor Changes
+
+- f3eb5e3: Add `config.flag_definition_cache_provider` to the `PostHog.init` block so Rails apps can share feature flag definitions across processes via an external cache (for example Redis). The generated initializer now documents the option.
+
 ## 3.18.9
 
 ### Patch Changes
