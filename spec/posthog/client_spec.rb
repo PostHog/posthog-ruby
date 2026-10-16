@@ -2139,6 +2139,7 @@ module PostHog
           raise StandardError, 'Test exception'
         rescue StandardError => e
           client.capture_exception(e, 'user-123', { 'user_agent' => 'Test Agent', 'request_id' => 'req-123' })
+          expect(client.capture_exception(e)).to be(false)
         end
 
         message = client.dequeue_last_message
@@ -2162,6 +2163,29 @@ module PostHog
         expect(client.dequeue_last_message[:timestamp]).to eq('2024-07-16T04:00:00.123Z')
       end
 
+      it 'does not mark an exception when it could not be queued' do
+        error = StandardError.new('boom')
+        allow(client).to receive(:capture).and_return(false, true)
+
+        expect(client.capture_exception(error)).to be(false)
+        expect(client.capture_exception(error)).to be(true)
+        expect(client.capture_exception(error)).to be(false)
+      end
+
+      %i[instance_variable_get instance_variable_set].each do |operation|
+        it "still captures when the exception marker's #{operation} fails" do
+          error = StandardError.new('boom')
+          allow(error).to receive(operation).and_raise(StandardError, 'marker failed')
+
+          expect(client.capture_exception(error)).to be(true)
+          expect(client.queued_messages).to eq(1)
+        end
+      end
+
+      it 'can capture frozen exceptions' do
+        expect(client.capture_exception(StandardError.new('boom').freeze)).to be(true)
+      end
+
       it 'captures the full cause chain outermost-first' do
         begin
           begin
@@ -2171,6 +2195,7 @@ module PostHog
           end
         rescue StandardError => e
           client.capture_exception(e, 'user-123')
+          expect(client.capture_exception(e.cause)).to be(false)
         end
 
         message = client.dequeue_last_message
