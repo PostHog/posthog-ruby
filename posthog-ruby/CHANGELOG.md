@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.27.1
+
+### Patch Changes
+
+- 6416934: Allow external flag definition cache consumers to evaluate flags locally and refresh cached definitions without a secret key.
+
 ## 3.27.0
 
 ### Minor Changes
