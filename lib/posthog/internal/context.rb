@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'posthog/internal/span_context'
+
 module PostHog
   module Internal
     # Internal request/fiber-local context applied to capture calls.
@@ -43,6 +45,7 @@ module PostHog
         raise ArgumentError, 'with_context requires a block' unless block_given?
 
         self.current = resolve(merge_data_and_kwargs(data, kwargs), previous_context, fresh: fresh)
+        SpanContext.apply_current
         yield
       ensure
         self.current = previous_context

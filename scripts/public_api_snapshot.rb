@@ -62,6 +62,7 @@ module PublicApiSnapshot
     require 'posthog'
     # Opt-in integration shipped in the core gem; loaded here so its public surface is tracked too.
     require 'posthog/mcp'
+    require 'posthog/otel/context_span_processor'
   end
 
   def captured_core_api
