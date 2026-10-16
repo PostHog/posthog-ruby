@@ -2214,6 +2214,33 @@ module PostHog
           end
         end
 
+        [
+          ['string trace only', { '$trace_id' => 'request-trace' }, {},
+           { '$trace_id' => 'request-trace', '$span_id' => '0123456789abcdef' }],
+          ['symbol span only', { :$span_id => 'request-span' }, {},
+           { '$trace_id' => '0123456789abcdef0123456789abcdef', :$span_id => 'request-span' }],
+          ['both string IDs', { '$trace_id' => 'request-trace', '$span_id' => 'request-span' }, {},
+           { '$trace_id' => 'request-trace', '$span_id' => 'request-span' }],
+          ['both symbol IDs', { :$trace_id => 'request-trace', :$span_id => 'request-span' }, {},
+           { :$trace_id => 'request-trace', :$span_id => 'request-span' }],
+          ['nil and empty IDs', { '$trace_id' => nil, :$span_id => '' }, {},
+           { '$trace_id' => nil, :$span_id => '' }],
+          ['explicit string trace ID', { :$trace_id => 'request-trace' }, { '$trace_id' => 'caller-trace' },
+           { '$trace_id' => 'caller-trace', '$span_id' => '0123456789abcdef' }],
+          ['explicit symbol span ID', { '$span_id' => 'request-span' }, { :$span_id => 'caller-span' },
+           { '$trace_id' => '0123456789abcdef0123456789abcdef', :$span_id => 'caller-span' }]
+        ].each do |name, request_properties, caller_properties, expected_ids|
+          it "keeps request and caller trace properties for #{name}" do
+            context_class.with_context(properties: request_properties.freeze) do
+              client.capture_exception(StandardError.new('example error'), 'example-user', caller_properties.freeze)
+            end
+
+            properties = client.dequeue_last_message[:properties]
+            actual_ids = properties.select { |key, _| ['$trace_id', '$span_id'].include?(key.to_s) }
+            expect(actual_ids).to eq(expected_ids)
+          end
+        end
+
         it 'keeps caller-supplied properties ahead of derived IDs' do
           properties = { '$trace_id' => 'caller-trace', '$span_id' => 'caller-span' }.freeze
 

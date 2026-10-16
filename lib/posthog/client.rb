@@ -988,7 +988,10 @@ module PostHog
       return {} unless trace_id.match?(/\A[0-9a-f]{32}\z/) && trace_id != '0' * 32
       return {} unless span_id.match?(/\A[0-9a-f]{16}\z/) && span_id != '0' * 16
 
-      { '$trace_id' => trace_id, '$span_id' => span_id }
+      context_properties = Internal::Context.current&.properties
+      { '$trace_id' => trace_id, '$span_id' => span_id }.reject do |key, _|
+        property_key?(context_properties, key)
+      end
     rescue StandardError, LoadError
       {}
     end
