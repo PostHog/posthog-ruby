@@ -9,6 +9,48 @@ SDK usage examples and code snippets live in the official documentation so they 
 - [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
 - [Ruby library docs](https://posthog.com/docs/libraries/ruby)
 
+## OpenTelemetry span context (optional)
+
+With OpenTelemetry tracing already installed, the request context adds
+`sessionId` and `posthogDistinctId` to the active recording request span.
+It uses the existing tracing headers and `config.use_tracing_headers` setting.
+
+To add the same context to child spans, add this processor to your existing
+OpenTelemetry setup before requests start:
+
+```ruby
+require 'posthog/otel/context_span_processor'
+
+OpenTelemetry.tracer_provider.add_span_processor(PostHog::ContextSpanProcessor.new)
+```
+
+This requires OpenTelemetry SDK 1.0.0 or later. The provider must be an
+OpenTelemetry SDK tracer provider. Register the processor once. Keep your existing instrumentation, exporter, and sampler.
+The PostHog SDK does not create or replace them, and does not require the
+OpenTelemetry gems.
+
+The processor reads the request context when each span starts. The request
+context also updates the current span when it reads the headers. This covers
+both middleware orders: OpenTelemetry can start the request span before or
+after the PostHog request context. Without the processor, the request span
+must already be active when the PostHog middleware reads the headers.
+
+An attribute already set on a span takes precedence. Your application can
+also replace a fallback value later with `span.set_attribute`. Header values
+are untrusted analytics context. Do not use them for authentication or access
+control. Missing or disabled IDs add no attributes. Sampled-out spans remain
+unchanged. This feature does not create a session, recording, or trace.
+
+Context stays local to each request and is cleared after success or failure.
+The span keeps its captured IDs after the request ends. Work in another
+thread, fiber, or background job needs a separate supported context transfer;
+this processor does not transfer request context. For concurrent async work,
+configure Rails isolated execution state for fibers.
+
+The optional Rails log forwarding uses the same request IDs. Its OpenTelemetry
+logger also records the active trace and span IDs. Log forwarding has its own
+setup below.
+
 ## PostHog Logs (optional)
 
 `posthog-rails` can forward `Rails.logger` output to [PostHog Logs](https://posthog.com/docs/logs)
