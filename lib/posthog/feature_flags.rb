@@ -100,9 +100,9 @@ module PostHog
           run_now: @async_load
         ) { _load_feature_flags }
 
-      # If no secret_key, disable local evaluation & thus polling for definitions
-      if @secret_key.nil?
-        logger.info 'No secret_key provided, disabling local evaluation'
+      # Local evaluation can load definitions from either the API or an external cache.
+      if @secret_key.nil? && @flag_definition_cache_provider.nil?
+        logger.info 'No secret_key or flag_definition_cache_provider provided, disabling local evaluation'
         @loaded_flags_successfully_once.make_true
       else
         # load once synchronously before timer, unless @async_load
@@ -1260,7 +1260,8 @@ module PostHog
 
       if @flag_definition_cache_provider
         begin
-          should_fetch = @flag_definition_cache_provider.should_fetch_flag_definitions?
+          # Cache-only readers must not acquire or renew fetch leadership.
+          should_fetch = @secret_key && @flag_definition_cache_provider.should_fetch_flag_definitions?
         rescue StandardError => e
           logger.error("[FEATURE FLAGS] Cache provider should_fetch error: #{e}")
           should_fetch = true
@@ -1271,6 +1272,10 @@ module PostHog
         begin
           cached_data = @flag_definition_cache_provider.flag_definitions
           if cached_data
+            unless cached_data.is_a?(Hash) && get_by_symbol_or_string_key(cached_data, 'flags').is_a?(Array)
+              raise ArgumentError, 'Cached flag definitions must contain a flags array'
+            end
+
             logger.debug '[FEATURE FLAGS] Using cached flag definitions from external cache'
             _apply_flag_definitions(cached_data)
             return
@@ -1288,6 +1293,11 @@ module PostHog
     end
 
     def _fetch_and_apply_flag_definitions
+      unless @secret_key
+        logger.warn '[FEATURE FLAGS] A secret_key is required to fetch flag definitions from PostHog'
+        return
+      end
+
       begin
         res = _request_feature_flag_definitions(etag: @flags_etag.value)
       rescue StandardError => e
