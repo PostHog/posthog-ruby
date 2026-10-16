@@ -2154,6 +2154,146 @@ module PostHog
         expect(message[:properties]['request_id']).to eq('req-123')
       end
 
+      describe 'ambient trace context' do
+        let(:trace_api) { Module.new }
+        let(:trace_id) { '0123456789abcdef0123456789abcdef' }
+        let(:span_id) { '0123456789abcdef' }
+        let(:span_context) { double('span context', valid?: true, hex_trace_id: trace_id, hex_span_id: span_id) }
+
+        before do
+          stub_const('OpenTelemetry::Trace', trace_api)
+          allow(trace_api).to receive(:current_span).and_return(double('span', context: span_context))
+        end
+
+        [
+          ['sampled', '0123456789abcdef0123456789abcdef', '0123456789abcdef', true],
+          ['unsampled', '0123456789abcdef0123456789abcdef', '0123456789abcdef', false],
+          ['with leading zeros', '00000000000000000000000000000003', '0000000000000004', true]
+        ].each do |name, trace_id, span_id, sampled|
+          it "adds IDs from a valid span #{name}" do
+            allow(span_context).to receive_messages(hex_trace_id: trace_id, hex_span_id: span_id)
+            allow(span_context).to receive(:trace_flags).and_return(double('trace flags', sampled?: sampled))
+
+            client.capture_exception(StandardError.new('example error'), 'example-user')
+
+            message = client.dequeue_last_message
+            expect(message[:event]).to eq('$exception')
+            expect(message[:properties]).to include('$trace_id' => trace_id, '$span_id' => span_id)
+          end
+        end
+
+        [
+          ['no active span', false, '0' * 32, '0' * 16],
+          ['zero trace ID', true, '0' * 32, '0123456789abcdef'],
+          ['zero span ID', true, '0123456789abcdef0123456789abcdef', '0' * 16],
+          ['short trace ID', true, '1234', '0123456789abcdef'],
+          ['non-hex span ID', true, '0123456789abcdef0123456789abcdef', 'not-a-hex-string']
+        ].each do |name, valid, trace_id, span_id|
+          it "captures without derived IDs for #{name}" do
+            allow(span_context).to receive_messages(valid?: valid, hex_trace_id: trace_id, hex_span_id: span_id)
+
+            client.capture_exception(StandardError.new('example error'), 'example-user')
+
+            message = client.dequeue_last_message
+            expect(message[:event]).to eq('$exception')
+            expect(message[:properties]).not_to have_key('$trace_id')
+            expect(message[:properties]).not_to have_key('$span_id')
+          end
+        end
+
+        [StandardError, LoadError].each do |error_class|
+          it "still captures if reading the span raises #{error_class}" do
+            allow(trace_api).to receive(:current_span).and_raise(error_class, 'example lookup failure')
+
+            client.capture_exception(StandardError.new('example error'), 'example-user')
+
+            message = client.dequeue_last_message
+            expect(message[:event]).to eq('$exception')
+            expect(message[:properties]).not_to have_key('$trace_id')
+            expect(message[:properties]).not_to have_key('$span_id')
+          end
+        end
+
+        [
+          ['string trace only', { '$trace_id' => 'request-trace' }, {},
+           { '$trace_id' => 'request-trace', '$span_id' => '0123456789abcdef' }],
+          ['symbol span only', { :$span_id => 'request-span' }, {},
+           { '$trace_id' => '0123456789abcdef0123456789abcdef', :$span_id => 'request-span' }],
+          ['both string IDs', { '$trace_id' => 'request-trace', '$span_id' => 'request-span' }, {},
+           { '$trace_id' => 'request-trace', '$span_id' => 'request-span' }],
+          ['both symbol IDs', { :$trace_id => 'request-trace', :$span_id => 'request-span' }, {},
+           { :$trace_id => 'request-trace', :$span_id => 'request-span' }],
+          ['nil and empty IDs', { '$trace_id' => nil, :$span_id => '' }, {},
+           { '$trace_id' => nil, :$span_id => '' }],
+          ['explicit string trace ID', { :$trace_id => 'request-trace' }, { '$trace_id' => 'caller-trace' },
+           { '$trace_id' => 'caller-trace', '$span_id' => '0123456789abcdef' }],
+          ['explicit symbol span ID', { '$span_id' => 'request-span' }, { :$span_id => 'caller-span' },
+           { '$trace_id' => '0123456789abcdef0123456789abcdef', :$span_id => 'caller-span' }]
+        ].each do |name, request_properties, caller_properties, expected_ids|
+          it "keeps request and caller trace properties for #{name}" do
+            context_class.with_context(properties: request_properties.freeze) do
+              client.capture_exception(StandardError.new('example error'), 'example-user', caller_properties.freeze)
+            end
+
+            properties = client.dequeue_last_message[:properties]
+            actual_ids = properties.select { |key, _| ['$trace_id', '$span_id'].include?(key.to_s) }
+            expect(actual_ids).to eq(expected_ids)
+          end
+        end
+
+        it 'keeps caller-supplied properties ahead of derived IDs' do
+          properties = { '$trace_id' => 'caller-trace', '$span_id' => 'caller-span' }.freeze
+
+          client.capture_exception(StandardError.new('example error'), 'example-user', properties)
+
+          expect(client.dequeue_last_message[:properties]).to include(properties)
+        end
+
+        it 'still captures when the OpenTelemetry API is not installed' do
+          hide_const('OpenTelemetry')
+
+          client.capture_exception(StandardError.new('example error'), 'example-user')
+
+          message = client.dequeue_last_message
+          expect(message[:event]).to eq('$exception')
+          expect(message[:properties]).not_to have_key('$trace_id')
+          expect(message[:properties]).not_to have_key('$span_id')
+        end
+      end
+
+      describe 'with the real OpenTelemetry API' do
+        before do
+          require 'opentelemetry-api'
+        rescue LoadError
+          skip 'Install the gemfiles/otel.gemfile bundle to run OpenTelemetry integration'
+        end
+
+        [0, 1].each do |trace_flags|
+          it "reads the active span with trace flags #{trace_flags} and clears context after its scope" do
+            trace_id = '00000000000000000000000000000003'
+            span_id = '0000000000000004'
+            context = OpenTelemetry::Trace::SpanContext.new(
+              trace_id: [trace_id].pack('H*'),
+              span_id: [span_id].pack('H*'),
+              trace_flags: OpenTelemetry::Trace::TraceFlags.from_byte(trace_flags)
+            )
+            span = OpenTelemetry::Trace.non_recording_span(context)
+
+            OpenTelemetry::Trace.with_span(span) do
+              client.capture_exception(StandardError.new('example error'), 'example-user')
+            end
+
+            expect(client.dequeue_last_message[:properties]).to include('$trace_id' => trace_id, '$span_id' => span_id)
+
+            client.capture_exception(StandardError.new('outside span'), 'example-user')
+
+            properties = client.dequeue_last_message[:properties]
+            expect(properties).not_to have_key('$trace_id')
+            expect(properties).not_to have_key('$span_id')
+          end
+        end
+      end
+
       it 'emits the SDK-generated exception timestamp in UTC' do
         allow(Time).to receive(:now).and_return(Time.new(2024, 7, 16, 13, 30, Rational(123, 1000), '+09:30'))
 
