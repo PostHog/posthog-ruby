@@ -54,6 +54,9 @@ module PostHog
     RELEASE_ID_ENV_VAR = 'POSTHOG_RELEASE_ID'
     private_constant :RELEASE_ID_ENV_VAR
 
+    CAPTURED_EXCEPTION_IVAR = :@posthog_exception_captured
+    private_constant :CAPTURED_EXCEPTION_IVAR
+
     # Thread-safe tracking of client instances per API key for singleton warnings
     @instances_by_api_key = {}
     @instances_mutex = Mutex.new
@@ -410,7 +413,7 @@ module PostHog
     #   Defaults to `{ 'type' => 'generic', 'handled' => true }` for manual captures.
     # @return [Boolean, nil] Whether the exception event was queued or sent, or nil if the input could not be parsed.
     def capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)
-      return false if @disabled
+      return false if @disabled || exception_captured?(exception)
 
       exception_list = ExceptionCapture.build_exception_list(exception, mechanism: mechanism)
 
@@ -427,7 +430,9 @@ module PostHog
       }
       event_data[:flags] = flags if flags
 
-      capture(event_data)
+      capture(event_data).tap do |captured|
+        mark_exception_captured(exception) if captured
+      end
     end
 
     # Identifies a user
@@ -977,6 +982,25 @@ module PostHog
     end
 
     private
+
+    def exception_captured?(exception)
+      exception.is_a?(Exception) && exception.instance_variable_get(CAPTURED_EXCEPTION_IVAR) == true
+    rescue StandardError
+      false
+    end
+
+    # Rails can unwrap template errors, so mark the causes included in the event too.
+    def mark_exception_captured(exception)
+      ExceptionCapture::MAX_CHAINED_EXCEPTIONS.times do
+        break unless exception.is_a?(Exception)
+        break if exception_captured?(exception)
+
+        exception.instance_variable_set(CAPTURED_EXCEPTION_IVAR, true) unless exception.frozen?
+        exception = exception.cause
+      end
+    rescue StandardError
+      nil
+    end
 
     def enrich_capture_attrs_with_context(attrs)
       context = Internal::Context.current
