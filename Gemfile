@@ -12,6 +12,7 @@ gem 'concurrent-ruby', require: 'concurrent'
 gem 'irb'
 
 group :development, :test do
+  gem 'activejob', '~> 7.1'
   gem 'activesupport', '~> 7.1'
   gem 'commander', '~> 5.0'
   gem 'mcp', '>= 1.4'

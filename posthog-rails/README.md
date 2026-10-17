@@ -15,9 +15,15 @@ Request context adds missing `sessionId` and `posthogDistinctId` attributes to a
 
 The request keeps the Rails facade client that owned it at entry. A missing or disabled owner adds no PostHog span attributes. A valid-key test-mode client remains enabled.
 
-Existing canonical attributes take precedence. Missing IDs stay absent. Spans keep their captured IDs after the request ends. Separate threads, fibers, and jobs need explicit context transfer; concurrent Rails fibers require fiber-isolated execution state.
+Existing canonical attributes take precedence. Missing IDs stay absent. Spans keep their captured IDs after the request ends. Separate threads and fibers need explicit context transfer; concurrent Rails fibers require fiber-isolated execution state.
 
 See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-rails#trace-context) for setup, middleware order, and trust limits. The bridge does not replace the application's provider, exporter, or sampler. Optional Rails log forwarding uses the same request context.
+
+## Active Job context
+
+Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.
+
+The existing job distinct ID extractor takes precedence over the saved ID. Events, optional logs, and application OpenTelemetry spans use the shared job context. Register `PostHog::ContextSpanProcessor` for child spans as described in the trace context guide. This transfers PostHog IDs; it does not transfer a distributed trace or configure a tracing provider.
 
 ## PostHog Logs (optional)
 

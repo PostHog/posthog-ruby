@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'posthog/rails/parameter_filter'
+require 'posthog/internal/context'
+require 'posthog/rails/tracing_headers'
 
 module PostHog
   module Rails
@@ -10,6 +12,7 @@ module PostHog
 
       def self.prepended(base)
         base.extend(ClassMethods)
+        base.around_perform :with_posthog_job_context, prepend: true if base.respond_to?(:around_perform)
       end
 
       module ClassMethods
@@ -36,21 +39,85 @@ module PostHog
         end
       end
 
-      def perform_now
+      # @api private
+      def enqueue(...)
+        posthog_job_context if PostHog::Rails.config&.auto_instrument_active_job
         super
-      rescue StandardError => e
-        # Capture the exception with job context
-        capture_job_exception(e)
-        raise
+      end
+
+      # @api private
+      def serialize
+        data = super
+        return data unless PostHog::Rails.config&.auto_instrument_active_job
+
+        data.merge('posthog_context' => posthog_job_context.dup)
+      end
+
+      # @api private
+      def deserialize(data)
+        super.tap { @posthog_job_context = copy_posthog_ids(data['posthog_context']) }
+      end
+
+      def perform_now
+        return super unless PostHog::Rails.config&.auto_instrument_active_job
+
+        posthog_job_context
+        @posthog_execution_context = nil
+        Internal::Context.with_context({}, fresh: true) do
+          super
+        rescue StandardError => e
+          # Capture the exception with job context
+          Internal::Context.with_context(@posthog_execution_context || @posthog_job_context, fresh: true) do
+            capture_job_exception(e)
+          end
+          raise
+        end
       end
 
       private
+
+      def copy_posthog_ids(data)
+        data = {} unless data.is_a?(Hash)
+        %w[distinct_id session_id].each_with_object({}) do |key, result|
+          value = TracingHeaders.sanitize_header_value(data[key])
+          result[key] = value.freeze if value
+        end.freeze
+      end
+
+      def posthog_job_context
+        @posthog_job_context ||= begin
+          context = Internal::Context.current
+          copy_posthog_ids('distinct_id' => context&.distinct_id, 'session_id' => context&.session_id)
+        end
+      end
+
+      def with_posthog_job_context(&block)
+        return yield unless PostHog::Rails.config&.auto_instrument_active_job
+
+        distinct_id = posthog_job_distinct_id
+        @posthog_execution_context = if distinct_id.nil?
+                                       posthog_job_context
+                                     else
+                                       posthog_job_context.merge('distinct_id' => distinct_id).freeze
+                                     end
+        Internal::Context.with_context(@posthog_execution_context, fresh: true, &block)
+      end
+
+      def posthog_job_distinct_id
+        extract_distinct_id_from_job
+      rescue StandardError
+        nil
+      end
 
       def capture_job_exception(exception)
         return unless PostHog::Rails.config&.auto_instrument_active_job
 
         # Build distinct_id from job arguments if possible
-        distinct_id = extract_distinct_id_from_job
+        distinct_id = if @posthog_execution_context
+                        @posthog_execution_context['distinct_id']
+                      else
+                        extract_distinct_id_from_job
+                      end
 
         properties = {
           '$exception_source' => 'active_job',
