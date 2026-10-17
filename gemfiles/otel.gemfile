@@ -3,5 +3,6 @@
 eval_gemfile '../Gemfile'
 
 gem 'opentelemetry-exporter-otlp-logs'
+gem 'opentelemetry-instrumentation-active_job'
 gem 'opentelemetry-logs-sdk', '>= 0.6.0'
 gem 'opentelemetry-sdk'
