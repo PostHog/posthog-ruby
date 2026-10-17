@@ -63,11 +63,14 @@ module PostHog
 
         posthog_job_context
         @posthog_execution_context = nil
-        Internal::Context.with_context({}, fresh: true) do
+        Internal::Context.with_context({}, fresh: true, enrich_current_span: false) do
           super
         rescue StandardError => e
           # Capture the exception with job context
-          Internal::Context.with_context(@posthog_execution_context || @posthog_job_context, fresh: true) do
+          Internal::Context.with_context(
+            @posthog_execution_context || @posthog_job_context, fresh: true, enrich_current_span: false
+          ) do
+            enrich_posthog_job_span
             capture_job_exception(e)
           end
           raise
@@ -100,7 +103,24 @@ module PostHog
                                      else
                                        posthog_job_context.merge('distinct_id' => distinct_id).freeze
                                      end
-        Internal::Context.with_context(@posthog_execution_context, fresh: true, &block)
+        Internal::Context.with_context(@posthog_execution_context, fresh: true, enrich_current_span: false) do
+          enrich_posthog_job_span
+          block.call
+        end
+      end
+
+      def enrich_posthog_job_span
+        return unless defined?(::OpenTelemetry::Trace)
+
+        span = ::OpenTelemetry::Trace.current_span
+        return unless span.recording? && span.respond_to?(:attributes)
+
+        attributes = span.attributes || {}
+        return unless attributes['messaging.system'] == 'active_job' && attributes['messaging.message.id'] == job_id
+
+        Internal::SpanContext.apply(span)
+      rescue StandardError
+        nil
       end
 
       def posthog_job_distinct_id

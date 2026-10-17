@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'rails'
 require 'rails/railtie'
 require 'active_job'
+require 'open3'
 
 $LOAD_PATH.unshift File.expand_path('../../../posthog-rails/lib', __dir__)
 require 'posthog/rails'
@@ -244,6 +245,47 @@ RSpec.describe 'Active Job context' do
     expect(observations.first.first(2)).to eq(%w[browser-person browser-session])
   end
 
+  %w[success failure].product(%w[none wrong-id wrong-system]).each do |outcome, marker|
+    it "keeps an unrelated caller unchanged across two #{outcome} jobs with #{marker} markers" do
+      begin
+        require 'opentelemetry-sdk'
+      rescue LoadError
+        skip 'Install the optional OpenTelemetry bundle'
+      end
+      require 'posthog/otel/context_span_processor'
+      spans = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
+      provider = OpenTelemetry::SDK::Trace::TracerProvider.new
+      provider.add_span_processor(PostHog::ContextSpanProcessor.new)
+      provider.add_span_processor(OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(spans))
+      tracer = provider.tracer('job-caller')
+      first = snapshot_job(outcome)
+      second = snapshot_job(outcome)
+      second['posthog_context'] = { 'distinct_id' => 'second-person', 'session_id' => 'second-session' }
+      original_observer = job_class.observer
+      job_class.observer = ->(job) { tracer.in_span('child') { original_observer.call(job) } }
+      attributes = case marker
+                   when 'wrong-id'
+                     { 'messaging.system' => 'active_job', 'messaging.message.id' => 'another-job' }
+                   when 'wrong-system'
+                     { 'messaging.system' => 'other', 'messaging.message.id' => first['job_id'] }
+                   else
+                     {}
+                   end
+      tracer.in_span('caller', attributes: attributes) do
+        [first, second].each do |payload|
+          invoke = -> { ActiveJob::Base.execute(payload) }
+          outcome == 'failure' ? expect(&invoke).to(raise_error('job failed')) : invoke.call
+        end
+      end
+      expect(spans.finished_spans.find { |span| span.name == 'caller' }.attributes || {}).to eq(attributes)
+      children = spans.finished_spans.select { |span| span.name == 'child' }
+      expect(children.map { |span| span.attributes['posthogDistinctId'] }).to eq(%w[browser-person second-person])
+      expect(children.map { |span| span.attributes['sessionId'] }).to eq(%w[browser-session second-session])
+    ensure
+      provider&.shutdown
+    end
+  end
+
   it 'adds job IDs to existing and child SDK spans and optional forwarded logs' do
     begin
       require 'opentelemetry-sdk'
@@ -267,7 +309,10 @@ RSpec.describe 'Active Job context' do
       tracer.in_span('child', attributes: { 'sessionId' => 'explicit-session' }) { appender.info('job ran') }
     end
     payload = snapshot_job
-    tracer.in_span('worker') { ActiveJob::Base.execute(payload) }
+    tracer.in_span('worker', attributes: { 'messaging.system' => 'active_job',
+                                           'messaging.message.id' => payload['job_id'] }) do
+      ActiveJob::Base.execute(payload)
+    end
     by_name = spans.finished_spans.to_h { |span| [span.name, span] }
     expect(by_name['worker'].attributes).to include('posthogDistinctId' => 'application-person',
                                                     'sessionId' => 'browser-session')
@@ -281,6 +326,16 @@ RSpec.describe 'Active Job context' do
   ensure
     provider&.shutdown
     logs_provider&.shutdown
+  end
+
+  it 'enriches job spans from the official OpenTelemetry instrumentation' do
+    unless Gem.loaded_specs.key?('opentelemetry-instrumentation-active_job')
+      skip 'Install the optional OpenTelemetry bundle'
+    end
+
+    fixture = File.expand_path('../../fixtures/active_job_span_context.rb', __dir__)
+    output, status = Open3.capture2e(RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib', fixture)
+    expect(status.success?).to be(true), output
   end
 
   it 'leaves serialization and execution unchanged when the integration is disabled' do
