@@ -20,7 +20,7 @@ module PostHog
       def call(env)
         request = build_request(env)
 
-        Internal::Context.with_context(context_data(request), fresh: true) do
+        Internal::Context.with_context(context_data(request), fresh: true, owner: PostHog.client) do
           @app.call(env)
         end
       end
