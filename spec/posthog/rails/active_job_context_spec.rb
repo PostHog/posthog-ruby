@@ -116,7 +116,8 @@ RSpec.describe 'Active Job context' do
     expect(observations.first.first(2)).to eq(%w[enqueue-person enqueue-session])
   end
 
-  [nil, {}, { 'session_id' => 12, 'distinct_id' => [] }].each do |saved|
+  [nil, {}, { 'session_id' => 12, 'distinct_id' => [] },
+   { 'distinct_id' => Float::INFINITY }, { 'distinct_id' => Float::NAN }].each do |saved|
     it "clears stale worker identity for a missing or invalid payload #{saved.inspect}" do
       payload = job_class.new.serialize
       saved.nil? ? payload.delete('posthog_context') : payload['posthog_context'] = saved
@@ -167,6 +168,67 @@ RSpec.describe 'Active Job context' do
       invoke = -> { ActiveJob::Base.execute(snapshot_job('failure')) }
       discard ? invoke.call : expect(&invoke).to(raise_error('job failed'))
       expect(PostHog).to have_received(:capture_exception).exactly(discard ? 0 : 1).times
+    end
+  end
+
+  %i[rescue discard terminal_retry].each do |handler|
+    [nil, 'application-person', 123].each do |extracted_id|
+      it "keeps effective identity in #{handler} handlers and child jobs with extractor #{extracted_id.inspect}" do
+        job_class.posthog_distinct_id { extracted_id } unless extracted_id.nil?
+        child_class = stub_const('PostHogChildContextTestJob', Class.new(ActiveJob::Base) do
+          prepend PostHog::Rails::ActiveJobExtensions
+
+          def perform; end
+        end)
+        child_class.queue_adapter = :test
+        child_class.logger = Logger.new(File::NULL)
+        handler_contexts = []
+        handler_context_class = context_class
+        handler_client = client
+        callback = lambda do |*_args|
+          current = handler_context_class.current
+          handler_contexts << [current&.distinct_id, current&.session_id]
+          handler_client.capture(event: 'job_handled')
+          child_class.perform_later
+        end
+        case handler
+        when :rescue then job_class.rescue_from(RuntimeError, &callback)
+        when :discard then job_class.discard_on(RuntimeError, &callback)
+        when :terminal_retry then job_class.retry_on(RuntimeError, attempts: 1, &callback)
+        end
+        payload = snapshot_job('failure')
+        context_class.with_context(distinct_id: 'worker-person', session_id: 'worker-session') do
+          outer = context_class.current
+          ActiveJob::Base.execute(payload)
+          expect(context_class.current).to equal(outer)
+        end
+        effective_id = extracted_id || 'browser-person'
+        expect(handler_contexts).to eq([[effective_id, 'browser-session']])
+        event = client.dequeue_last_message
+        expect(event[:distinct_id]).to eq(effective_id)
+        expect(event[:properties]['$session_id']).to eq('browser-session')
+        expect(child_class.queue_adapter.enqueued_jobs.last['posthog_context']).to eq(
+          'distinct_id' => effective_id.to_s, 'session_id' => 'browser-session'
+        )
+        expect(PostHog).not_to have_received(:capture_exception)
+        expect(context_class.current).to be_nil
+      end
+    end
+  end
+
+  [123, 1.5].each do |distinct_id|
+    it "copies numeric distinct ID #{distinct_id} into child jobs during perform" do
+      job_class.posthog_distinct_id { distinct_id }
+      original_observer = job_class.observer
+      job_class.observer = lambda do |job|
+        original_observer.call(job)
+        job_class.perform_later('child') unless job.arguments.first == 'child'
+      end
+      ActiveJob::Base.execute(snapshot_job)
+      child_payload = JSON.parse(JSON.generate(job_class.queue_adapter.enqueued_jobs.last))
+      expect(child_payload['posthog_context']).to eq(
+        'distinct_id' => distinct_id.to_s, 'session_id' => 'browser-session'
+      )
     end
   end
 
