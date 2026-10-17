@@ -47,11 +47,16 @@ RSpec.describe 'Rails span context' do
 
   around do |example|
     previous_config = PostHog::Rails.config
+    previous_client = PostHog.client
     PostHog::Rails.config = PostHog::Rails::Configuration.new
     example.run
   ensure
     PostHog::Rails.config = previous_config
+    PostHog.client&.shutdown
+    PostHog.client = previous_client
   end
+
+  before { PostHog.client = PostHog::Client.new(api_key: API_KEY, test_mode: true) }
 
   after { provider.shutdown if otel_available && defined?(OpenTelemetry::SDK) }
 
@@ -61,6 +66,53 @@ RSpec.describe 'Rails span context' do
       [200, { 'content-type' => 'text/plain' }, ['ok']]
     end
     PostHog::Rails::RequestContext.new(app).call(Rack::MockRequest.env_for('/request', headers))
+  end
+
+  it 'does not enrich Rails requests before the facade has a client' do
+    PostHog.client.shutdown
+    PostHog.client = nil
+    tracer.in_span('request') { request(headers) { tracer.in_span('child') { nil } } }
+    exporter.finished_spans.each { |span| expect(span.attributes || {}).to be_empty }
+    expect(context_class.current).to be_nil
+  end
+
+  [nil, '', API_KEY].each do |key|
+    [false, true].each do |raises|
+      it "respects the request owner with key #{key.inspect}, failure=#{raises}" do
+        PostHog.client.shutdown
+        owner = PostHog::Client.new(api_key: key, test_mode: true, silence_disabled_client_error: true)
+        replacement = PostHog::Client.new(api_key: key == API_KEY ? nil : API_KEY,
+                                          test_mode: true, silence_disabled_client_error: true)
+        PostHog.client = owner
+        tracer.in_span('request', attributes: { 'app.key' => 'keep' }) do
+          invoke = lambda do
+            request(headers) do
+              PostHog.client = replacement
+              context_class.with_context(distinct_id: 'nested-person', fresh: true) do
+                tracer.in_span('child', attributes: { 'sessionId' => 'application-session' }) { nil }
+              end
+              raise 'request failed' if raises
+            end
+          end
+          raises ? expect(&invoke).to(raise_error('request failed')) : invoke.call
+          expect(context_class.current).to be_nil
+        end
+        spans = exporter.finished_spans.to_h { |span| [span.name, span.attributes] }
+        if owner.enabled?
+          expect(spans['request']).to include('posthogDistinctId' => 'browser-person', 'sessionId' => 'browser-session')
+          expect(spans['child']).to include('posthogDistinctId' => 'nested-person',
+                                            'sessionId' => 'application-session')
+        else
+          expect(spans['request']).to eq('app.key' => 'keep')
+          expect(spans['child']).to eq('sessionId' => 'application-session')
+        end
+        context_class.with_context(distinct_id: 'independent-person') { tracer.in_span('independent') { nil } }
+        expect(exporter.finished_spans.last.attributes).to include('posthogDistinctId' => 'independent-person')
+      ensure
+        owner&.shutdown
+        replacement&.shutdown
+      end
+    end
   end
 
   [false, true].each do |raises|

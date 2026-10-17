@@ -7,6 +7,8 @@ module PostHog
         context = Context.current
         return unless context && span&.recording? && span.respond_to?(:attributes)
 
+        return unless context.owner.equal?(Context::UNBOUND_OWNER) || context.owner&.enabled?
+
         attributes = span.attributes || {}
         {
           'posthogDistinctId' => context.distinct_id,
