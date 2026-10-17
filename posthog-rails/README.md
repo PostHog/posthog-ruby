@@ -23,7 +23,7 @@ See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-r
 
 Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.
 
-The existing job distinct ID extractor takes precedence over the saved ID. Events, optional logs, and application OpenTelemetry spans use the shared job context. Register `PostHog::ContextSpanProcessor` for child spans as described in the trace context guide. An existing job span receives IDs only when its public `messaging.system` is `active_job` and `messaging.message.id` matches the current job ID. Other active spans stay unchanged. This transfers PostHog IDs; it does not transfer a distributed trace or configure a tracing provider.
+The existing job distinct ID extractor takes precedence over the saved ID. Rescue, discard, and terminal retry handlers keep this effective context, including when they enqueue child jobs. Integer and finite floating-point distinct IDs are stored as strings in job snapshots; session IDs must be strings. Events, optional logs, and application OpenTelemetry spans use the shared job context. Register `PostHog::ContextSpanProcessor` for child spans as described in the trace context guide. An existing job span receives IDs only when its public `messaging.system` is `active_job` and `messaging.message.id` matches the current job ID. Other active spans stay unchanged. This transfers PostHog IDs; it does not transfer a distributed trace or configure a tracing provider.
 
 ## PostHog Logs (optional)
 

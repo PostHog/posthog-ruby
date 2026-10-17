@@ -58,6 +58,18 @@ module PostHog
         super.tap { @posthog_job_context = copy_posthog_ids(data['posthog_context']) }
       end
 
+      # @api private
+      def rescue_with_handler(...)
+        return super unless PostHog::Rails.config&.auto_instrument_active_job
+
+        Internal::Context.with_context(
+          @posthog_execution_context || posthog_job_context, fresh: true, enrich_current_span: false
+        ) do
+          enrich_posthog_job_span
+          super
+        end
+      end
+
       def perform_now
         return super unless PostHog::Rails.config&.auto_instrument_active_job
 
@@ -82,7 +94,9 @@ module PostHog
       def copy_posthog_ids(data)
         data = {} unless data.is_a?(Hash)
         %w[distinct_id session_id].each_with_object({}) do |key, result|
-          value = TracingHeaders.sanitize_header_value(data[key])
+          value = data[key]
+          value = value.to_s if key == 'distinct_id' && (value.is_a?(Integer) || (value.is_a?(Float) && value.finite?))
+          value = TracingHeaders.sanitize_header_value(value)
           result[key] = value.freeze if value
         end.freeze
       end
