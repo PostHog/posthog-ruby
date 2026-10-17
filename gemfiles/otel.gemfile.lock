@@ -26,6 +26,9 @@ GEM
       erubi (~> 1.11)
       rails-dom-testing (~> 2.2)
       rails-html-sanitizer (~> 1.6)
+    activejob (7.2.3.1)
+      activesupport (= 7.2.3.1)
+      globalid (>= 0.3.6)
     activesupport (7.2.3.1)
       base64
       benchmark (>= 0.3)
@@ -60,6 +63,8 @@ GEM
     erb (4.0.4.1)
       cgi (>= 0.3.3)
     erubi (1.13.1)
+    globalid (1.4.0)
+      activesupport (>= 6.1)
     google-protobuf (4.36.2)
       bigdecimal
       rake (~> 13.3)
@@ -288,6 +293,7 @@ PLATFORMS
   x86_64-linux-musl
 
 DEPENDENCIES
+  activejob (~> 7.1)
   activesupport (~> 7.1)
   commander (~> 5.0)
   concurrent-ruby
@@ -310,6 +316,7 @@ DEPENDENCIES
 CHECKSUMS
   actionpack (7.2.3.1) sha256=b66afe7f937273270cb63f03bde7af7ba850017867766e8848d06d3e12e1e4ca
   actionview (7.2.3.1) sha256=de19b86843391762ac24a6287c30fbba11cd475fa4d4b664924d5fb7a2f1ff7c
+  activejob (7.2.3.1) sha256=0bc4227ce371b82da119cd27ed91e0deb9b744bbfa266b86e4bd8d1e2a8f6ed8
   activesupport (7.2.3.1) sha256=11ebed516a43a0bb47346227a35ebae4d9427465a7c9eb197a03d5c8d283cb34
   addressable (2.9.0) sha256=7fdf6ac3660f7f4e867a0838be3f6cf722ace541dd97767fa42bc6cfa980c7af
   ast (2.4.3) sha256=954615157c1d6a382bc27d690d973195e79db7f55e9765ac7c481c60bdb4d383
@@ -329,6 +336,7 @@ CHECKSUMS
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
   erb (4.0.4.1) sha256=47e2a70922ba4cec8c23c2304ad7e581665c37a297cb9a22a860162c7727ee24
   erubi (1.13.1) sha256=a082103b0885dbc5ecf1172fede897f9ebdb745a4b97a5e8dc63953db1ee4ad9
+  globalid (1.4.0) sha256=037f12fbf1d9d7a014d501c2d5c77356fd4ddd96d7a7991d6700bba96706f427
   google-protobuf (4.36.2) sha256=2f8daff50ae14aad36ab0ccdcf284065fa71d726c444efe114e6db82ffe62494
   google-protobuf (4.36.2-aarch64-linux-gnu) sha256=c3279ec6eaa59f6ed6276eda2a33cffb4306471183ab79a332e698b8564f5169
   google-protobuf (4.36.2-aarch64-linux-musl) sha256=0772c9dde1e6dce9a6b44d1d35c28c29adee99d9bd6aff5e21840daeb22161ce
