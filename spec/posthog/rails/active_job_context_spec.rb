@@ -38,15 +38,19 @@ RSpec.describe 'Active Job context' do
 
   around do |example|
     previous_config = PostHog::Rails.config
+    previous_client = PostHog.client
     PostHog::Rails.config = PostHog::Rails::Configuration.new
     PostHog::Rails.config.auto_instrument_active_job = true
     example.run
   ensure
     PostHog::Rails.config = previous_config
+    PostHog.client&.shutdown unless PostHog.client.equal?(client)
+    PostHog.client = previous_client
     client.shutdown
   end
 
   before do
+    PostHog.client = client
     allow(PostHog).to receive(:capture_exception) do
       current = context_class.current
       exception_contexts << [current&.distinct_id, current&.session_id]
@@ -388,6 +392,39 @@ RSpec.describe 'Active Job context' do
   ensure
     provider&.shutdown
     logs_provider&.shutdown
+  end
+
+  [
+    ['no facade client', -> {}],
+    ['a client without an API key', -> { PostHog::Client.new(api_key: nil, silence_disabled_client_error: true) }],
+    ['a client with a blank API key', -> { PostHog::Client.new(api_key: ' ', silence_disabled_client_error: true) }]
+  ].each do |owner_name, build_owner|
+    it "adds no job IDs to spans with #{owner_name}" do
+      begin
+        require 'opentelemetry-sdk'
+      rescue LoadError
+        skip 'Install the gemfiles/otel.gemfile bundle to run span integration'
+      end
+      require 'posthog/otel/context_span_processor'
+      PostHog.client = build_owner.call
+      spans = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
+      provider = OpenTelemetry::SDK::Trace::TracerProvider.new
+      provider.add_span_processor(PostHog::ContextSpanProcessor.new)
+      provider.add_span_processor(OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(spans))
+      tracer = provider.tracer('active-job-test')
+      job_class.observer = ->(_job) { tracer.in_span('child') { nil } }
+      payload = snapshot_job
+      tracer.in_span('worker', attributes: { 'messaging.system' => 'active_job',
+                                             'messaging.message.id' => payload['job_id'] }) do
+        ActiveJob::Base.execute(payload)
+      end
+      spans.finished_spans.each do |span|
+        expect(span.attributes.keys).not_to include('posthogDistinctId', 'sessionId')
+      end
+      expect(spans.finished_spans.map(&:name)).to contain_exactly('worker', 'child')
+    ensure
+      provider&.shutdown
+    end
   end
 
   it 'enriches job spans from the official OpenTelemetry instrumentation' do

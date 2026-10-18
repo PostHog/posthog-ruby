@@ -2,6 +2,7 @@
 
 require 'rails'
 require 'active_job'
+require 'posthog'
 require 'posthog/rails'
 require 'posthog/otel/context_span_processor'
 require 'opentelemetry-sdk'
@@ -9,6 +10,8 @@ require 'opentelemetry-instrumentation-active_job'
 
 PostHog::Rails.config = PostHog::Rails::Configuration.new
 PostHog::Rails.config.auto_instrument_active_job = true
+PostHog::Logging.logger = Logger.new(File::NULL)
+PostHog.client = PostHog::Client.new(api_key: 'phc_fixture', test_mode: true)
 exporter = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
 OpenTelemetry::SDK.configure do |config|
   config.add_span_processor(PostHog::ContextSpanProcessor.new)

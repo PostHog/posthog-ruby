@@ -75,7 +75,7 @@ module PostHog
 
         posthog_job_context
         @posthog_execution_context = nil
-        Internal::Context.with_context({}, fresh: true, enrich_current_span: false) do
+        Internal::Context.with_context({}, fresh: true, owner: PostHog.client, enrich_current_span: false) do
           super
         rescue StandardError => e
           # Capture the exception with job context
