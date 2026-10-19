@@ -9,6 +9,16 @@ SDK usage examples and code snippets live in the official documentation so they 
 - [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
 - [Ruby library docs](https://posthog.com/docs/libraries/ruby)
 
+## OpenTelemetry span context (optional)
+
+Request context adds missing `sessionId` and `posthogDistinctId` attributes to an active recording OpenTelemetry SDK span. Register the optional `PostHog::ContextSpanProcessor` on the application's existing provider for child spans. OpenTelemetry SDK 1.0.0 or later is supported and remains optional.
+
+The request keeps the Rails facade client that owned it at entry. A missing or disabled owner adds no PostHog span attributes. A valid-key test-mode client remains enabled.
+
+Existing canonical attributes take precedence. Missing IDs stay absent. Spans keep their captured IDs after the request ends. Separate threads, fibers, and jobs need explicit context transfer; concurrent Rails fibers require fiber-isolated execution state.
+
+See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-rails#trace-context) for setup, middleware order, and trust limits. The bridge does not replace the application's provider, exporter, or sampler. Optional Rails log forwarding uses the same request context.
+
 ## PostHog Logs (optional)
 
 `posthog-rails` can forward `Rails.logger` output to [PostHog Logs](https://posthog.com/docs/logs)
