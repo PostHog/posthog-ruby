@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.28.0
+
+### Minor Changes
+
+- 1643b9d: Local flag evaluation honors experiment holdouts. A flag whose definition carries `filters.holdout` now resolves a held-out identifier to `holdout-<id>` before its release conditions, matching the server instead of silently bucketing the identifier into a regular variant.
+
 ## 3.27.1
 
 ### Patch Changes
