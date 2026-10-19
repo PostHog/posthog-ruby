@@ -500,6 +500,21 @@ module PostHog
       end
     end
 
+    def self.parse_finite_number(value)
+      case value
+      when String
+        return unless /\A[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\z/.match?(value)
+      when Integer, Float
+        # JSON numbers remain supported alongside numeric strings.
+      else
+        return unless defined?(::BigDecimal) && value.is_a?(::BigDecimal)
+      end
+
+      number = value.to_f
+      number if number.finite?
+    end
+    private_class_method :parse_finite_number
+
     def self.relative_date_parse_for_feature_flag_matching(value)
       match = /^-?([0-9]+)([a-z])$/.match(value)
       parsed_dt = DateTime.now.new_offset(0)
@@ -734,20 +749,13 @@ module PostHog
       when 'not_regex'
         PostHog::Utils.is_valid_regex(value.to_s) && Regexp.new(value.to_s).match(override_value.to_s).nil?
       when 'gt', 'gte', 'lt', 'lte'
-        parsed_value = nil
-        begin
-          parsed_value = Float(value)
-        rescue StandardError # rubocop:disable Lint/SuppressedException
-        end
-        if !parsed_value.nil? && !override_value.nil?
-          if override_value.is_a?(String)
-            compare(override_value, value.to_s, operator)
-          else
-            compare(override_value, parsed_value, operator)
-          end
-        else
-          compare(override_value.to_s, value.to_s, operator)
-        end
+        parsed_value = parse_finite_number(value)
+        raise InconclusiveMatchError, 'Invalid numeric condition' if parsed_value.nil?
+
+        parsed_override = parse_finite_number(override_value)
+        return false if parsed_override.nil?
+
+        compare(parsed_override, parsed_value, operator)
       when 'is_date_before', 'is_date_after'
         override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
         parsed_date = relative_date_parse_for_feature_flag_matching(value.to_s)
