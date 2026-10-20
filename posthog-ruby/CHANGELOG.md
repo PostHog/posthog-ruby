@@ -1,5 +1,29 @@
 # posthog-ruby
 
+## 3.28.0
+
+### Minor Changes
+
+- 1643b9d: Local flag evaluation honors experiment holdouts. A flag whose definition carries `filters.holdout` now resolves a held-out identifier to `holdout-<id>` before its release conditions, matching the server instead of silently bucketing the identifier into a regular variant.
+
+## 3.27.1
+
+### Patch Changes
+
+- 6416934: Allow external flag definition cache consumers to evaluate flags locally and refresh cached definitions without a secret key.
+
+## 3.27.0
+
+### Minor Changes
+
+- bd2d976: Add an optional `default_value:` keyword to `PostHog::FeatureFlagEvaluations#enabled?`. It is returned when the flag has no value in the snapshot — it was never loaded, the `/flags` request failed, or no flag with that key exists — while a flag that does have a value, including `false` and variant strings, still wins over the default. A flag the server returned but marked as failed resolves to `false`, not the default. Calls that omit the keyword keep returning `false` for a missing flag.
+
+## 3.26.4
+
+### Patch Changes
+
+- 5adef1c: Fix feature flag and remote config response parsing with JSON 3, restoring remote flag evaluation and local definition loading.
+
 ## 3.26.3
 
 ### Patch Changes

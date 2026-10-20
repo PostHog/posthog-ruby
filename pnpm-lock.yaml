@@ -12,7 +12,11 @@ importers:
         specifier: ^3.0.3
         version: 3.0.3
 
-  posthog-rails: {}
+  posthog-rails:
+    dependencies:
+      posthog-ruby:
+        specifier: workspace:*
+        version: link:../posthog-ruby
 
   posthog-ruby: {}
 

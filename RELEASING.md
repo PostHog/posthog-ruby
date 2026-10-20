@@ -4,11 +4,11 @@ This repository uses [Changesets](https://github.com/changesets/changesets) for 
 
 The gems have independent version numbers, but releases follow their dependency direction:
 
-- A releasable change to `posthog-ruby` must include changesets for both `posthog-ruby` and `posthog-rails`. Select a Rails patch release when only its core SDK dependency changes and the update is backwards compatible, so Rails users receive the updated SDK.
+- A releasable change to `posthog-ruby` needs a changeset for `posthog-ruby`. Changesets automatically includes a Rails patch release to update its core SDK dependency. A Rails patch is appropriate when only its core SDK dependency changes and the update is backwards compatible, so Rails users receive the updated SDK.
 - A Rails-only change needs a changeset for `posthog-rails`; it does not require a `posthog-ruby` changeset or release.
-- If both packages have code changes, choose each package's release type based on its changes.
+- If both packages have code changes, select both and choose each package's release type based on its changes.
 
-`posthog-rails` is not bumped automatically when `posthog-ruby` changes. Contributors must explicitly include it in the changeset.
+Changesets reads the `workspace:*` dependency in `posthog-rails/package.json` as an exact dependency on `posthog-ruby` and adds Rails to the release plan automatically.
 
 ## How to release
 
@@ -21,7 +21,7 @@ pnpm changeset
 ```
 
 This will prompt you to:
-- select both packages for a core Ruby change, or only `posthog-rails` for a Rails-only change
+- select `posthog-ruby` for a core Ruby change, `posthog-rails` for a Rails-only change, or both when both packages have code changes
 - select the release type (`patch`, `minor`, or `major`) for each package
 - write a summary of the change
 
@@ -46,7 +46,7 @@ No release label is required. When the PR is merged to `main`, the release workf
    - Publish only the packages whose versions changed
    - Create package-specific git tags and GitHub releases, for example `posthog-ruby-v3.13.1` or `posthog-rails-v3.14.0`
 
-When both packages are released, the workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`. The Rails gemspec pins its `posthog-ruby` dependency to the exact core SDK version present in the release commit. Including a Rails changeset with each core Ruby release updates that pin in the published Rails gem; a Rails-only release uses the core SDK version already recorded on `main`.
+When both packages are released, the workflow publishes `posthog-ruby` first, then `posthog-rails`, since `posthog-rails` depends on `posthog-ruby`. The Rails gemspec pins its `posthog-ruby` dependency to the exact core SDK version present in the release commit. The automatically included Rails release updates that pin in the published Rails gem; a Rails-only release uses the core SDK version already recorded on `main`.
 
 ## Manual trigger
 

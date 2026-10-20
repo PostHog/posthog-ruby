@@ -1,5 +1,44 @@
 # posthog-rails
 
+## 3.19.2
+
+### Patch Changes
+
+- Updated dependencies [1643b9d]
+  - posthog-ruby@3.28.0
+
+## 3.19.1
+
+### Patch Changes
+
+- Updated dependencies [6416934]
+  - posthog-ruby@3.27.1
+
+## 3.19.0
+
+### Minor Changes
+
+- f3eb5e3: Add `config.flag_definition_cache_provider` to the `PostHog.init` block so Rails apps can share feature flag definitions across processes via an external cache (for example Redis). The generated initializer now documents the option.
+
+## 3.18.9
+
+### Patch Changes
+
+- Updated dependencies [bd2d976]
+  - posthog-ruby@3.27.0
+
+## 3.18.8
+
+### Patch Changes
+
+- 5adef1c: Fix feature flag and remote config response parsing with JSON 3, restoring remote flag evaluation and local definition loading.
+
+## 3.18.7
+
+### Patch Changes
+
+- 2952fbf: Update the pinned `posthog-ruby` dependency from 3.23.7 to 3.26.2 to include the latest core SDK fixes and features.
+
 ## 3.18.6
 
 ### Patch Changes

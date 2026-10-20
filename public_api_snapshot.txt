@@ -56,7 +56,7 @@ constant PostHog::Defaults::Request::RETRIES: Integer
 constant PostHog::Defaults::Request::SSL: Boolean
 class PostHog::FeatureFlagEvaluations
 instance_method PostHog::FeatureFlagEvaluations#distinct_id()
-instance_method PostHog::FeatureFlagEvaluations#enabled?(key)
+instance_method PostHog::FeatureFlagEvaluations#enabled?(key, default_value: ...)
 instance_method PostHog::FeatureFlagEvaluations#evaluated_at()
 instance_method PostHog::FeatureFlagEvaluations#flag_definitions_loaded_at()
 instance_method PostHog::FeatureFlagEvaluations#get_flag(key)
@@ -334,6 +334,7 @@ instance_method PostHog::Rails::InitConfig#before_send=(value)
 instance_method PostHog::Rails::InitConfig#compress_request=(value)
 instance_method PostHog::Rails::InitConfig#feature_flag_request_timeout_seconds=(value)
 instance_method PostHog::Rails::InitConfig#feature_flags_polling_interval=(value)
+instance_method PostHog::Rails::InitConfig#flag_definition_cache_provider=(value)
 instance_method PostHog::Rails::InitConfig#host=(value)
 instance_method PostHog::Rails::InitConfig#max_queue_size=(value)
 instance_method PostHog::Rails::InitConfig#on_error=(value)
