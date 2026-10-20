@@ -49,6 +49,8 @@ BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle exec rspec
 
 Without that bundle, those two integration tests are reported as pending. CI runs both bundles.
 
+CI also runs the full suite with real OpenTelemetry dependencies on stable Ruby and the latest stable Rails eligible under the repository's 7-day RubyGems cooldown. This job sets `RAILS_VERSION='>= 5.2'` and runs `bundle update --all` so the committed lockfile does not keep Rails on an older version. The existing Ruby matrix continues to use the committed lockfiles.
+
 The public API snapshot covers both `posthog-ruby` and `posthog-rails`. If you intentionally change either API, update the snapshot and review the diff:
 
 ```bash
