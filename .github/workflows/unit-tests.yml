@@ -42,6 +42,7 @@ jobs:
   latest-rails:
     name: RSpec (latest Rails / stable Ruby)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       BUNDLE_GEMFILE: gemfiles/otel.gemfile
       RAILS_VERSION: '>= 5.2'
