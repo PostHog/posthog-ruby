@@ -344,7 +344,7 @@ jobs:
           set -euo pipefail
 
           # A re-run after a later step failed must not try to push the same version again
-          if curl -fs -o /dev/null "https://rubygems.org/api/v2/rubygems/${GEM_NAME}/versions/${GEM_VERSION}.json"; then
+          if curl -fs --connect-timeout 10 --max-time 30 -o /dev/null "https://rubygems.org/api/v2/rubygems/${GEM_NAME}/versions/${GEM_VERSION}.json"; then
             echo "${GEM_NAME} ${GEM_VERSION} is already on RubyGems - skipping push"
           else
             gem push "${GEM_NAME}"-*.gem
