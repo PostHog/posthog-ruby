@@ -337,12 +337,24 @@ jobs:
       - name: Publish ${{ matrix.package.name }}
         if: steps.detect-version.outputs.has-new-version == 'true'
         working-directory: ${{ matrix.package.path }}
-        run: gem push ${{ matrix.package.name }}-*.gem
+        env:
+          GEM_NAME: ${{ matrix.package.name }}
+          GEM_VERSION: ${{ steps.detect-version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # A re-run after a later step failed must not try to push the same version again
+          if curl -fs --connect-timeout 10 --max-time 30 -o /dev/null "https://rubygems.org/api/v2/rubygems/${GEM_NAME}/versions/${GEM_VERSION}.json"; then
+            echo "${GEM_NAME} ${GEM_VERSION} is already on RubyGems - skipping push"
+          else
+            gem push "${GEM_NAME}"-*.gem
+          fi
 
       - name: Wait for ${{ matrix.package.name }} to be available
         if: steps.detect-version.outputs.has-new-version == 'true'
         working-directory: ${{ matrix.package.path }}
-        run: gem exec rubygems-await ${{ matrix.package.name }}-*.gem
+        # RubyGems' full index can take longer than the 5-minute default to update
+        run: gem exec rubygems-await --timeout 900 ${{ matrix.package.name }}-*.gem
 
       - name: Tag ${{ matrix.package.name }}
         if: steps.detect-version.outputs.has-new-version == 'true'
