@@ -1,5 +1,13 @@
 # posthog-rails
 
+## 3.19.5
+
+### Patch Changes
+
+- 23134c3: Update the core SDK dependency so Rails events with numeric NaN or infinities serialize as JSON null instead of being lost.
+- Updated dependencies [23134c3]
+  - posthog-ruby@3.28.3
+
 ## 3.19.4
 
 ### Patch Changes

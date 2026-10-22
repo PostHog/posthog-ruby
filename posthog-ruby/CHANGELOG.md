@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.28.3
+
+### Patch Changes
+
+- 23134c3: Serialize numeric NaN and positive or negative Infinity in event properties as JSON null instead of losing the event. Preserve nested properties, array positions, and caller-owned values in synchronous and background delivery.
+
 ## 3.28.2
 
 ### Patch Changes
