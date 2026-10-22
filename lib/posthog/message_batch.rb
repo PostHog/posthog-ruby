@@ -26,6 +26,7 @@ module PostHog
     # @return [Array<Hash>, nil]
     def <<(message)
       begin
+        message = normalize_non_finite_numbers(message)
         message_json = message.to_json
       rescue StandardError => e
         raise JSONGenerationError, "Serialization error: #{e}"
@@ -56,6 +57,39 @@ module PostHog
     def_delegators :@messages, :length
 
     private
+
+    def normalize_non_finite_numbers(message)
+      copies = {}.compare_by_identity
+      pending = []
+      normalized = copy_json_value(message, copies, pending)
+
+      # Traverse iteratively so circular/deep containers still reach the JSON encoder's error handling.
+      until pending.empty?
+        container = pending.pop
+        if container.is_a?(Hash)
+          container.transform_values! { |value| copy_json_value(value, copies, pending) }
+        else
+          container.map! { |value| copy_json_value(value, copies, pending) }
+        end
+      end
+      normalized
+    end
+
+    def copy_json_value(value, copies, pending)
+      case value
+      when Float
+        value.finite? ? value : nil
+      when Hash, Array
+        copies.fetch(value) do
+          copy = value.clone(freeze: false)
+          copies[value] = copy
+          pending << copy
+          copy
+        end
+      else
+        value
+      end
+    end
 
     def item_count_exhausted?
       @messages.length >= @max_message_count

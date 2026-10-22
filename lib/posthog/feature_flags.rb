@@ -689,6 +689,11 @@ module PostHog
       end.downcase
     end
 
+    def self.string_operand(value)
+      value.nil? ? 'null' : value.to_s
+    end
+    private_class_method :string_operand
+
     def self.exact_property_match?(filter, value, property_matching_version)
       return legacy_truthy?(filter) == legacy_truthy?(value) if property_matching_version != 2 && boolean_like?(filter)
       return legacy_truthy?(value) if filter.is_a?(Array) && filter.empty?
@@ -733,21 +738,21 @@ module PostHog
       when 'is_set'
         property_values.key?(key)
       when 'icontains'
-        override_value.to_s.downcase(:ascii).include?(value.to_s.downcase(:ascii))
+        string_operand(override_value).downcase(:ascii).include?(value.to_s.downcase(:ascii))
       when 'not_icontains'
-        !override_value.to_s.downcase(:ascii).include?(value.to_s.downcase(:ascii))
+        !string_operand(override_value).downcase(:ascii).include?(value.to_s.downcase(:ascii))
       when 'starts_with'
-        override_value.to_s.downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
+        string_operand(override_value).downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
       when 'not_starts_with'
-        !override_value.to_s.downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
+        !string_operand(override_value).downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
       when 'ends_with'
-        override_value.to_s.downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
+        string_operand(override_value).downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
       when 'not_ends_with'
-        !override_value.to_s.downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
+        !string_operand(override_value).downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
       when 'regex'
-        PostHog::Utils.is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(override_value.to_s).nil?
+        PostHog::Utils.is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(string_operand(override_value)).nil?
       when 'not_regex'
-        PostHog::Utils.is_valid_regex(value.to_s) && Regexp.new(value.to_s).match(override_value.to_s).nil?
+        PostHog::Utils.is_valid_regex(value.to_s) && Regexp.new(value.to_s).match(string_operand(override_value)).nil?
       when 'gt', 'gte', 'lt', 'lte'
         parsed_value = parse_finite_number(value)
         raise InconclusiveMatchError, 'Invalid numeric condition' if parsed_value.nil?
