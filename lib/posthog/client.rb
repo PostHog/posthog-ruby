@@ -983,7 +983,7 @@ module PostHog
     private
 
     def exception_captured?(exception)
-      exception.is_a?(Exception) && exception.instance_variable_get(CAPTURED_EXCEPTION_IVAR) == true
+      exception.is_a?(Exception) && exception.instance_variable_get(CAPTURED_EXCEPTION_IVAR).equal?(exception)
     rescue StandardError
       false
     end
@@ -994,7 +994,7 @@ module PostHog
         break unless exception.is_a?(Exception)
         break if exception_captured?(exception)
 
-        exception.instance_variable_set(CAPTURED_EXCEPTION_IVAR, true) unless exception.frozen?
+        exception.instance_variable_set(CAPTURED_EXCEPTION_IVAR, exception) unless exception.frozen?
         exception = exception.cause
       end
     rescue StandardError
@@ -1175,10 +1175,7 @@ module PostHog
       action = process_before_send(action)
       return false if action.nil? || action.empty?
 
-      if @sync_mode
-        send_sync(action)
-        return true
-      end
+      return send_sync(action) if @sync_mode
 
       queued = @queue_mutex.synchronize do
         if @queue.length < @max_queue_size
@@ -1246,13 +1243,15 @@ module PostHog
         batch << action
       rescue MessageBatch::JSONGenerationError => e
         @on_error.call(-1, e.to_s)
-        return
+        return false
       end
-      return if batch.empty?
+      return false if batch.empty?
 
       @sync_lock.synchronize do
         res = @transport.send(@api_key, batch)
-        @on_error.call(res.status, res.error) unless res.status.between?(200, 299)
+        success = res.status.between?(200, 299)
+        @on_error.call(res.status, res.error) unless success
+        success
       end
     end
 
