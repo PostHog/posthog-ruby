@@ -419,7 +419,7 @@ module PostHog
 
       return if exception_list.nil?
 
-      properties = { '$exception_list' => exception_list }
+      properties = { '$exception_list' => exception_list }.merge(active_trace_properties)
       properties.merge!(additional_properties) if additional_properties && !additional_properties.empty?
 
       event_data = {
@@ -982,6 +982,25 @@ module PostHog
     end
 
     private
+
+    def active_trace_properties
+      return {} unless defined?(::OpenTelemetry::Trace)
+
+      context = ::OpenTelemetry::Trace.current_span.context
+      return {} unless context.valid?
+
+      trace_id = context.hex_trace_id
+      span_id = context.hex_span_id
+      return {} unless trace_id.match?(/\A[0-9a-f]{32}\z/) && trace_id != '0' * 32
+      return {} unless span_id.match?(/\A[0-9a-f]{16}\z/) && span_id != '0' * 16
+
+      context_properties = Internal::Context.current&.properties
+      { '$trace_id' => trace_id, '$span_id' => span_id }.reject do |key, _|
+        property_key?(context_properties, key)
+      end
+    rescue StandardError, LoadError
+      {}
+    end
 
     def exception_captured?(exception)
       exception.is_a?(Exception) && exception.instance_variable_get(CAPTURED_EXCEPTION_IVAR).equal?(exception)
