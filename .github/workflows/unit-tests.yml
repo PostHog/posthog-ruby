@@ -29,13 +29,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Ruby ${{ matrix.ruby-version }}
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler: 4.0.13
           # runs 'bundle install' and caches installed gems automatically
           bundler-cache: true
 
+      - name: Run RSpec tests
+        run: bundle exec rspec
+
+  latest-rails:
+    name: RSpec (latest Rails / stable Ruby)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BUNDLE_GEMFILE: gemfiles/otel.gemfile
+      RAILS_VERSION: '>= 5.2'
+      RAILS_ENV: test
+      GH_ACTIONS_UNIT_TESTS: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Use stable Ruby
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: ruby
+          bundler: 4.0.13
+      - name: Resolve latest Rails and dependencies
+        run: bundle update --all
+      - name: Report resolved versions and require logs dependencies
+        run: |
+          bundle exec ruby -rrails -rjson -ropentelemetry-sdk -ropentelemetry-logs-sdk -ropentelemetry/exporter/otlp_logs -e 'puts "Ruby #{RUBY_VERSION}, Rails #{Rails.version}, JSON #{JSON::VERSION}"'
       - name: Run RSpec tests
         run: bundle exec rspec
 
@@ -52,7 +76,7 @@ jobs:
       GH_ACTIONS_UNIT_TESTS: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler: 4.0.13
@@ -69,7 +93,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Ruby 3.4
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: 3.4
           bundler: 4.0.13
@@ -85,7 +109,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Ruby 3.4
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: 3.4
           bundler: 4.0.13
@@ -101,7 +125,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Use Ruby 3.4
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: 3.4
           bundler: 4.0.13

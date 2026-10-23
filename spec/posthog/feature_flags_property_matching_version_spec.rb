@@ -200,16 +200,18 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'property matching versions' do
       { status: 200, body: 'invalid json' },
       { status: 200, body: definitions.to_json }
     )
-    poller._load_feature_flags
-    expect_local_flags(poller, false)
-    poller._load_feature_flags
-    expect_local_flags(poller, false)
-    poller._load_feature_flags
-    expect_local_flags(poller, false)
-    poller._load_feature_flags
-    expect_local_flags(poller, false)
-    poller._load_feature_flags
-    expect_local_flags(poller, true)
+    authenticated_poller = described_class.new(60, API_KEY, API_KEY, 'https://us.i.posthog.com', 3)
+    expect_local_flags(authenticated_poller, false)
+    authenticated_poller._load_feature_flags
+    expect_local_flags(authenticated_poller, false)
+    authenticated_poller._load_feature_flags
+    expect_local_flags(authenticated_poller, false)
+    authenticated_poller._load_feature_flags
+    expect_local_flags(authenticated_poller, false)
+    authenticated_poller._load_feature_flags
+    expect_local_flags(authenticated_poller, true)
+  ensure
+    authenticated_poller&.shutdown_poller
   end
 
   it 'round trips version through JSON external caches and defaults older entries to legacy' do
@@ -217,7 +219,10 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'property matching versions' do
     allow(provider).to receive(:flag_definitions)
     stored = nil
     allow(provider).to receive(:on_flag_definitions_received) { |data| stored = JSON.parse(JSON.generate(data)) }
-    poller.instance_variable_set(:@flag_definition_cache_provider, provider)
+    stub_request(:get, url).to_return(status: 200, body: definitions.to_json)
+    authenticated_poller = described_class.new(
+      60, API_KEY, API_KEY, 'https://us.i.posthog.com', 3, flag_definition_cache_provider: provider
+    )
     cached_poller = described_class.new(60, nil, API_KEY, 'https://us.i.posthog.com', 3)
     cached_poller.instance_variable_set(:@flag_definition_cache_provider, provider)
     allow(provider).to receive(:flag_definitions) { stored }
@@ -227,7 +232,7 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'property matching versions' do
       stub_request(:get, url).to_return(
         status: 200, body: definitions.merge(property_matching_version: version).to_json
       )
-      poller._load_feature_flags
+      authenticated_poller._load_feature_flags
       expect(stored['property_matching_version']).to eq(version)
       allow(provider).to receive(:should_fetch_flag_definitions?).and_return(false)
       cached_poller._load_feature_flags
@@ -238,6 +243,7 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'property matching versions' do
     cached_poller._load_feature_flags
     expect_local_flags(cached_poller, true)
   ensure
+    authenticated_poller&.shutdown_poller
     cached_poller&.shutdown_poller
   end
 end

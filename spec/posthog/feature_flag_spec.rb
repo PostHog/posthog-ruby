@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'bigdecimal'
 require 'timecop'
 
 module PostHog
@@ -9,6 +10,68 @@ module PostHog
   flags_endpoint = 'https://us.i.posthog.com/flags/?v=2'
 
   describe 'local evaluation' do
+    describe 'numeric ordering' do
+      [
+        { operator: 'gt', filter: 2, properties: { score: '10' }, expected: true },
+        { operator: 'lt', filter: 30, properties: { score: '100' }, expected: false },
+        { operator: 'gte', filter: '5', properties: { score: '10' }, expected: true },
+        { operator: 'lte', filter: '5', properties: { score: '10' }, expected: false },
+        { operator: 'gt', filter: '2', properties: { score: BigDecimal('10') }, expected: true },
+        { operator: 'gte', filter: '10', properties: { score: BigDecimal('10') }, expected: true },
+        { operator: 'lt', filter: '30', properties: { score: BigDecimal('10') }, expected: true },
+        { operator: 'lte', filter: '10', properties: { score: BigDecimal('10') }, expected: true },
+        {
+          operator: 'lte', filter: '9007199254740992',
+          properties: { score: BigDecimal('9007199254740993') }, expected: true
+        },
+        { operator: 'gte', filter: '0', properties: { score: BigDecimal('1e-400') }, expected: true },
+        { operator: 'lt', filter: '5', properties: { score: BigDecimal('NaN') }, expected: false },
+        { operator: 'gt', filter: '5', properties: { score: BigDecimal('Infinity') }, expected: false },
+        { operator: 'lt', filter: '5', properties: { score: BigDecimal('-Infinity') }, expected: false },
+        { operator: 'gt', filter: '5', properties: { score: BigDecimal('1e400') }, expected: false },
+        { operator: 'gt', filter: '5', properties: { score: '10px' }, expected: false },
+        { operator: 'lt', filter: 5, properties: { score: nil }, expected: false },
+        { operator: 'gt', filter: '5px', properties: { score: '10' }, expected: 'server-fallback' },
+        { operator: 'gt', filter: '5px', properties: { score: nil }, expected: 'server-fallback' },
+        { operator: 'gt', filter: '5', properties: {}, expected: 'server-fallback' }
+      ].each do |test_case|
+        it "evaluates #{test_case.inspect} with the expected fallback boundary" do
+          flag = {
+            key: 'numeric-flag', active: true,
+            filters: {
+              groups: [{
+                properties: [{
+                  key: 'score', type: 'person', operator: test_case[:operator], value: test_case[:filter]
+                }],
+                rollout_percentage: 100
+              }]
+            }
+          }
+          stub_request(:get, 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true')
+            .to_return(status: 200, body: { flags: [flag] }.to_json)
+          stub_request(:post, flags_endpoint)
+            .to_return(status: 200, body: { featureFlags: { 'numeric-flag' => 'server-fallback' } }.to_json)
+
+          client = Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+          options = { person_properties: test_case[:properties], flag_keys: ['numeric-flag'] }
+          local_expected = test_case[:expected] == 'server-fallback' ? nil : test_case[:expected]
+          local_flags = client.evaluate_flags('test-id', **options, only_evaluate_locally: true)
+          expect(local_flags.get_flag('numeric-flag')).to eq(local_expected)
+          assert_not_requested :post, flags_endpoint
+
+          flags = client.evaluate_flags('test-id', **options)
+          expect(flags.get_flag('numeric-flag')).to eq(test_case[:expected])
+          if test_case[:expected] == 'server-fallback'
+            assert_requested :post, flags_endpoint, times: 1
+          else
+            assert_not_requested :post, flags_endpoint
+          end
+        ensure
+          client&.shutdown
+        end
+      end
+    end
+
     it 'evaluates person properties' do
       api_feature_flag_res = {
         'flags' => [
@@ -1701,16 +1764,108 @@ module PostHog
       property_e = { 'key' => 'key', 'value' => '30', 'operator' => 'lt' }
       expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '29' })).to be true
 
-      # depending on the type of override, we adjust type comparison
-      expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '100' })).to be true
+      expect(FeatureFlagsPoller.match_property(property_e, { 'key' => '100' })).to be false
       expect(FeatureFlagsPoller.match_property(property_e, { 'key' => 100 })).to be false
 
       property_f = { 'key' => 'key', 'value' => '123aloha', 'operator' => 'gt' }
-      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => '123' })).to be false
-      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => 122 })).to be false
+      ['123', 122, 129].each do |actual|
+        expect do
+          FeatureFlagsPoller.match_property(property_f, { 'key' => actual })
+        end.to raise_error(InconclusiveMatchError)
+      end
+    end
 
-      # this turns into a string comparison
-      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => 129 })).to be true
+    describe 'numeric ordering' do
+      [
+        ['gt', 2, '10', true],
+        ['lt', 30, '100', false],
+        ['gte', '5', '10', true],
+        ['lte', '5', '10', false]
+      ].each do |operator, filter, actual, expected|
+        it "compares #{actual.inspect} #{operator} #{filter.inspect} numerically" do
+          property = { key: 'key', value: filter, operator: operator }
+          expect(FeatureFlagsPoller.match_property(property, { key: actual })).to be(expected)
+        end
+      end
+
+      {
+        'gt' => [false, false, true],
+        'gte' => [false, true, true],
+        'lt' => [true, false, false],
+        'lte' => [true, true, false]
+      }.each do |operator, expected_results|
+        [5, 5.0, '5'].each do |filter|
+          [2, 5, 10, 2.0, 5.0, 10.0, '2', '5', '10',
+           BigDecimal('2'), BigDecimal('5'), BigDecimal('10')].each_with_index do |actual, index|
+            it "compares #{actual.inspect} #{operator} #{filter.inspect} numerically" do
+              property = { key: 'key', value: filter, operator: operator }
+              expect(FeatureFlagsPoller.match_property(property, { key: actual })).to be(expected_results[index % 3])
+            end
+          end
+        end
+      end
+
+      [
+        ['+10', 10], ['-10', -10], ['10.', 10], ['.5', 0.5], ['-.5', -0.5],
+        ['+1.25e+2', 125], ['-1.25E-2', -0.0125], ['0010', 10], ['-0', 0],
+        ['1e-400', 0], ['9007199254740993', 9_007_199_254_740_992],
+        [9_007_199_254_740_993, 9_007_199_254_740_992]
+      ].each do |string, number|
+        it "converts #{string.inspect} on either side to finite binary64" do
+          %w[gt gte lt lte].each do |operator|
+            [[string, number], [number, string]].each do |actual, filter|
+              property = { key: 'key', value: filter, operator: operator }
+              expected = %w[gte lte].include?(operator)
+              expect(FeatureFlagsPoller.match_property(property, { key: actual })).to be(expected)
+            end
+          end
+        end
+      end
+
+      [
+        [BigDecimal('10.5'), 10.5], [BigDecimal('-0.5'), -0.5],
+        [BigDecimal('9007199254740993'), 9_007_199_254_740_992],
+        [BigDecimal('1e-400'), 0], [BigDecimal('-1e-400'), 0]
+      ].each do |actual, filter|
+        it "converts BigDecimal #{actual.inspect} properties to finite binary64" do
+          %w[gt gte lt lte].each do |operator|
+            property = { key: 'key', value: filter, operator: operator }
+            expected = %w[gte lte].include?(operator)
+            expect(FeatureFlagsPoller.match_property(property, { key: actual })).to be(expected)
+          end
+        end
+      end
+
+      [
+        '', ' 10', '10 ', "10\n", "\n10", "10\r\n", '10px', '1_0', '0x10', '1,5',
+        '.', '+', '1e', 'NaN', 'Infinity', '-Infinity', '1e309', '１０',
+        nil, true, false, [], [10], {}, Float::NAN, Float::INFINITY, -Float::INFINITY, 10**400,
+        BigDecimal('NaN'), BigDecimal('Infinity'), BigDecimal('-Infinity'), BigDecimal('1e400')
+      ].each do |invalid|
+        it "rejects #{invalid.inspect} as a property and treats it as inconclusive as a filter" do
+          %w[gt gte lt lte].each do |operator|
+            [5, '5'].each do |valid|
+              property = { key: 'key', value: valid, operator: operator }
+              expect(FeatureFlagsPoller.match_property(property, { key: invalid })).to be(false)
+
+              property = { key: 'key', value: invalid, operator: operator }
+              [valid, nil].each do |actual|
+                expect do
+                  FeatureFlagsPoller.match_property(property, { key: actual })
+                end.to raise_error(InconclusiveMatchError)
+              end
+            end
+          end
+        end
+      end
+
+      it 'preserves inconclusive matching for missing properties' do
+        %w[gt gte lt lte].each do |operator|
+          expect do
+            FeatureFlagsPoller.match_property({ key: 'key', value: '5', operator: operator }, {})
+          end.to raise_error(InconclusiveMatchError)
+        end
+      end
     end
 
     it 'with date operators' do
@@ -1891,10 +2046,12 @@ module PostHog
       expect(FeatureFlagsPoller.match_property(property_e, { 'key' => nil })).to be false
 
       property_f = { 'key' => 'key', 'value' => 1, 'operator' => 'lt' }
-      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => nil })).to be true
+      expect(FeatureFlagsPoller.match_property(property_f, { 'key' => nil })).to be false
 
       property_g = { 'key' => 'key', 'value' => 'xyz', 'operator' => 'gte' }
-      expect(FeatureFlagsPoller.match_property(property_g, { 'key' => nil })).to be false
+      expect do
+        FeatureFlagsPoller.match_property(property_g, { 'key' => nil })
+      end.to raise_error(InconclusiveMatchError)
 
       property_j = { 'key' => 'key', 'value' => '2022-05-01', 'operator' => 'is_date_after' }
       expect { FeatureFlagsPoller.match_property(property_j, { 'key' => nil }) }.to raise_error(InconclusiveMatchError)

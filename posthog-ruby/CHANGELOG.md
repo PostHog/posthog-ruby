@@ -1,5 +1,41 @@
 # posthog-ruby
 
+## 3.28.4
+
+### Patch Changes
+
+- 1a2260c: Fix MCP instrumentation returning internal errors with mcp 1.8.0 by forwarding request keywords, including authentication context, to the MCP server.
+
+## 3.28.3
+
+### Patch Changes
+
+- 23134c3: Serialize numeric NaN and positive or negative Infinity in event properties as JSON null instead of losing the event. Preserve nested properties, array positions, and caller-owned values in synchronous and background delivery.
+
+## 3.28.2
+
+### Patch Changes
+
+- 01f7d09: Fix local feature flag evaluation to stringify explicitly null properties as "null" instead of an empty string for contains, prefix, suffix, and regex operators (including their negations). Flag values or selected variants can change for explicitly null person or group properties; missing properties still allow remote evaluation fallback.
+
+## 3.28.1
+
+### Patch Changes
+
+- 5d3224e: Compare numeric strings numerically for locally evaluated feature flag `gt`, `gte`, `lt`, and `lte` conditions, including when the filter is a JSON number. This corrects flag membership for values such as `"10" > 2` and `"100" < 30`. Invalid or non-finite property values no longer match via string ordering; invalid numeric conditions use the existing remote-evaluation fallback.
+
+## 3.28.0
+
+### Minor Changes
+
+- 1643b9d: Local flag evaluation honors experiment holdouts. A flag whose definition carries `filters.holdout` now resolves a held-out identifier to `holdout-<id>` before its release conditions, matching the server instead of silently bucketing the identifier into a regular variant.
+
+## 3.27.1
+
+### Patch Changes
+
+- 6416934: Allow external flag definition cache consumers to evaluate flags locally and refresh cached definitions without a secret key.
+
 ## 3.27.0
 
 ### Minor Changes
