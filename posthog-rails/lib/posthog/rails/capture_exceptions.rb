@@ -18,10 +18,6 @@ module PostHog
       # @param env [Hash] Rack environment.
       # @return [Array] Rack response.
       def call(env)
-        # Signal that we're in a web request context
-        # ErrorSubscriber will skip capture for web requests to avoid duplicates
-        PostHog::Rails.enter_web_request
-
         response = @app.call(env)
         env['posthog.response_status_code'] = response_status(response)
 
@@ -35,8 +31,6 @@ module PostHog
         # Capture unhandled exceptions
         capture_exception(e, env) if should_capture?(e)
         raise
-      ensure
-        PostHog::Rails.exit_web_request
       end
 
       private
@@ -60,13 +54,12 @@ module PostHog
         distinct_id = extract_distinct_id(env)
         additional_properties = build_properties(request, env)
 
-        captured = PostHog.capture_exception(
+        PostHog.capture_exception(
           exception,
           distinct_id,
           additional_properties,
           mechanism: { 'type' => 'rails', 'handled' => false }
         )
-        PostHog::Rails.mark_web_exception_captured(exception) if captured
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to capture exception: #{e.message}")
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")

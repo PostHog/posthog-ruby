@@ -327,7 +327,6 @@ instance_method PostHog::Rails::Configuration#use_tracing_headers=(arg0)
 instance_method PostHog::Rails::Configuration#user_id_method()
 instance_method PostHog::Rails::Configuration#user_id_method=(arg0)
 constant PostHog::Rails::Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE: Integer
-constant PostHog::Rails::IN_WEB_REQUEST_KEY: Symbol
 class PostHog::Rails::InitConfig
 instance_method PostHog::Rails::InitConfig#api_key=(value)
 instance_method PostHog::Rails::InitConfig#before_send=(value)

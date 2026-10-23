@@ -18,14 +18,6 @@ require 'posthog/rails/railtie'
 
 module PostHog
   module Rails
-    # Thread-local key for tracking web request context
-    IN_WEB_REQUEST_KEY = :posthog_in_web_request
-    ACTIVE_JOB_CAPTURED_EXCEPTION_IVAR = :@posthog_active_job_exception_captured
-    WEB_CAPTURED_EXCEPTION_IVAR = :@posthog_web_exception_captured
-
-    private_constant :ACTIVE_JOB_CAPTURED_EXCEPTION_IVAR
-    private_constant :WEB_CAPTURED_EXCEPTION_IVAR
-
     class << self
       # @return [PostHog::Rails::Configuration] Rails integration configuration.
       def config
@@ -41,87 +33,6 @@ module PostHog
       # @return [void]
       def configure
         yield config if block_given?
-      end
-
-      # Mark that we're in a web request context
-      # CaptureExceptions middleware will handle exception capture
-      # @api private
-      # @return [void]
-      def enter_web_request
-        Thread.current[IN_WEB_REQUEST_KEY] = true
-      end
-
-      # Clear web request context (called at end of request)
-      # @api private
-      # @return [void]
-      def exit_web_request
-        Thread.current[IN_WEB_REQUEST_KEY] = false
-      end
-
-      # Check if we're currently in a web request context
-      # Used by ErrorSubscriber to avoid duplicate captures
-      # @api private
-      # @return [Boolean]
-      def in_web_request?
-        Thread.current[IN_WEB_REQUEST_KEY] == true
-      end
-
-      # Mark an exception as already captured by the ActiveJob integration.
-      # Used by ErrorSubscriber to avoid duplicate captures when Rails reports
-      # the same re-raised job exception via Rails.error.
-      # @api private
-      # @param exception [Exception]
-      # @return [void]
-      def mark_active_job_exception_captured(exception)
-        exception.instance_variable_set(ACTIVE_JOB_CAPTURED_EXCEPTION_IVAR, true)
-      rescue StandardError
-        nil
-      end
-
-      # Check whether an exception was already captured by ActiveJobExtensions.
-      # @api private
-      # @param exception [Exception]
-      # @return [Boolean]
-      def active_job_exception_captured?(exception)
-        exception.instance_variable_get(ACTIVE_JOB_CAPTURED_EXCEPTION_IVAR) == true
-      rescue StandardError
-        false
-      end
-
-      # Mark an exception as already captured by the CaptureExceptions middleware.
-      #
-      # ActionDispatch::Executor sits above our middleware and reports unhandled
-      # exceptions to Rails.error *after* the response has unwound back through
-      # CaptureExceptions, so `in_web_request?` is already false by then. The mark
-      # lets ErrorSubscriber recognize the report as a duplicate.
-      #
-      # The whole cause chain is marked because ActionDispatch::ExceptionWrapper
-      # unwraps ActionView::Template::Error to its cause, meaning Rails can report
-      # a different object than the one the middleware captured.
-      # @api private
-      # @param exception [Exception]
-      # @return [void]
-      def mark_web_exception_captured(exception)
-        current = exception
-        seen = {}.compare_by_identity
-
-        while current.is_a?(Exception) && !seen[current]
-          seen[current] = true
-          current.instance_variable_set(WEB_CAPTURED_EXCEPTION_IVAR, true)
-          current = current.cause
-        end
-      rescue StandardError
-        nil
-      end
-
-      # Check whether an exception was already captured by CaptureExceptions.
-      # @api private
-      # @param exception [Exception]
-      # @return [Boolean]
-      def web_exception_captured?(exception)
-        exception.instance_variable_get(WEB_CAPTURED_EXCEPTION_IVAR) == true
-      rescue StandardError
-        false
       end
     end
   end

@@ -1,7 +1,7 @@
 {
   "name": "posthog-rails",
   "private": true,
-  "version": "3.19.5",
+  "version": "3.19.6",
   "dependencies": {
     "posthog-ruby": "workspace:*"
   }
