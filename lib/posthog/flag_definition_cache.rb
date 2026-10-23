@@ -5,7 +5,8 @@ module PostHog
   #
   # Enables multi-worker environments (Kubernetes, load-balanced servers,
   # serverless functions) to share flag definitions via an external cache,
-  # reducing redundant API calls.
+  # reducing redundant API calls. Cache consumers need only the project API key;
+  # +:secret_key+ is required only for workers that fetch definitions from PostHog.
   #
   # Implement the four required methods on any object and pass it as the
   # +:flag_definition_cache_provider+ option when creating a {Client}.
@@ -16,7 +17,7 @@ module PostHog
   #   Retrieve cached flag definitions. Return a Hash with +:flags+,
   #   +:group_type_mapping+, +:cohorts+, +:minimal_flag_called_events+, and +:property_matching_version+
   #   keys, or +nil+ if the cache is empty. Returning +nil+ triggers an API
-  #   fetch when no flags are loaded yet (emergency fallback). Providers
+  #   fetch when no flags are loaded yet and +:secret_key+ is configured (emergency fallback). Providers
   #   written before +:minimal_flag_called_events+ existed continue to work;
   #   a missing key is treated as +false+. Preserve +:property_matching_version+
   #   with the definitions: exactly +2+ selects explicit equality; missing/1
@@ -27,7 +28,9 @@ module PostHog
   # @!method should_fetch_flag_definitions?
   #   Return +true+ if this instance should fetch new definitions from the
   #   API, +false+ to read from cache instead. Use for distributed lock
-  #   coordination so only one worker fetches at a time.
+  #   coordination so only one worker fetches at a time. Called only when
+  #   +:secret_key+ is configured. Without it, the SDK reads +flag_definitions+
+  #   directly without acquiring or renewing fetch leadership.
   #   @return [Boolean]
   #
   # @!method on_flag_definitions_received(data)
@@ -53,12 +56,16 @@ module PostHog
   # - +on_flag_definitions_received+ errors are logged; flags remain in memory
   # - +shutdown+ errors are logged; shutdown continues
   #
+  # API fallback requires +:secret_key+. Without it, the SDK logs a warning and
+  # keeps any previously loaded definitions. Cache-only readers skip the fetch
+  # decision and never publish. Polling and manual reloads continue reading the
+  # cache so consumers can pick up later updates.
+  #
   # == Example
   #
   #   cache = RedisFlagCache.new(redis, service_key: 'my-service')
   #   client = PostHog::Client.new(
   #     api_key: '<project_api_key>',
-  #     secret_key: '<secret_key>',
   #     flag_definition_cache_provider: cache
   #   )
   #

@@ -137,6 +137,36 @@ RSpec.describe PostHog::MCP do
       expect(drain_events(other_client)).to be_empty
     end
 
+    %i[handle handle_json].each do |entrypoint|
+      it "preserves auth_info through #{entrypoint} on instrumented and uninstrumented servers" do
+        skip 'The MCP gem does not support auth_info' unless server.method(entrypoint).parameters.include?(%i[key auth_info])
+
+        seen = []
+        auth_info = Object.new
+        tool = Class.new(MCP::Tool) do
+          tool_name 'authenticated'
+          define_singleton_method(:call) do |server_context:|
+            seen << server_context.auth_info
+            MCP::Tool::Response.new([{ type: 'text', text: 'ok' }])
+          end
+        end
+        instrumented = MCP::Server.new(name: 'instrumented', tools: [tool])
+        uninstrumented = MCP::Server.new(name: 'uninstrumented', tools: [tool])
+        described_class.instrument(instrumented, client, enable_conversation_id: false)
+
+        [instrumented, uninstrumented].each do |target|
+          request = rpc(1, 'tools/call', { name: 'authenticated', arguments: {} })
+          request = JSON.generate(request) if entrypoint == :handle_json
+          response = target.public_send(entrypoint, request, auth_info: auth_info)
+          response = JSON.parse(response, symbolize_names: true) if entrypoint == :handle_json
+          expect(response.dig(:result, :content)).to eq([{ type: 'text', text: 'ok' }])
+        end
+
+        expect(seen).to eq([auth_info, auth_info])
+        expect(events_named(drain_events(client), '$mcp_tool_call').length).to eq(1)
+      end
+    end
+
     it 'returns a no-op handle for unsupported servers and when no client is available' do
       allow(Kernel).to receive(:warn)
       allow(PostHog).to receive(:client).and_return(nil) if PostHog.respond_to?(:client)

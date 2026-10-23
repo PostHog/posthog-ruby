@@ -100,9 +100,9 @@ module PostHog
           run_now: @async_load
         ) { _load_feature_flags }
 
-      # If no secret_key, disable local evaluation & thus polling for definitions
-      if @secret_key.nil?
-        logger.info 'No secret_key provided, disabling local evaluation'
+      # Local evaluation can load definitions from either the API or an external cache.
+      if @secret_key.nil? && @flag_definition_cache_provider.nil?
+        logger.info 'No secret_key or flag_definition_cache_provider provided, disabling local evaluation'
         @loaded_flags_successfully_once.make_true
       else
         # load once synchronously before timer, unless @async_load
@@ -500,6 +500,21 @@ module PostHog
       end
     end
 
+    def self.parse_finite_number(value)
+      case value
+      when String
+        return unless /\A[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\z/.match?(value)
+      when Integer, Float
+        # JSON numbers remain supported alongside numeric strings.
+      else
+        return unless defined?(::BigDecimal) && value.is_a?(::BigDecimal)
+      end
+
+      number = value.to_f
+      number if number.finite?
+    end
+    private_class_method :parse_finite_number
+
     def self.relative_date_parse_for_feature_flag_matching(value)
       match = /^-?([0-9]+)([a-z])$/.match(value)
       parsed_dt = DateTime.now.new_offset(0)
@@ -674,6 +689,11 @@ module PostHog
       end.downcase
     end
 
+    def self.string_operand(value)
+      value.nil? ? 'null' : value.to_s
+    end
+    private_class_method :string_operand
+
     def self.exact_property_match?(filter, value, property_matching_version)
       return legacy_truthy?(filter) == legacy_truthy?(value) if property_matching_version != 2 && boolean_like?(filter)
       return legacy_truthy?(value) if filter.is_a?(Array) && filter.empty?
@@ -718,36 +738,30 @@ module PostHog
       when 'is_set'
         property_values.key?(key)
       when 'icontains'
-        override_value.to_s.downcase(:ascii).include?(value.to_s.downcase(:ascii))
+        string_operand(override_value).downcase(:ascii).include?(value.to_s.downcase(:ascii))
       when 'not_icontains'
-        !override_value.to_s.downcase(:ascii).include?(value.to_s.downcase(:ascii))
+        !string_operand(override_value).downcase(:ascii).include?(value.to_s.downcase(:ascii))
       when 'starts_with'
-        override_value.to_s.downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
+        string_operand(override_value).downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
       when 'not_starts_with'
-        !override_value.to_s.downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
+        !string_operand(override_value).downcase(:ascii).start_with?(value.to_s.downcase(:ascii))
       when 'ends_with'
-        override_value.to_s.downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
+        string_operand(override_value).downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
       when 'not_ends_with'
-        !override_value.to_s.downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
-      when 'regex'
-        PostHog::Utils.is_valid_regex(value.to_s) && !Regexp.new(value.to_s).match(override_value.to_s).nil?
-      when 'not_regex'
-        PostHog::Utils.is_valid_regex(value.to_s) && Regexp.new(value.to_s).match(override_value.to_s).nil?
+        !string_operand(override_value).downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
+      when 'regex', 'not_regex'
+        matched = match_regex(value.to_s, string_operand(override_value))
+        return false if matched.nil?
+
+        operator == 'regex' ? matched : !matched
       when 'gt', 'gte', 'lt', 'lte'
-        parsed_value = nil
-        begin
-          parsed_value = Float(value)
-        rescue StandardError # rubocop:disable Lint/SuppressedException
-        end
-        if !parsed_value.nil? && !override_value.nil?
-          if override_value.is_a?(String)
-            compare(override_value, value.to_s, operator)
-          else
-            compare(override_value, parsed_value, operator)
-          end
-        else
-          compare(override_value.to_s, value.to_s, operator)
-        end
+        parsed_value = parse_finite_number(value)
+        raise InconclusiveMatchError, 'Invalid numeric condition' if parsed_value.nil?
+
+        parsed_override = parse_finite_number(override_value)
+        return false if parsed_override.nil?
+
+        compare(parsed_override, parsed_value, operator)
       when 'is_date_before', 'is_date_after'
         override_date = PostHog::Utils.convert_to_datetime(override_value.to_s)
         parsed_date = relative_date_parse_for_feature_flag_matching(value.to_s)
@@ -795,6 +809,139 @@ module PostHog
         raise InconclusiveMatchError, "Unknown operator: #{operator}"
       end
     end
+
+    def self.match_regex(pattern, value)
+      return true if pattern.empty?
+
+      unless portable_regex?(pattern, value)
+        raise InconclusiveMatchError, 'Regex compatibility requires server evaluation'
+      end
+
+      begin
+        regex = Regexp.new(pattern)
+      rescue RegexpError => e
+        # Ruby's repeat-count limit is smaller than the service's syntax limit.
+        raise InconclusiveMatchError, 'Regex compilation requires server evaluation' if e.message.include?('too big')
+
+        return nil
+      end
+      !regex.match(value).nil?
+    rescue InconclusiveMatchError
+      raise
+    rescue StandardError
+      raise InconclusiveMatchError, 'Regex execution requires server evaluation'
+    end
+    private_class_method :match_regex
+
+    # Native compilation alone cannot establish compatibility with the flags service's Rust engine.
+    # Keep ordinary scalar matching local, but defer engine-specific syntax and backtracking assertions.
+    def self.portable_regex?(pattern, value)
+      # Ruby string offsets repeatedly traverse multibyte prefixes; tokenize once for constant-time lookahead.
+      characters = pattern.chars
+      ascii_input = value.ascii_only?
+      newline_input = value.include?("\n")
+      class_start = nil
+      previous_token = nil
+      index = 0
+      while index < characters.length
+        character = characters[index]
+        if character == '\\'
+          index += 1
+          escaped = characters[index]
+          break if escaped.nil?
+
+          if escaped == 'x'
+            hex = characters[index + 1, 2]&.join
+            return false unless hex&.match?(/\A[0-9a-fA-F]{2}\z/) && hex.to_i(16) < 128
+
+            index += 2
+          elsif 'dDsSwW'.include?(escaped)
+            # Ruby shorthand classes are ASCII-oriented, unlike the service's Unicode classes.
+            return false unless ascii_input
+          elsif class_start.nil?
+            return false if 'bB'.include?(escaped) # Even short ASCII inputs can exceed the service's boundary budget.
+            return false unless 'Azfnrtv'.include?(escaped) || escaped.match?(/[\x20-\x2f:;=?@\x5b-\x60\x7b-\x7e]/)
+          else
+            return false unless 'bfnrtv\\.^$|?*+(){}[]-'.include?(escaped)
+          end
+          previous_token = class_start.nil? && %w[A z].include?(escaped) ? :assertion : :literal
+        elsif character == '['
+          return false unless class_start.nil?
+
+          class_start = index
+        elsif character == ']' && class_start
+          content_start = class_start + (characters[class_start + 1] == '^' ? 2 : 1)
+          return false if index == content_start
+
+          class_start = nil
+          previous_token = :literal
+        elsif class_start
+          return false if %w[&& -- ~~].include?(characters[index, 2].join)
+        else
+          token = character
+          if character == '(' && characters[index + 1] == '?'
+            return false unless characters[index + 2] == ':'
+
+            index += 2
+          elsif character == '{'
+            repetition_end = regex_repetition_end(characters, index)
+            return false unless repetition_end && ![nil, '|', '('].include?(previous_token)
+            return false if %i[assertion empty_group repetition lazy_repetition
+                               bounded_repetition].include?(previous_token)
+
+            index = repetition_end
+            token = :bounded_repetition
+          elsif '*+?'.include?(character)
+            # A leading quantifier is invalid in both engines, regardless of the remaining syntax.
+            return true if [nil, '|', '('].include?(previous_token)
+            return false if %i[assertion empty_group].include?(previous_token)
+
+            repeated = %i[repetition lazy_repetition bounded_repetition].include?(previous_token)
+            return false if repeated && !(character == '?' && previous_token == :repetition)
+
+            token = :repetition
+            token = :lazy_repetition if repeated
+          elsif '^$'.include?(character)
+            # Ruby ^/$ are line anchors even without a multiline option; Rust's defaults are absolute.
+            return false if newline_input
+
+            token = :assertion
+          elsif character == ')' && ['(', :empty_group].include?(previous_token)
+            token = :empty_group
+          end
+          previous_token = token
+        end
+        index += 1
+      end
+      true
+    end
+    private_class_method :portable_regex?
+
+    def self.regex_repetition_end(characters, index)
+      index += 1
+      return nil unless characters[index]&.match?(/\A[0-9]\z/)
+
+      count = 0
+      comma = false
+      while index < characters.length
+        character = characters[index]
+        digit = character.ord - 48
+        if digit.between?(0, 9)
+          count = (count * 10) + digit
+          return nil if count > 0xffffffff
+        elsif character == ',' && !comma
+          comma = true
+          count = 0
+        elsif character == '}'
+          return index
+        else
+          return nil
+        end
+        index += 1
+      end
+      nil
+    end
+    private_class_method :regex_repetition_end
 
     def self.match_cohort(property, property_values, cohort_properties, property_matching_version: 1)
       # Cohort properties are in the form of property groups like this:
@@ -1110,6 +1257,13 @@ module PostHog
                                       groups: {}, group_properties: {}, snapshot: _evaluation_snapshot)
       flag_filters = flag[:filters] || {}
 
+      # Holdouts precede release conditions: a held-out identifier is excluded from
+      # the flag's targeting entirely rather than bucketed into one of its variants.
+      # The per-condition aggregation handled below never changes holdout membership,
+      # so this uses the flag-level bucketing identity the caller resolved.
+      holdout_variant = holdout_variant_for(flag_filters[:holdout], distinct_id)
+      return holdout_variant unless holdout_variant.nil?
+
       flag_conditions = flag_filters[:groups] || []
       flag_aggregation = flag_filters[:aggregation_group_type_index]
       early_exit = flag_filters[:early_exit] == true
@@ -1233,6 +1387,36 @@ module PostHog
       (Integer(hash_key[0..14], 16).to_f / 0xfffffffffffffff)
     end
 
+    # An experiment holdout excludes an identifier from the flag's release conditions
+    # entirely, resolving it to the synthetic variant "holdout-<id>". That variant does
+    # not need to exist in `filters.multivariate.variants`. Returns nil when the flag has
+    # no usable holdout or the identifier falls outside it, leaving ordinary evaluation
+    # unchanged.
+    def holdout_variant_for(holdout, bucketing_value)
+      return nil unless holdout.is_a?(Hash)
+
+      id = holdout[:id]
+      exclusion_percentage = holdout[:exclusion_percentage]
+      return nil if id.nil? || !exclusion_percentage.is_a?(Numeric)
+
+      # The server clamps an out-of-range percentage rather than rejecting it, and treats
+      # 100 as everyone without hashing, so a full holdout can't miss on a hash boundary.
+      # Fractional percentages are kept as-is.
+      percentage = exclusion_percentage.to_f.clamp(0, 100)
+      return nil if percentage < 100 && _holdout_hash(bucketing_value) > (percentage / 100)
+
+      "holdout-#{id}"
+    end
+
+    # Holdout membership hashes `holdout-<bucketing value>` with no separator, salt, flag
+    # key or holdout id taking part, so one identity lands in the same holdout population
+    # on every flag, the way the server buckets it. The dot-separated flag hash above
+    # selects a different population and must not be reused here.
+    def _holdout_hash(bucketing_value)
+      hash_key = Digest::SHA1.hexdigest "holdout-#{bucketing_value}"
+      (Integer(hash_key[0..14], 16).to_f / 0xfffffffffffffff)
+    end
+
     def get_matching_variant(flag, distinct_id)
       hash_value = _hash(flag[:key], distinct_id, 'variant')
       matching_variant = variant_lookup_table(flag).find do |variant|
@@ -1260,7 +1444,8 @@ module PostHog
 
       if @flag_definition_cache_provider
         begin
-          should_fetch = @flag_definition_cache_provider.should_fetch_flag_definitions?
+          # Cache-only readers must not acquire or renew fetch leadership.
+          should_fetch = @secret_key && @flag_definition_cache_provider.should_fetch_flag_definitions?
         rescue StandardError => e
           logger.error("[FEATURE FLAGS] Cache provider should_fetch error: #{e}")
           should_fetch = true
@@ -1271,6 +1456,10 @@ module PostHog
         begin
           cached_data = @flag_definition_cache_provider.flag_definitions
           if cached_data
+            unless cached_data.is_a?(Hash) && get_by_symbol_or_string_key(cached_data, 'flags').is_a?(Array)
+              raise ArgumentError, 'Cached flag definitions must contain a flags array'
+            end
+
             logger.debug '[FEATURE FLAGS] Using cached flag definitions from external cache'
             _apply_flag_definitions(cached_data)
             return
@@ -1288,6 +1477,11 @@ module PostHog
     end
 
     def _fetch_and_apply_flag_definitions
+      unless @secret_key
+        logger.warn '[FEATURE FLAGS] A secret_key is required to fetch flag definitions from PostHog'
+        return
+      end
+
       begin
         res = _request_feature_flag_definitions(etag: @flags_etag.value)
       rescue StandardError => e

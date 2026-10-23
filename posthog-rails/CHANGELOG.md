@@ -1,5 +1,49 @@
 # posthog-rails
 
+## 3.19.6
+
+### Patch Changes
+
+- Updated dependencies [1a2260c]
+  - posthog-ruby@3.28.4
+
+## 3.19.5
+
+### Patch Changes
+
+- 23134c3: Update the core SDK dependency so Rails events with numeric NaN or infinities serialize as JSON null instead of being lost.
+- Updated dependencies [23134c3]
+  - posthog-ruby@3.28.3
+
+## 3.19.4
+
+### Patch Changes
+
+- 01f7d09: Fix local feature flag evaluation to stringify explicitly null properties as "null" instead of an empty string for contains, prefix, suffix, and regex operators (including their negations). Flag values or selected variants can change for explicitly null person or group properties; missing properties still allow remote evaluation fallback.
+- Updated dependencies [01f7d09]
+  - posthog-ruby@3.28.2
+
+## 3.19.3
+
+### Patch Changes
+
+- Updated dependencies [5d3224e]
+  - posthog-ruby@3.28.1
+
+## 3.19.2
+
+### Patch Changes
+
+- Updated dependencies [1643b9d]
+  - posthog-ruby@3.28.0
+
+## 3.19.1
+
+### Patch Changes
+
+- Updated dependencies [6416934]
+  - posthog-ruby@3.27.1
+
 ## 3.19.0
 
 ### Minor Changes
