@@ -35,6 +35,12 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'regex compatibility' do
         ['alternation leading repetition', 'a|{2}', 'x'],
         ['group leading repetition', '(?:{2})', 'x'],
         ['open repetition', 'a{,2}', 'aa'],
+        ['multibyte open repetition', 'é{,2}', 'éé'],
+        ['multibyte unclosed repetition', 'é{2', 'éé'],
+        ['multibyte extra repetition separator', 'é{1,2,3}', 'éé'],
+        ['multibyte Unicode repetition count', 'é{١}', 'é'],
+        ['multibyte oversized minimum', 'é{4294967296,}', 'é'],
+        ['multibyte oversized maximum', 'é{1,4294967296}', 'é'],
         ['stacked repetition', 'a*{2}', 'aa'],
         ['nested star repetition', 'a**', 'x'],
         ['nested plus repetition', 'a+*', 'x'],
@@ -82,6 +88,16 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'regex compatibility' do
         ['carriage-return dot', '^.$', "\r", true],
         ['Unicode literal', '^😀?$', '', true],
         ['Unicode literal search', 'é', 'café', true],
+        ['long multibyte literal match', 'é' * 2000, 'é' * 2000, true],
+        ['long multibyte literal miss', 'é' * 2000, 'e' * 2000, false],
+        ['hex escape after multibyte literal', 'é\\x41', 'éA', true],
+        ['class after multibyte literal', 'é[😀]+', 'é😀😀', true],
+        ['multibyte bounded repetition match', 'é{2,3}', 'ééé', true],
+        ['multibyte bounded repetition miss', 'é{2,3}', 'é', false],
+        ['multibyte open upper bound', 'é{2,}', 'ééé', true],
+        ['multibyte leading zero bounds', 'é{0001,0002}', 'éé', true],
+        ['many multibyte bounded repetitions', 'é{1}' * 100, 'é' * 100, true],
+        ['escaped multibyte repetition braces', 'é\\{2\\}', 'é{2}', true],
         ['absolute anchors', '\\Afoo\\z', "foo\n", false],
         ['empty Unicode input', '', 'é', true],
         ['empty newline input', '', "\n", true],
@@ -94,7 +110,7 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'regex compatibility' do
         end
       end
 
-      ['[', '(', '*', '?*'].each do |pattern|
+      ['[', '(', '*', '?*', 'é[', 'é(', 'é{3,2}'].each do |pattern|
         ['value', 'é', nil].each do |input|
           it "returns false for invalid portable syntax #{pattern.inspect} and #{input.inspect}" do
             expect(described_class.match_property({ key: 'value', operator: operator, value: pattern },

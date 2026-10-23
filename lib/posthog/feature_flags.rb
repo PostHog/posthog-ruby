@@ -836,24 +836,28 @@ module PostHog
     # Native compilation alone cannot establish compatibility with the flags service's Rust engine.
     # Keep ordinary scalar matching local, but defer engine-specific syntax and backtracking assertions.
     def self.portable_regex?(pattern, value)
+      # Ruby string offsets repeatedly traverse multibyte prefixes; tokenize once for constant-time lookahead.
+      characters = pattern.chars
+      ascii_input = value.ascii_only?
+      newline_input = value.include?("\n")
       class_start = nil
       previous_token = nil
       index = 0
-      while index < pattern.length
-        character = pattern[index]
+      while index < characters.length
+        character = characters[index]
         if character == '\\'
           index += 1
-          escaped = pattern[index]
+          escaped = characters[index]
           break if escaped.nil?
 
           if escaped == 'x'
-            hex = pattern[index + 1, 2]
+            hex = characters[index + 1, 2]&.join
             return false unless hex&.match?(/\A[0-9a-fA-F]{2}\z/) && hex.to_i(16) < 128
 
             index += 2
           elsif 'dDsSwW'.include?(escaped)
             # Ruby shorthand classes are ASCII-oriented, unlike the service's Unicode classes.
-            return false unless value.ascii_only?
+            return false unless ascii_input
           elsif class_start.nil?
             return false if 'bB'.include?(escaped) # Even short ASCII inputs can exceed the service's boundary budget.
             return false unless 'Azfnrtv'.include?(escaped) || escaped.match?(/[\x20-\x2f:;=?@\x5b-\x60\x7b-\x7e]/)
@@ -866,27 +870,26 @@ module PostHog
 
           class_start = index
         elsif character == ']' && class_start
-          content_start = class_start + (pattern[class_start + 1] == '^' ? 2 : 1)
+          content_start = class_start + (characters[class_start + 1] == '^' ? 2 : 1)
           return false if index == content_start
 
           class_start = nil
           previous_token = :literal
         elsif class_start
-          return false if %w[&& -- ~~].include?(pattern[index, 2])
+          return false if %w[&& -- ~~].include?(characters[index, 2].join)
         else
           token = character
-          if character == '(' && pattern[index + 1] == '?'
-            return false unless pattern[index + 2] == ':'
+          if character == '(' && characters[index + 1] == '?'
+            return false unless characters[index + 2] == ':'
 
             index += 2
           elsif character == '{'
-            repetition = /\A\{(\d+)(?:,(\d*))?\}/.match(pattern[index..])
-            return false unless repetition && ![nil, '|', '('].include?(previous_token)
+            repetition_end = regex_repetition_end(characters, index)
+            return false unless repetition_end && ![nil, '|', '('].include?(previous_token)
             return false if %i[assertion empty_group repetition lazy_repetition
                                bounded_repetition].include?(previous_token)
-            return false if repetition.captures.compact.any? { |count| count.to_i > 0xffffffff }
 
-            index += repetition[0].length - 1
+            index = repetition_end
             token = :bounded_repetition
           elsif '*+?'.include?(character)
             # A leading quantifier is invalid in both engines, regardless of the remaining syntax.
@@ -900,7 +903,7 @@ module PostHog
             token = :lazy_repetition if repeated
           elsif '^$'.include?(character)
             # Ruby ^/$ are line anchors even without a multiline option; Rust's defaults are absolute.
-            return false if value.include?("\n")
+            return false if newline_input
 
             token = :assertion
           elsif character == ')' && ['(', :empty_group].include?(previous_token)
@@ -913,6 +916,32 @@ module PostHog
       true
     end
     private_class_method :portable_regex?
+
+    def self.regex_repetition_end(characters, index)
+      index += 1
+      return nil unless characters[index]&.match?(/\A[0-9]\z/)
+
+      count = 0
+      comma = false
+      while index < characters.length
+        character = characters[index]
+        digit = character.ord - 48
+        if digit.between?(0, 9)
+          count = (count * 10) + digit
+          return nil if count > 0xffffffff
+        elsif character == ',' && !comma
+          comma = true
+          count = 0
+        elsif character == '}'
+          return index
+        else
+          return nil
+        end
+        index += 1
+      end
+      nil
+    end
+    private_class_method :regex_repetition_end
 
     def self.match_cohort(property, property_values, cohort_properties, property_matching_version: 1)
       # Cohort properties are in the form of property groups like this:
