@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.28.4
+
+### Patch Changes
+
+- 1a2260c: Fix MCP instrumentation returning internal errors with mcp 1.8.0 by forwarding request keywords, including authentication context, to the MCP server.
+
 ## 3.28.3
 
 ### Patch Changes
