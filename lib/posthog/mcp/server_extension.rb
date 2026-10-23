@@ -11,7 +11,7 @@ module PostHog
     module ServerExtension
       private
 
-      def handle_request(request, method, session: nil, related_request_id: nil)
+      def handle_request(request, method, session: nil, related_request_id: nil, **kwargs)
         handler = super
         data = PostHog::MCP.tracking_data(self)
         return handler unless data && handler.is_a?(Proc) && Instrumentation.tracked?(method)
