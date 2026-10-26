@@ -2185,10 +2185,11 @@ module PostHog
         let(:trace_id) { '0123456789abcdef0123456789abcdef' }
         let(:span_id) { '0123456789abcdef' }
         let(:span_context) { double('span context', valid?: true, hex_trace_id: trace_id, hex_span_id: span_id) }
+        let(:span) { double('span', context: span_context, recording?: false) }
 
         before do
           stub_const('OpenTelemetry::Trace', trace_api)
-          allow(trace_api).to receive(:current_span).and_return(double('span', context: span_context))
+          allow(trace_api).to receive(:current_span).and_return(span)
         end
 
         [

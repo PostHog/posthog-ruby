@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'posthog/internal/span_context'
+
 module PostHog
   module Internal
     # Internal request/fiber-local context applied to capture calls.
@@ -12,10 +14,12 @@ module PostHog
     # server-side SDK globally stateful per user.
     class Context
       STORAGE_KEY = :posthog_context
+      UNBOUND_OWNER = Object.new.freeze
 
-      attr_reader :distinct_id, :session_id, :properties
+      attr_reader :distinct_id, :session_id, :properties, :owner
 
-      def initialize(distinct_id: nil, session_id: nil, properties: {})
+      def initialize(distinct_id: nil, session_id: nil, properties: {}, owner: UNBOUND_OWNER)
+        @owner = owner
         @distinct_id = distinct_id
         @session_id = session_id
         @properties = properties ? properties.dup : {}
@@ -38,17 +42,18 @@ module PostHog
         end
       end
 
-      def self.with_context(data = nil, fresh: false, **kwargs)
+      def self.with_context(data = nil, fresh: false, owner: UNBOUND_OWNER, **kwargs)
         previous_context = current
         raise ArgumentError, 'with_context requires a block' unless block_given?
 
-        self.current = resolve(merge_data_and_kwargs(data, kwargs), previous_context, fresh: fresh)
+        self.current = resolve(merge_data_and_kwargs(data, kwargs), previous_context, fresh: fresh, owner: owner)
+        SpanContext.apply_current
         yield
       ensure
         self.current = previous_context
       end
 
-      def self.resolve(data, parent, fresh: false)
+      def self.resolve(data, parent, fresh: false, owner: UNBOUND_OWNER)
         data = normalize_data(data)
 
         parent_properties = fresh || parent.nil? ? {} : parent.properties
@@ -61,7 +66,8 @@ module PostHog
         new(
           distinct_id: data[:distinct_id] || (fresh || parent.nil? ? nil : parent.distinct_id),
           session_id: data[:session_id] || (fresh || parent.nil? ? nil : parent.session_id),
-          properties: properties
+          properties: properties,
+          owner: owner.equal?(UNBOUND_OWNER) && parent ? parent.owner : owner
         )
       end
       private_class_method :resolve
