@@ -14,6 +14,7 @@ gem 'irb'
 rails_version = ENV.fetch('RAILS_VERSION', '~> 7.1')
 
 group :development, :test do
+  gem 'activejob', rails_version
   gem 'activesupport', rails_version
   gem 'commander', '~> 5.0'
   gem 'mcp', '>= 1.4'

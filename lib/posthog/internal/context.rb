@@ -42,12 +42,12 @@ module PostHog
         end
       end
 
-      def self.with_context(data = nil, fresh: false, owner: UNBOUND_OWNER, **kwargs)
+      def self.with_context(data = nil, fresh: false, owner: UNBOUND_OWNER, enrich_current_span: true, **kwargs)
         previous_context = current
         raise ArgumentError, 'with_context requires a block' unless block_given?
 
         self.current = resolve(merge_data_and_kwargs(data, kwargs), previous_context, fresh: fresh, owner: owner)
-        SpanContext.apply_current
+        SpanContext.apply_current if enrich_current_span
         yield
       ensure
         self.current = previous_context
