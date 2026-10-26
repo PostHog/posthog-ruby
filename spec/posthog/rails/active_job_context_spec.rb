@@ -57,12 +57,17 @@ RSpec.describe 'Active Job context' do
     end
   end
 
+  # The test adapter adds symbol keys next to the serialized job, which a queue never stores.
+  def stored_payload(enqueued_job = job_class.queue_adapter.enqueued_jobs.last)
+    JSON.parse(JSON.generate(enqueued_job.select { |key, _| key.is_a?(String) }))
+  end
+
   def snapshot_job(mode = 'success')
     context_class.with_context(distinct_id: 'browser-person', session_id: 'browser-session',
                                properties: { 'request_only' => 'excluded' }) do
       job_class.perform_later(mode)
     end
-    JSON.parse(JSON.generate(job_class.queue_adapter.enqueued_jobs.last))
+    stored_payload
   end
 
   [false, true].each do |fails|
@@ -146,7 +151,7 @@ RSpec.describe 'Active Job context' do
     payload = nil
     context_class.with_context(distinct_id: 'browser-person', session_id: 'browser-session') do
       job_class.perform_later('user_id' => 'application-person')
-      payload = JSON.parse(JSON.generate(job_class.queue_adapter.enqueued_jobs.last))
+      payload = stored_payload
     end
     ActiveJob::Base.execute(payload)
     expect(observations.first.first(2)).to eq(%w[application-person browser-session])
@@ -157,7 +162,7 @@ RSpec.describe 'Active Job context' do
     payload = snapshot_job('retry')
     ActiveJob::Base.execute(payload)
     expect(PostHog).not_to have_received(:capture_exception)
-    retry_payload = JSON.parse(JSON.generate(job_class.queue_adapter.enqueued_jobs.last))
+    retry_payload = stored_payload
     context_class.with_context(distinct_id: 'unrelated-person', session_id: 'unrelated-session') do
       ActiveJob::Base.execute(retry_payload)
     end
@@ -229,7 +234,7 @@ RSpec.describe 'Active Job context' do
         job_class.perform_later('child') unless job.arguments.first == 'child'
       end
       ActiveJob::Base.execute(snapshot_job)
-      child_payload = JSON.parse(JSON.generate(job_class.queue_adapter.enqueued_jobs.last))
+      child_payload = stored_payload
       expect(child_payload['posthog_context']).to eq(
         'distinct_id' => distinct_id.to_s, 'session_id' => 'browser-session'
       )
@@ -242,7 +247,7 @@ RSpec.describe 'Active Job context' do
       ActiveJob.perform_all_later(jobs)
     end
     job_class.queue_adapter.enqueued_jobs.each do |payload|
-      ActiveJob::Base.execute(JSON.parse(JSON.generate(payload)))
+      ActiveJob::Base.execute(stored_payload(payload))
     end
     expect(observations.map { |row| row.first(2) }).to eq([%w[bulk-person bulk-session]] * 2)
   end
@@ -264,7 +269,7 @@ RSpec.describe 'Active Job context' do
       context_class.with_context(distinct_id: person, session_id: "session-#{person}") do
         job_class.perform_later
       end
-      JSON.parse(JSON.generate(job_class.queue_adapter.enqueued_jobs.last))
+      stored_payload
     end
     started = Queue.new
     proceed = Queue.new

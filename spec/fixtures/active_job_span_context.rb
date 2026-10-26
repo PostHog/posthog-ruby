@@ -37,7 +37,8 @@ payloads = %w[first second].map do |identity|
   context.with_context(distinct_id: identity, session_id: "session-#{identity}") do
     SpanContextFixtureJob.perform_later
   end
-  JSON.parse(JSON.generate(SpanContextFixtureJob.queue_adapter.enqueued_jobs.last))
+  serialized_job = SpanContextFixtureJob.queue_adapter.enqueued_jobs.last.select { |key, _| key.is_a?(String) }
+  JSON.parse(JSON.generate(serialized_job))
 end
 exporter.reset
 tracer = OpenTelemetry.tracer_provider.tracer('job-fixture')
