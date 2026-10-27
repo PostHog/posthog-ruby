@@ -95,6 +95,23 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       expect(logs.count { |m| m.include?('fragment across requests') }).to eq(1)
     end
 
+    {
+      'authorization' => 'Bearer secret-token-should-not-leak',
+      'x-tenant-id' => 'tenant-should-not-leak'
+    }.each do |header, secret|
+      it "hands identify the #{header} header without capturing it on any event" do
+        identify = ->(_request, extra) { { distinct_id: extra['headers'][header] == secret ? 'user-1' : 'anonymous' } }
+        PostHog::MCP.instrument(server, client, identify: identify, enable_conversation_id: false)
+        token = transport.call(env_for(initialize_body, header => secret))[1]['mcp-session-id']
+        transport.call(env_for(rpc(2, 'tools/call', { name: 'ping_tool', arguments: {} }), 'mcp-session-id' => token, header => secret))
+
+        events = drain_events(client)
+        expect(events_named(events, '$mcp_tool_call').map { |e| e[:distinct_id] }).to eq(['user-1'])
+        expect(events_named(events, '$identify').size).to eq(1)
+        expect(events.map { |e| JSON.generate(e) }.grep(/#{secret}/)).to eq([])
+      end
+    end
+
     it 'leaves uninstrumented servers alone' do
       response = transport.call(env_for(initialize_body))
       expect(response[0]).to eq(200)

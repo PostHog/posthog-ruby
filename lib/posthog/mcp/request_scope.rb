@@ -17,14 +17,6 @@ module PostHog
       KEY = :posthog_mcp_request_scope
       FIBER_STORAGE = Fiber.respond_to?(:[]) && Fiber.respond_to?(:[]=)
 
-      # Rack `env` keys for the headers the integration reads, by header name.
-      HEADER_ENV_KEYS = {
-        'user-agent' => 'HTTP_USER_AGENT',
-        'x-anthropic-client' => 'HTTP_X_ANTHROPIC_CLIENT',
-        'mcp-session-id' => 'HTTP_MCP_SESSION_ID',
-        'mcp-protocol-version' => 'HTTP_MCP_PROTOCOL_VERSION'
-      }.freeze
-
       module_function
 
       # @return [Hash, nil] `{headers:, transport:, mint:, session_id:}` for the in-flight HTTP request,
@@ -46,20 +38,27 @@ module PostHog
         end
       end
 
-      # @param headers [Hash{String => String}] lowercase header names
-      # @param transport [Symbol] `:http` for the Streamable HTTP transport, `:other`
-      #   for a transport that publishes no headers (stdio, a custom dispatcher)
+      # Every request header, so `identify`, `intent_fallback` and `event_properties`
+      # can read the ones they need (an `authorization` bearer token, an API key)
+      # from `extra['headers']`. No header value is captured: {Identity} keeps only
+      # scalars from `extra`, and {TransportIdentity} stamps `user-agent` and
+      # `x-anthropic-client` alone.
+      #
       # @param env [Hash] a Rack `env`
-      # @return [Hash{String => String}] the headers {Instrumentation} reads, lowercase
+      # @return [Hash{String => String}] lowercase header names
       def headers_from_env(env)
         return {} unless env.is_a?(Hash)
 
-        HEADER_ENV_KEYS.each_with_object({}) do |(name, env_key), acc|
-          value = env[env_key]
-          acc[name] = value if value.is_a?(String) && !value.empty?
+        env.each_with_object({}) do |(key, value), acc|
+          next unless key.is_a?(String) && key.start_with?('HTTP_') && value.is_a?(String) && !value.empty?
+
+          acc[key.delete_prefix('HTTP_').downcase.tr('_', '-')] = value
         end
       end
 
+      # @param headers [Hash{String => String}] lowercase header names
+      # @param transport [Symbol] `:http` for the Streamable HTTP transport, `:other`
+      #   for a transport that publishes no headers (stdio, a custom dispatcher)
       def with(headers:, transport: :http)
         previous = current
         self.current = { headers: headers, transport: transport, mint: nil, session_id: nil }
