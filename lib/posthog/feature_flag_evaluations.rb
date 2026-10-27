@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require 'posthog/feature_flag_error'
 
 module PostHog
   # A snapshot of feature flag evaluations for one distinct_id, returned by
@@ -34,6 +35,15 @@ module PostHog
     # @return [Time, nil] When local flag definitions were loaded.
     attr_reader :flag_definitions_loaded_at
 
+    # Flags that have a loaded local definition but that neither local evaluation nor a remote
+    # fallback resolved, mapped to the reason local evaluation was inconclusive. These flags are not
+    # in {#keys}, and their accessors follow the missing-flag contract. Reading this does not count
+    # as an access and does not send any event. Always empty on snapshots returned by {#only} and
+    # {#only_accessed}.
+    #
+    # @return [Hash{String => String}] Frozen hash of flag key to an {UnresolvedFlagReason} value.
+    attr_reader :unresolved_flags
+
     # @param host [Host, nil] Internal host callbacks used to record flag access events.
     # @param distinct_id [String, nil] The distinct id these evaluations belong to.
     # @param flags [Hash] Evaluated flags keyed by flag key.
@@ -47,6 +57,8 @@ module PostHog
     # @param minimal_flag_called_events [Boolean] Server-controlled gate for minimal
     #   `$feature_flag_called` events.
     # @param accessed [Array<String>, Set<String>, nil] Flag keys already accessed by this snapshot.
+    # @param unresolved_flags [Hash{String => String}, nil] Unresolved flag keys mapped to an
+    #   {UnresolvedFlagReason} value.
     def initialize(
       host: nil,
       distinct_id: nil,
@@ -59,7 +71,8 @@ module PostHog
       errors_while_computing: false,
       quota_limited: false,
       minimal_flag_called_events: false,
-      accessed: nil
+      accessed: nil,
+      unresolved_flags: nil
     )
       @host = host
       @distinct_id = distinct_id || ''
@@ -73,6 +86,7 @@ module PostHog
       @quota_limited = quota_limited
       @minimal_flag_called_events = minimal_flag_called_events == true
       @accessed = Set.new(accessed || [])
+      @unresolved_flags = (unresolved_flags || {}).dup.freeze
     end
 
     # @return [Array<String>] The evaluated flag keys in this snapshot.
@@ -85,8 +99,8 @@ module PostHog
     #   snapshot — it was never loaded, the `/flags` request failed, or no flag with that
     #   key exists. A flag that does have a value, including `false` and variant strings,
     #   always wins over this default; so does a flag the server returned but marked as
-    #   failed, which resolves to `false`. Defaults to `nil`, which keeps the historical
-    #   `false` result for a missing flag.
+    #   failed, which resolves to `false` unless it is in {#unresolved_flags}. Defaults to
+    #   `nil`, which keeps the historical `false` result for a missing flag.
     # @return [Boolean] true when the flag is enabled, false when disabled, and the
     #   caller-supplied default (or false when none was supplied) when the flag is missing.
     def enabled?(key, default_value: nil)
@@ -198,7 +212,11 @@ module PostHog
       errors = []
       errors << 'errors_while_computing_flags' if @errors_while_computing
       errors << 'quota_limited' if @quota_limited
-      errors << 'flag_missing' if flag.nil?
+      if flag.nil? && @unresolved_flags.key?(key)
+        errors << FeatureFlagError::LOCAL_EVALUATION_INCONCLUSIVE
+      elsif flag.nil?
+        errors << FeatureFlagError::FLAG_MISSING
+      end
       properties['$feature_flag_error'] = errors.join(',') unless errors.empty?
 
       # Emit a minimal event only when the server gate is on and the flag is

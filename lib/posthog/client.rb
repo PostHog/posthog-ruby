@@ -640,7 +640,8 @@ module PostHog
     # @param [Hash] groups
     # @param [Hash] person_properties key-value pairs of properties to associate with the user
     # @param [Hash] group_properties
-    # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely
+    # @param [Boolean] only_evaluate_locally Skip the remote /flags call entirely. Flags that local evaluation
+    #   cannot resolve are left out of the snapshot and listed in {FeatureFlagEvaluations#unresolved_flags}.
     # @param [Boolean, nil] disable_geoip When true, disables GeoIP lookup for remote evaluation and stamps captured
     #   access events.
     # @param [Array<String, Symbol>, nil] flag_keys When set, scopes evaluation to only these flag keys.
@@ -676,6 +677,7 @@ module PostHog
 
       records = {}
       locally_evaluated_keys = Set.new
+      unresolved_flags = {}
       flag_keys_set = flag_keys&.to_set(&:to_s)
 
       @feature_flags_poller.load_feature_flags
@@ -690,7 +692,10 @@ module PostHog
             :_compute_flag_locally,
             definition, distinct_id, groups, person_properties, group_properties, snapshot: definition_snapshot
           )
-        rescue PostHog::RequiresServerEvaluation, PostHog::InconclusiveMatchError, StandardError
+        rescue PostHog::RequiresServerEvaluation, PostHog::InconclusiveMatchError => e
+          unresolved_flags[key.to_s] = e.reason
+          next
+        rescue StandardError
           next
         end
 
@@ -747,6 +752,8 @@ module PostHog
           remote_flags.each do |key, ff|
             key_str = key.to_s
             next if locally_evaluated_keys.include?(key_str)
+            # A failed server evaluation has no value, so a flag local evaluation left unresolved stays so.
+            next if ff.failed == true && unresolved_flags.key?(key_str)
 
             metadata = ff.metadata
             reason = ff.reason
@@ -778,7 +785,8 @@ module PostHog
         flag_definitions_loaded_at: @feature_flags_poller.flag_definitions_loaded_at,
         errors_while_computing: errors_while_computing,
         quota_limited: quota_limited,
-        minimal_flag_called_events: minimal_flag_called_events
+        minimal_flag_called_events: minimal_flag_called_events,
+        unresolved_flags: unresolved_flags.reject { |key, _reason| records.key?(key) }
       )
     end
 

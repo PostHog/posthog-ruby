@@ -92,7 +92,7 @@ module PostHog
              seconds.abs / 3600, (seconds.abs % 3600) / 60)
     end
 
-    def convert_to_datetime(value)
+    def convert_to_datetime(value, reason:)
       if value.respond_to?(:strftime)
         value
 
@@ -100,10 +100,10 @@ module PostHog
         begin
           DateTime.parse(value)
         rescue ArgumentError
-          raise InconclusiveMatchError, "#{value} is not in a valid date format"
+          raise InconclusiveMatchError.new("#{value} is not in a valid date format", reason: reason)
         end
       else
-        raise InconclusiveMatchError, 'The date provided must be a string or date object'
+        raise InconclusiveMatchError.new('The date provided must be a string or date object', reason: reason)
       end
     end
 
