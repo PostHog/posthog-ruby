@@ -38,22 +38,35 @@ module PostHog
         end
       end
 
+      # Rack `env` keys for the two request headers Rack stores without `HTTP_`.
+      UNPREFIXED_HEADER_ENV_KEYS = { 'CONTENT_TYPE' => 'content-type', 'CONTENT_LENGTH' => 'content-length' }.freeze
+      # The request line's protocol, which some servers (WEBrick, Thin) put in `env`.
+      PROTOCOL_ENV_KEY = 'HTTP_VERSION'
+
       # Every request header, so `identify`, `intent_fallback` and `event_properties`
       # can read the ones they need (an `authorization` bearer token, an API key)
-      # from `extra['headers']`. No header value is captured: {Identity} keeps only
-      # scalars from `extra`, and {TransportIdentity} stamps `user-agent` and
-      # `x-anthropic-client` alone.
+      # from `extra['headers']`. The SDK captures no header value: {Identity} keeps
+      # only scalars from `extra`, and {TransportIdentity} stamps `user-agent` and
+      # `x-anthropic-client` alone. A callback that returns a raw header value in
+      # identity properties or `event_properties` sends it, unredacted.
       #
       # @param env [Hash] a Rack `env`
-      # @return [Hash{String => String}] lowercase header names
+      # @return [Hash{String => String}] lowercase header names, frozen because
+      #   {Instrumentation} reads session and protocol headers from it after callbacks run
       def headers_from_env(env)
-        return {} unless env.is_a?(Hash)
+        return {}.freeze unless env.is_a?(Hash)
 
         env.each_with_object({}) do |(key, value), acc|
-          next unless key.is_a?(String) && key.start_with?('HTTP_') && value.is_a?(String) && !value.empty?
+          name = header_name(key)
+          acc[name] = value if name && value.is_a?(String) && !value.empty?
+        end.freeze
+      end
 
-          acc[key.delete_prefix('HTTP_').downcase.tr('_', '-')] = value
-        end
+      def header_name(env_key)
+        return UNPREFIXED_HEADER_ENV_KEYS[env_key] unless env_key.is_a?(String) && env_key.start_with?('HTTP_')
+        return nil if env_key == PROTOCOL_ENV_KEY
+
+        env_key.delete_prefix('HTTP_').downcase.tr('_', '-')
       end
 
       # @param headers [Hash{String => String}] lowercase header names
