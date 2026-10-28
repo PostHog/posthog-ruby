@@ -112,19 +112,35 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       end
     end
 
-    it 'keeps the headers instrumentation reads when a callback changes its copy' do
-      identify = lambda do |_request, extra|
-        extra['headers'].delete('user-agent')
-        extra['headers']['mcp-session-id'] = 'forged'
-        { distinct_id: 'user-1' }
-      end
-      PostHog::MCP.instrument(server, client, identify: identify, enable_conversation_id: false)
-      token = transport.call(env_for(initialize_body, 'user-agent' => 'claude-code/2.1.0'))[1]['mcp-session-id']
-      transport.call(env_for(rpc(2, 'tools/call', { name: 'ping_tool', arguments: {} }), 'mcp-session-id' => token, 'user-agent' => 'claude-code/2.1.0'))
+    {
+      'replaces entries' => lambda { |headers|
+        headers.delete('user-agent')
+        headers['authorization'] = 'forged'
+        headers['mcp-session-id'] = 'forged'
+      },
+      'edits values in place' => lambda { |headers|
+        headers['user-agent'].clear
+        headers['authorization'].delete_prefix!('Bearer ')
+        headers['mcp-session-id'].replace('forged')
+      }
+    }.each do |change, mutate|
+      it "keeps the request's headers when a callback #{change} in its copy" do
+        identify = lambda do |_request, extra|
+          mutate.call(extra['headers'])
+          { distinct_id: 'user-1' }
+        end
+        PostHog::MCP.instrument(server, client, identify: identify, enable_conversation_id: false)
+        token = transport.call(env_for(initialize_body, 'user-agent' => +'claude-code/2.1.0'))[1]['mcp-session-id']
+        env = env_for(rpc(2, 'tools/call', { name: 'ping_tool', arguments: {} }),
+                      'mcp-session-id' => token.dup, 'user-agent' => +'claude-code/2.1.0', 'authorization' => +'Bearer secret')
+        transport.call(env)
 
-      call = events_named(drain_events(client), '$mcp_tool_call').first
-      expect(call[:properties]).to include('$session_id' => PostHog::MCP.decode_session_id(token).session_id,
-                                           '$mcp_client_user_agent' => 'claude-code/2.1.0')
+        expect(env.values_at('HTTP_MCP_SESSION_ID', 'HTTP_USER_AGENT', 'HTTP_AUTHORIZATION'))
+          .to eq([token, 'claude-code/2.1.0', 'Bearer secret'])
+        call = events_named(drain_events(client), '$mcp_tool_call').first
+        expect(call[:properties]).to include('$session_id' => PostHog::MCP.decode_session_id(token).session_id,
+                                             '$mcp_client_user_agent' => 'claude-code/2.1.0')
+      end
     end
 
     it 'leaves uninstrumented servers alone' do
