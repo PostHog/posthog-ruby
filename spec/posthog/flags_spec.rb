@@ -2281,15 +2281,29 @@ module PostHog
       ['before a condition with an unknown operator', [%i[dependency], %i[unknown_operator]],
        UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
       ['before an unknown operator in its condition', [%i[dependency unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['after a ruled-out condition with an unknown operator', [%i[plan_is_free unknown_operator], %i[dependency]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before a matching cohort with an unknown operator last', [%i[dependency pro_or_unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before a matching cohort with an unknown operator first', [%i[dependency unknown_operator_or_pro]],
        UnresolvedFlagReason::UNSUPPORTED_DEFINITION]
     ].each do |description, conditions, reason|
       it "requires the server for a dependency that requires the server, #{description}" do
         base = flag('base', [static_cohort])
-        filters = { dependency: depends_on('base'), unknown_operator: unknown_operator }
+        filters = {
+          dependency: depends_on('base'), unknown_operator: unknown_operator, plan_is_free: plan_is_free,
+          pro_or_unknown_operator: { key: 'id', value: 1, type: 'cohort' },
+          unknown_operator_or_pro: { key: 'id', value: 2, type: 'cohort' }
+        }
+        cohorts = {
+          '1' => { type: 'OR', values: [plan_is_pro, unknown_operator] },
+          '2' => { type: 'OR', values: [unknown_operator, plan_is_pro] }
+        }
         checkout = flag('checkout', *conditions.map { |names| names.map { |name| filters.fetch(name) } })
 
         expect_unresolved(RequiresServerEvaluation, reason) do
-          evaluate(checkout, { plan: 'pro' }, flags: [base])
+          evaluate(checkout, { plan: 'pro' }, flags: [base], cohorts: cohorts)
         end
       end
     end

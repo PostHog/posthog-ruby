@@ -708,9 +708,9 @@ module PostHog
         { key: key, type: 'flag', value: true, operator: 'flag_evaluates_to', dependency_chain: [key] }
       end
 
-      def local_client(*flags)
+      def local_client(*flags, **options)
         stub_request(:get, definitions_endpoint).to_return(status: 200, body: { flags: flags }.to_json)
-        Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
+        Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true, **options)
       end
 
       def flag_called_events(client)
@@ -816,6 +816,32 @@ module PostHog
 
           expect(snapshot.keys).not_to include('target')
           expect(snapshot.unresolved_flags).to eq('target' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+        end
+
+        context 'with a malformed later condition' do
+          let(:malformed_target) do
+            target.merge(filters: target[:filters].merge(
+              groups: [target[:filters][:groups][0], { properties: ['not-a-filter'], rollout_percentage: 100 }]
+            ))
+          end
+
+          it 'uses the server value without reporting an error' do
+            errors = []
+            c = local_client(static_cohort_dep, malformed_target, on_error: proc { |_, error| errors << error })
+            stub_flags(flags: { 'target' => { key: 'target', enabled: true, variant: 'a' } })
+
+            expect(c.get_feature_flag('target', 'user-123')).to eq('a')
+            expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
+            expect(errors).to eq([])
+          end
+
+          it 'leaves the flag unresolved in local-only evaluation' do
+            c = local_client(static_cohort_dep, malformed_target)
+
+            snapshot = c.evaluate_flags('user-123', flag_keys: ['target'], only_evaluate_locally: true)
+
+            expect(snapshot.unresolved_flags).to eq('target' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+          end
         end
 
         it 'resolves the flag locally when the dependency resolves locally' do

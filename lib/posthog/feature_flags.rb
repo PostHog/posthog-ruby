@@ -1275,13 +1275,7 @@ module PostHog
         return UnresolvedFlagReason::UNSUPPORTED_DEFINITION
       end
 
-      conditions_definition_reason(flag_filters[:groups] || [], flags_by_key, cohorts)
-    end
-
-    # unsupported_definition when a filter in any of the conditions cannot be checked locally
-    # whatever the call passes, or nil.
-    def self.conditions_definition_reason(conditions, flags_by_key, cohorts)
-      unsupported = conditions.any? do |condition|
+      unsupported = (flag_filters[:groups] || []).any? do |condition|
         (condition[:properties] || []).any? do |property|
           unsupported_property?(property, flags_by_key, cohorts, Set.new)
         end
@@ -1450,7 +1444,7 @@ module PostHog
       result = nil
 
       # NOTE: This NEEDS to be `each` because `each_key` breaks
-      flag_conditions.each_with_index do |condition, index|
+      flag_conditions.each do |condition|
         # Per-condition aggregation overrides only when the condition explicitly
         # sets its own aggregation_group_type_index (mixed targeting). When absent,
         # use the properties/bucketing already resolved by the caller.
@@ -1501,13 +1495,11 @@ module PostHog
           break if early_exit
         end
       rescue RequiresServerEvaluation => e
-        # Static cohort or other missing server-side data - must fallback to API. Later conditions are
-        # not evaluated, so their definitions still count toward the reason.
+        # Static cohort or other missing server-side data - must fallback to API. Evaluation stops here and
+        # skips filters it did not reach, so the flag's definition still counts toward the reason.
         reason = FeatureFlagsPoller.pick_unresolved_reason(inconclusive_reason, e.reason)
-        later_reason = FeatureFlagsPoller.conditions_definition_reason(
-          flag_conditions[(index + 1)..], snapshot[:flags_by_key] || {}, snapshot[:cohorts]
-        )
-        reason = FeatureFlagsPoller.pick_unresolved_reason(reason, later_reason) unless later_reason.nil?
+        definition_reason = _definition_unresolved_reason(flag, snapshot)
+        reason = FeatureFlagsPoller.pick_unresolved_reason(reason, definition_reason) unless definition_reason.nil?
         raise RequiresServerEvaluation.new(e.message, reason: reason)
       rescue InconclusiveMatchError => e
         # Evaluation error (bad regex, invalid date, missing property, etc.)
@@ -1524,6 +1516,14 @@ module PostHog
 
       # We can only return False when all conditions are False
       false
+    end
+
+    def _definition_unresolved_reason(flag, snapshot)
+      self.class.definition_unresolved_reason(flag, snapshot[:flags_by_key] || {}, snapshot[:cohorts],
+                                              snapshot[:group_type_mapping])
+    rescue StandardError
+      # A malformed definition must not stop the fallback to the server.
+      nil
     end
 
     def condition_match(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {},
