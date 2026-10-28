@@ -19,9 +19,5 @@ RSpec.describe PostHog::MCP::RequestScope do
         expect(described_class.headers_from_env(env)).to eq(expected)
       end
     end
-
-    it 'returns a frozen Hash, so a callback cannot change the session headers instrumentation reads later' do
-      expect(described_class.headers_from_env('HTTP_MCP_SESSION_ID' => 'abc')).to be_frozen
-    end
   end
 end

@@ -112,6 +112,21 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       end
     end
 
+    it 'keeps the headers instrumentation reads when a callback changes its copy' do
+      identify = lambda do |_request, extra|
+        extra['headers'].delete('user-agent')
+        extra['headers']['mcp-session-id'] = 'forged'
+        { distinct_id: 'user-1' }
+      end
+      PostHog::MCP.instrument(server, client, identify: identify, enable_conversation_id: false)
+      token = transport.call(env_for(initialize_body, 'user-agent' => 'claude-code/2.1.0'))[1]['mcp-session-id']
+      transport.call(env_for(rpc(2, 'tools/call', { name: 'ping_tool', arguments: {} }), 'mcp-session-id' => token, 'user-agent' => 'claude-code/2.1.0'))
+
+      call = events_named(drain_events(client), '$mcp_tool_call').first
+      expect(call[:properties]).to include('$session_id' => PostHog::MCP.decode_session_id(token).session_id,
+                                           '$mcp_client_user_agent' => 'claude-code/2.1.0')
+    end
+
     it 'leaves uninstrumented servers alone' do
       response = transport.call(env_for(initialize_body))
       expect(response[0]).to eq(200)

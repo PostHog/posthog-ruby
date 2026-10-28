@@ -51,15 +51,14 @@ module PostHog
       # identity properties or `event_properties` sends it, unredacted.
       #
       # @param env [Hash] a Rack `env`
-      # @return [Hash{String => String}] lowercase header names, frozen because
-      #   {Instrumentation} reads session and protocol headers from it after callbacks run
+      # @return [Hash{String => String}] lowercase header names
       def headers_from_env(env)
-        return {}.freeze unless env.is_a?(Hash)
+        return {} unless env.is_a?(Hash)
 
         env.each_with_object({}) do |(key, value), acc|
           name = header_name(key)
           acc[name] = value if name && value.is_a?(String) && !value.empty?
-        end.freeze
+        end
       end
 
       def header_name(env_key)

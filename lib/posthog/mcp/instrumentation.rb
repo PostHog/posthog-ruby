@@ -588,7 +588,8 @@ module PostHog
           'session_id' => (@session.respond_to?(:session_id) ? @session.session_id : nil) || header_session_id,
           'request_id' => @request_id,
           'protocol_version' => protocol_version,
-          'headers' => @headers,
+          # A copy, because session and protocol resolution read @headers after callbacks run.
+          'headers' => @headers.dup,
           'session' => @session
         }
       end
