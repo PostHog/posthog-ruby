@@ -2274,15 +2274,36 @@ module PostHog
       end
     end
 
-    it 'reports a dependency that requires the server as unresolved_dependency' do
-      base = flag('base', [static_cohort])
+    [
+      ['alone', [%i[dependency]], UnresolvedFlagReason::UNRESOLVED_DEPENDENCY],
+      ['after a condition with an unknown operator', [%i[unknown_operator], %i[dependency]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before a condition with an unknown operator', [%i[dependency], %i[unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before an unknown operator in its condition', [%i[dependency unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION]
+    ].each do |description, conditions, reason|
+      it "requires the server for a dependency that requires the server, #{description}" do
+        base = flag('base', [static_cohort])
+        filters = { dependency: depends_on('base'), unknown_operator: unknown_operator }
+        checkout = flag('checkout', *conditions.map { |names| names.map { |name| filters.fetch(name) } })
 
-      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNRESOLVED_DEPENDENCY) do
-        evaluate(flag('checkout', [depends_on('base')]), {}, flags: [base])
+        expect_unresolved(RequiresServerEvaluation, reason) do
+          evaluate(checkout, { plan: 'pro' }, flags: [base])
+        end
       end
-      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
-        evaluate(flag('checkout', [unknown_operator], [depends_on('base')]), { plan: 'pro' }, flags: [base])
+    end
+
+    it 'caches nothing for a dependency that requires the server' do
+      poller._apply_flag_definitions(flags: [flag('base', [static_cohort])], cohorts: {})
+      evaluation_cache = {}
+
+      2.times do
+        expect_unresolved(RequiresServerEvaluation, UnresolvedFlagReason::UNRESOLVED_DEPENDENCY) do
+          poller.evaluate_flag_dependency(depends_on('base'), evaluation_cache, 'user-123', {}, {})
+        end
       end
+      expect(evaluation_cache).to eq({})
     end
 
     it 'reports a dependency with experience continuity as unresolved_dependency' do

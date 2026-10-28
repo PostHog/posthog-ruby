@@ -782,6 +782,52 @@ module PostHog
         )
       end
 
+      context 'when a flag depends on a flag that needs the server' do
+        let(:static_cohort_dep) { flag_definition('dep', { key: 'id', type: 'cohort', value: 999 }) }
+        let(:target) do
+          {
+            id: 2, key: 'target', active: true,
+            filters: {
+              multivariate: { variants: [{ key: 'a', rollout_percentage: 50 }, { key: 'b', rollout_percentage: 50 }] },
+              groups: [
+                { properties: [depends_on('dep')], rollout_percentage: 100, variant: 'a' },
+                { properties: [], rollout_percentage: 100, variant: 'b' }
+              ]
+            }
+          }
+        end
+
+        [['target alone', { flag_keys: ['target'] }], ['all flags', {}]].each do |description, options|
+          it "uses the server value with #{description} requested" do
+            c = local_client(static_cohort_dep, target)
+            stub_flags(flags: { 'target' => { key: 'target', enabled: true, variant: 'a' } })
+
+            snapshot = c.evaluate_flags('user-123', **options)
+
+            expect(snapshot.get_flag('target')).to eq('a')
+            expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
+          end
+        end
+
+        it 'leaves the flag unresolved in local-only evaluation' do
+          c = local_client(static_cohort_dep, target)
+
+          snapshot = c.evaluate_flags('user-123', flag_keys: ['target'], only_evaluate_locally: true)
+
+          expect(snapshot.keys).not_to include('target')
+          expect(snapshot.unresolved_flags).to eq('target' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+        end
+
+        it 'resolves the flag locally when the dependency resolves locally' do
+          c = local_client(flag_definition('dep', plan_is_pro), target)
+
+          snapshot = c.evaluate_flags('user-123', person_properties: { plan: 'pro' }, flag_keys: ['target'])
+
+          expect(snapshot.get_flag('target')).to eq('a')
+          expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+        end
+      end
+
       it 'reports a flag that depends on a flag with no loaded definition as unsupported_definition' do
         c = local_client(flag_definition('beta-ui', depends_on('checkout')))
 

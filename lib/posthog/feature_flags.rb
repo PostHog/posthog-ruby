@@ -1198,7 +1198,12 @@ module PostHog
                 snapshot: snapshot
               )
               evaluation_cache[dep_flag_key] = dep_result
-            rescue InconclusiveMatchError, RequiresServerEvaluation => e
+            rescue RequiresServerEvaluation => e
+              # The dependent flag needs the server too. Nothing is cached, so a later lookup of this
+              # dependency also requires the server instead of reading it as merely inconclusive.
+              raise RequiresServerEvaluation.new("Cannot evaluate flag dependency '#{dep_flag_key}': #{e.message}",
+                                                 reason: UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+            rescue InconclusiveMatchError => e
               # If we can't evaluate a dependency, store nil and propagate the error
               evaluation_cache[dep_flag_key] = nil
               raise InconclusiveMatchError.new("Cannot evaluate flag dependency '#{dep_flag_key}': #{e.message}",
@@ -1270,7 +1275,13 @@ module PostHog
         return UnresolvedFlagReason::UNSUPPORTED_DEFINITION
       end
 
-      unsupported = (flag_filters[:groups] || []).any? do |condition|
+      conditions_definition_reason(flag_filters[:groups] || [], flags_by_key, cohorts)
+    end
+
+    # unsupported_definition when a filter in any of the conditions cannot be checked locally
+    # whatever the call passes, or nil.
+    def self.conditions_definition_reason(conditions, flags_by_key, cohorts)
+      unsupported = conditions.any? do |condition|
         (condition[:properties] || []).any? do |property|
           unsupported_property?(property, flags_by_key, cohorts, Set.new)
         end
@@ -1439,7 +1450,7 @@ module PostHog
       result = nil
 
       # NOTE: This NEEDS to be `each` because `each_key` breaks
-      flag_conditions.each do |condition|
+      flag_conditions.each_with_index do |condition, index|
         # Per-condition aggregation overrides only when the condition explicitly
         # sets its own aggregation_group_type_index (mixed targeting). When absent,
         # use the properties/bucketing already resolved by the caller.
@@ -1489,9 +1500,15 @@ module PostHog
         when :out_of_rollout_bound
           break if early_exit
         end
-      rescue RequiresServerEvaluation
-        # Static cohort or other missing server-side data - must fallback to API
-        raise
+      rescue RequiresServerEvaluation => e
+        # Static cohort or other missing server-side data - must fallback to API. Later conditions are
+        # not evaluated, so their definitions still count toward the reason.
+        reason = FeatureFlagsPoller.pick_unresolved_reason(inconclusive_reason, e.reason)
+        later_reason = FeatureFlagsPoller.conditions_definition_reason(
+          flag_conditions[(index + 1)..], snapshot[:flags_by_key] || {}, snapshot[:cohorts]
+        )
+        reason = FeatureFlagsPoller.pick_unresolved_reason(reason, later_reason) unless later_reason.nil?
+        raise RequiresServerEvaluation.new(e.message, reason: reason)
       rescue InconclusiveMatchError => e
         # Evaluation error (bad regex, invalid date, missing property, etc.)
         # Track that we had an inconclusive match, but try other conditions
@@ -1558,8 +1575,10 @@ module PostHog
         end
 
         # Raise the original error type: match_feature_flag_properties stops at it and falls back to the
-        # server instead of trying later conditions.
-        raise server_evaluation_error unless server_evaluation_error.nil?
+        # server instead of trying later conditions. A later filter can still carry a higher-precedence reason.
+        unless server_evaluation_error.nil?
+          raise RequiresServerEvaluation.new(server_evaluation_error.message, reason: inconclusive_reason)
+        end
         unless inconclusive_reason.nil?
           raise InconclusiveMatchError.new("Can't determine if a condition of flag #{flag[:key]} matches",
                                            reason: inconclusive_reason)
