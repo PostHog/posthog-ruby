@@ -10,40 +10,11 @@ require 'posthog/backoff_policy'
 require 'posthog/feature_flag'
 require 'posthog/flag_definition_cache'
 require 'posthog/unresolved_flag_reason'
+require 'posthog/flag_evaluation_errors'
 require 'digest'
 require 'set'
 
 module PostHog
-  # InconclusiveMatchError is raised when local evaluation cannot determine a flag's
-  # value. {#reason} says why, as reported by {FeatureFlagEvaluations#unresolved_flags}.
-  class InconclusiveMatchError < StandardError
-    # @return [String] One of the {UnresolvedFlagReason} values.
-    attr_reader :reason
-
-    # @param message [String, nil]
-    # @param reason [String] One of the {UnresolvedFlagReason} values.
-    def initialize(message = nil, reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-      super(message)
-      @reason = reason
-    end
-  end
-
-  # RequiresServerEvaluation is raised when feature flag evaluation requires
-  # server-side data that is not available locally (e.g., static cohorts,
-  # experience continuity). This error should propagate immediately to trigger
-  # API fallback, unlike InconclusiveMatchError which allows trying other conditions.
-  class RequiresServerEvaluation < StandardError
-    # @return [String] One of the {UnresolvedFlagReason} values.
-    attr_reader :reason
-
-    # @param message [String, nil]
-    # @param reason [String] One of the {UnresolvedFlagReason} values.
-    def initialize(message = nil, reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-      super(message)
-      @reason = reason
-    end
-  end
-
   # Polls and evaluates feature flag definitions for {PostHog::Client}.
   #
   # @api private
@@ -59,6 +30,13 @@ module PostHog
       UnresolvedFlagReason::UNRESOLVED_DEPENDENCY,
       UnresolvedFlagReason::MISSING_CONTEXT
     ].freeze
+
+    # Operator groups that share one branch in both match_property_value and assert_filter_supported,
+    # so the load-time check stays in step with evaluation.
+    REGEX_OPERATORS = %w[regex not_regex].freeze
+    NUMERIC_OPERATORS = %w[gt gte lt lte].freeze
+    DATE_OPERATORS = %w[is_date_before is_date_after].freeze
+    SEMVER_COMPARISON_OPERATORS = %w[semver_eq semver_neq semver_gt semver_gte semver_lt semver_lte].freeze
 
     # @param polling_interval [Integer, nil] Seconds between local feature flag definition polls.
     #   Defaults to {Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS}.
@@ -806,18 +784,18 @@ module PostHog
         string_operand(override_value).downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
       when 'not_ends_with'
         !string_operand(override_value).downcase(:ascii).end_with?(value.to_s.downcase(:ascii))
-      when 'regex', 'not_regex'
+      when *REGEX_OPERATORS
         matched = match_regex(value.to_s, string_operand(override_value))
         return false if matched.nil?
 
         operator == 'regex' ? matched : !matched
-      when 'gt', 'gte', 'lt', 'lte'
+      when *NUMERIC_OPERATORS
         parsed_value = parse_numeric_filter(value)
         parsed_override = parse_finite_number(override_value)
         return false if parsed_override.nil?
 
         compare(parsed_override, parsed_value, operator)
-      when 'is_date_before', 'is_date_after'
+      when *DATE_OPERATORS
         # Parses the filter before the context, so a bad filter reports unsupported_definition even
         # when the context value is bad too.
         parsed_date = parse_date_filter(value)
@@ -829,7 +807,7 @@ module PostHog
         elsif operator == 'is_date_after'
           override_date > parsed_date
         end
-      when 'semver_eq', 'semver_neq', 'semver_gt', 'semver_gte', 'semver_lt', 'semver_lte'
+      when *SEMVER_COMPARISON_OPERATORS
         flag_parsed = parse_semver(value, reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
         override_parsed = parse_semver(override_value, reason: UnresolvedFlagReason::MISSING_CONTEXT)
 
@@ -874,15 +852,17 @@ module PostHog
       when 'exact', 'is_not', 'is_set', 'is_not_set', 'icontains', 'not_icontains', 'starts_with',
            'not_starts_with', 'ends_with', 'not_ends_with'
         nil
-      when 'regex', 'not_regex'
+      when *REGEX_OPERATORS
         # An empty input is the most portable one, so this raises only for a pattern that needs the
-        # server whatever the value.
-        match_regex(value.to_s, '')
-      when 'gt', 'gte', 'lt', 'lte'
+        # server whatever the value. Compile without matching, so a server-supplied pattern never runs
+        # while definitions load.
+        pattern = value.to_s
+        compile_regex(pattern, '') unless pattern.empty?
+      when *NUMERIC_OPERATORS
         parse_numeric_filter(value)
-      when 'is_date_before', 'is_date_after'
+      when *DATE_OPERATORS
         parse_date_filter(value)
-      when 'semver_eq', 'semver_neq', 'semver_gt', 'semver_gte', 'semver_lt', 'semver_lte'
+      when *SEMVER_COMPARISON_OPERATORS
         parse_semver(value, reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       when 'semver_tilde'
         semver_tilde_bounds(value)
@@ -920,22 +900,9 @@ module PostHog
     def self.match_regex(pattern, value)
       return true if pattern.empty?
 
-      unless portable_regex?(pattern, value)
-        raise InconclusiveMatchError.new('Regex compatibility requires server evaluation',
-                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-      end
+      regex = compile_regex(pattern, value)
+      return nil if regex.nil?
 
-      begin
-        regex = Regexp.new(pattern)
-      rescue RegexpError => e
-        # Ruby's repeat-count limit is smaller than the service's syntax limit.
-        if e.message.include?('too big')
-          raise InconclusiveMatchError.new('Regex compilation requires server evaluation',
-                                           reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-        end
-
-        return nil
-      end
       !regex.match(value).nil?
     rescue InconclusiveMatchError
       raise
@@ -944,6 +911,31 @@ module PostHog
                                        reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
     end
     private_class_method :match_regex
+
+    # Returns nil for a pattern that Ruby cannot compile.
+    def self.compile_regex(pattern, value)
+      unless portable_regex?(pattern, value)
+        raise InconclusiveMatchError.new('Regex compatibility requires server evaluation',
+                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+      end
+
+      Regexp.new(pattern)
+    rescue RegexpError => e
+      # Ruby's repeat-count limit is smaller than the service's syntax limit.
+      if e.message.include?('too big')
+        raise InconclusiveMatchError.new('Regex compilation requires server evaluation',
+                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+      end
+
+      nil
+    rescue InconclusiveMatchError
+      raise
+    rescue StandardError
+      # For example, a pattern with an invalid byte sequence.
+      raise InconclusiveMatchError.new('Regex compatibility requires server evaluation',
+                                       reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+    end
+    private_class_method :compile_regex
 
     # Native compilation alone cannot establish compatibility with the flags service's Rust engine.
     # Keep ordinary scalar matching local, but defer engine-specific syntax and backtracking assertions.
@@ -1088,11 +1080,17 @@ module PostHog
       return true if properties.nil? || properties.empty?
 
       if nested_property_group?(properties)
-        match_nested_property_group(properties, group_type, property_values, cohort_properties,
-                                    property_matching_version: property_matching_version)
+        property_group_items_match?(properties, group_type) do |group|
+          match_property_group(group, property_values, cohort_properties,
+                               property_matching_version: property_matching_version)
+        end
       else
-        match_regular_property_group(properties, group_type, property_values, cohort_properties,
-                                     property_matching_version: property_matching_version)
+        property_group_items_match?(properties, group_type) do |prop|
+          PostHog::Utils.symbolize_keys!(prop)
+          matches = match_property(prop, property_values, cohort_properties,
+                                   property_matching_version: property_matching_version)
+          prop[:negation] ? !matches : matches
+        end
       end
     end
 
@@ -1117,28 +1115,24 @@ module PostHog
       first_property.key?(:values) || first_property.key?('values')
     end
 
-    def self.match_nested_property_group(properties, group_type, property_values, cohort_properties,
-                                         property_matching_version: 1)
+    # Combines the items of a cohort property group with AND or OR. The block evaluates one item.
+    # RequiresServerEvaluation is not an InconclusiveMatchError, so it propagates at once.
+    def self.property_group_items_match?(items, group_type)
       unless %w[AND OR].include?(group_type)
         raise InconclusiveMatchError.new("Unknown property group type: #{group_type}",
                                          reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
 
       inconclusive_reason = nil
-
-      properties.each do |property|
-        matches = match_property_group(property, property_values, cohort_properties,
-                                       property_matching_version: property_matching_version)
+      items.each do |item|
+        matches = yield(item)
         if group_type == 'AND'
           return false unless matches
         elsif matches
           return true
         end
-      rescue RequiresServerEvaluation => e
-        # Immediately propagate - this condition requires server-side data
-        raise RequiresServerEvaluation.new(e.message, reason: pick_unresolved_reason(inconclusive_reason, e.reason))
       rescue InconclusiveMatchError => e
-        PostHog::Logging.logger&.debug("Failed to compute property group #{property} locally: #{e}")
+        PostHog::Logging.logger&.debug("Failed to compute property #{item} locally: #{e}")
         inconclusive_reason = pick_unresolved_reason(inconclusive_reason, e.reason)
       end
 
@@ -1147,48 +1141,6 @@ module PostHog
                                          reason: inconclusive_reason)
       end
 
-      group_type == 'AND'
-    end
-
-    def self.match_regular_property_group(properties, group_type, property_values, cohort_properties,
-                                          property_matching_version: 1)
-      # Validate group type upfront
-      unless %w[AND OR].include?(group_type)
-        raise InconclusiveMatchError.new("Unknown property group type: #{group_type}",
-                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-      end
-
-      inconclusive_reason = nil
-
-      properties.each do |prop|
-        PostHog::Utils.symbolize_keys!(prop)
-
-        matches = match_property(prop, property_values, cohort_properties,
-                                 property_matching_version: property_matching_version)
-
-        negated = prop[:negation] || false
-        final_result = negated ? !matches : matches
-
-        # Short-circuit based on group type
-        if group_type == 'AND'
-          return false unless final_result
-        elsif final_result # group_type == 'OR'
-          return true
-        end
-      rescue RequiresServerEvaluation => e
-        # Immediately propagate - this condition requires server-side data
-        raise RequiresServerEvaluation.new(e.message, reason: pick_unresolved_reason(inconclusive_reason, e.reason))
-      rescue InconclusiveMatchError => e
-        PostHog::Logging.logger&.debug("Failed to compute property #{prop} locally: #{e}")
-        inconclusive_reason = pick_unresolved_reason(inconclusive_reason, e.reason)
-      end
-
-      unless inconclusive_reason.nil?
-        raise InconclusiveMatchError.new("can't match cohort without a given cohort property value",
-                                         reason: inconclusive_reason)
-      end
-
-      # If we reach here, return default based on group type
       group_type == 'AND'
     end
 
@@ -1202,12 +1154,6 @@ module PostHog
     # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
     def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties,
                                  snapshot: _evaluation_snapshot)
-      if property[:operator] != 'flag_evaluates_to'
-        # Should never happen, but just in case
-        raise InconclusiveMatchError.new("Operator #{property[:operator]} not supported for flag dependencies",
-                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-      end
-
       if snapshot[:flags_by_key].nil? || evaluation_cache.nil?
         # Cannot evaluate flag dependencies without required context
         raise InconclusiveMatchError.new(
@@ -1217,43 +1163,14 @@ module PostHog
         )
       end
 
-      # Check if dependency_chain is present - it should always be provided for flag dependencies
-      unless property.key?(:dependency_chain)
-        # Missing dependency_chain indicates malformed server data
-        raise InconclusiveMatchError.new(
-          "Flag dependency property for '#{property[:key] || 'unknown'}' " \
-          "is missing required 'dependency_chain' field",
-          reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION
-        )
+      # A dependency with no definition outranks one that is only inconclusive, so this checks the whole
+      # chain before evaluating any of it. Nothing is cached for it, so a later lookup reports the same.
+      definition_error = FeatureFlagsPoller.flag_dependency_definition_error(property, snapshot[:flags_by_key])
+      unless definition_error.nil?
+        raise InconclusiveMatchError.new(definition_error, reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
 
       dependency_chain = property[:dependency_chain]
-
-      unless dependency_chain.is_a?(Array)
-        raise InconclusiveMatchError.new(
-          "Flag dependency property for '#{property[:key] || 'unknown'}' has an invalid 'dependency_chain' field",
-          reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION
-        )
-      end
-
-      # Handle circular dependency (empty chain means circular)
-      if dependency_chain.empty?
-        PostHog::Logging.logger&.debug("Circular dependency detected for flag: #{property[:key]}")
-        raise InconclusiveMatchError.new("Circular dependency detected for flag '#{property[:key] || 'unknown'}'",
-                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
-      end
-
-      # A dependency with no definition outranks one that is only inconclusive, so check the whole
-      # chain before evaluating any of it. Nothing is cached for it, so a later lookup reports the same.
-      missing_dependency = dependency_chain.find do |dep_flag_key|
-        !evaluation_cache.key?(dep_flag_key) && snapshot[:flags_by_key][dep_flag_key].nil?
-      end
-      unless missing_dependency.nil?
-        raise InconclusiveMatchError.new(
-          "Cannot evaluate flag dependency '#{missing_dependency}' - flag not found in local flags",
-          reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION
-        )
-      end
 
       # Evaluate all dependencies in the chain order
       dependency_chain.each do |dep_flag_key|
@@ -1361,14 +1278,32 @@ module PostHog
       unsupported ? UnresolvedFlagReason::UNSUPPORTED_DEFINITION : nil
     end
 
+    # Why a flag dependency filter can never evaluate locally, whatever the call passes, or nil.
+    # Evaluation and the load-time warning both use it, so the warning matches the reason evaluation reports.
+    def self.flag_dependency_definition_error(property, flags_by_key)
+      operator = property[:operator]
+      return "Operator #{operator} not supported for flag dependencies" if operator != 'flag_evaluates_to'
+
+      key = property[:key] || 'unknown'
+      dependency_chain = property[:dependency_chain]
+      unless property.key?(:dependency_chain)
+        return "Flag dependency property for '#{key}' is missing required 'dependency_chain' field"
+      end
+      unless dependency_chain.is_a?(Array)
+        return "Flag dependency property for '#{key}' has an invalid 'dependency_chain' field"
+      end
+      return "Circular dependency detected for flag '#{key}'" if dependency_chain.empty?
+
+      missing_dependency = dependency_chain.find { |dep_flag_key| flags_by_key[dep_flag_key].nil? }
+      return nil if missing_dependency.nil?
+
+      "Cannot evaluate flag dependency '#{missing_dependency}' - flag not found in local flags"
+    end
+
     def self.unsupported_property?(property, flags_by_key, cohorts, visited_cohort_ids)
       case property[:type]
       when 'flag'
-        dependency_chain = property[:dependency_chain]
-        return true if property[:operator] != 'flag_evaluates_to'
-        return true unless dependency_chain.is_a?(Array) && !dependency_chain.empty?
-
-        dependency_chain.any? { |key| flags_by_key[key].nil? }
+        !flag_dependency_definition_error(property, flags_by_key).nil?
       when 'cohort'
         cohort_id = property[:value].to_s
         property_group = find_cohort_property(cohorts, cohort_id)
@@ -1411,7 +1346,7 @@ module PostHog
     end
 
     private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
-                         :match_nested_property_group, :match_regular_property_group, :assert_filter_supported,
+                         :property_group_items_match?, :assert_filter_supported,
                          :unsupported_property?, :unsupported_property_group?, :unsupported_filter?
 
     # Publish/capture all matching state together so a poll cannot switch semantics
@@ -1554,11 +1489,9 @@ module PostHog
         when :out_of_rollout_bound
           break if early_exit
         end
-      rescue RequiresServerEvaluation => e
+      rescue RequiresServerEvaluation
         # Static cohort or other missing server-side data - must fallback to API
-        raise RequiresServerEvaluation.new(
-          e.message, reason: FeatureFlagsPoller.pick_unresolved_reason(inconclusive_reason, e.reason)
-        )
+        raise
       rescue InconclusiveMatchError => e
         # Evaluation error (bad regex, invalid date, missing property, etc.)
         # Track that we had an inconclusive match, but try other conditions
@@ -1616,13 +1549,17 @@ module PostHog
           inconclusive_reason = FeatureFlagsPoller.pick_unresolved_reason(inconclusive_reason, e.reason)
         rescue InconclusiveMatchError => e
           inconclusive_reason = FeatureFlagsPoller.pick_unresolved_reason(inconclusive_reason, e.reason)
+        rescue StandardError
+          raise if inconclusive_reason.nil?
+
+          # The condition is already inconclusive, so an unexpected error in a later filter must not
+          # fail the whole flag. Later conditions can still resolve it.
+          break
         end
 
         # Raise the original error type: match_feature_flag_properties stops at it and falls back to the
         # server instead of trying later conditions.
-        unless server_evaluation_error.nil?
-          raise RequiresServerEvaluation.new(server_evaluation_error.message, reason: inconclusive_reason)
-        end
+        raise server_evaluation_error unless server_evaluation_error.nil?
         unless inconclusive_reason.nil?
           raise InconclusiveMatchError.new("Can't determine if a condition of flag #{flag[:key]} matches",
                                            reason: inconclusive_reason)
@@ -1846,23 +1783,22 @@ module PostHog
         @loaded_flags_successfully_once.make_true if @loaded_flags_successfully_once.false?
         # Rebuilt from the current definitions, so a flag that is deleted or becomes resolvable is
         # forgotten and warns again if it later returns to an unresolvable definition.
-        unwarned_flags = unresolvable_flags.reject do |key, (_reason, fingerprint)|
-          @warned_unresolvable_flags[key] == fingerprint
-        end
-        @warned_unresolvable_flags = unresolvable_flags.transform_values(&:last)
+        unwarned_flags = unresolvable_flags.reject { |key, entry| @warned_unresolvable_flags[key] == entry }
+        @warned_unresolvable_flags = unresolvable_flags
         @on_flag_definitions_updated&.call
       end
       _warn_about_unresolvable_flags(unwarned_flags)
       logger.debug "Loaded #{new_flags.length} feature flags and #{new_cohorts.length} cohorts"
     end
 
-    # Flag key => [reason, definition fingerprint] for each flag that local evaluation never resolves.
+    # Flag key => [reason, definition] for each flag that local evaluation never resolves. Hash#== compares
+    # the definition by content and ignores key order, so a reordered copy does not warn again.
     def _unresolvable_flags(flags, flags_by_key, cohorts, group_type_mapping)
       flags.each_with_object({}) do |flag, unresolvable|
         reason = self.class.definition_unresolved_reason(flag, flags_by_key, cohorts, group_type_mapping)
         next if reason.nil? || flag[:key].nil?
 
-        unresolvable[flag[:key]] = [reason, Digest::SHA256.hexdigest(JSON.generate([reason, flag]))]
+        unresolvable[flag[:key]] = [reason, flag]
       rescue StandardError
         # Evaluation reports a definition this malformed when the flag is used.
         next

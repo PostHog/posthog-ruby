@@ -20,8 +20,6 @@ Naming/PredicateMethod:
     - condition_match
     - enqueue
     - flush
-    - match_nested_property_group
-    - match_regular_property_group
 
 Style/OneClassPerFile:
   Exclude:

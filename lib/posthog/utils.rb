@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
-module PostHog
-  class InconclusiveMatchError < StandardError
-  end
+require 'posthog/flag_evaluation_errors'
 
+module PostHog
   # Utility helpers used internally by the SDK.
   #
   # @api private

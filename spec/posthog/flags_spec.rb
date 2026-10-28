@@ -2211,6 +2211,8 @@ module PostHog
        UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
       ['a regex the server must evaluate for the context value', 'regex', '\w+', { key: 'é' },
        UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['a regex with an invalid byte and a missing property', 'regex', "\\\xFF", {},
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
       ['a portable regex and a missing property', 'regex', 'foo', {}, UnresolvedFlagReason::MISSING_CONTEXT]
     ].each do |cause, operator, value, property_values, reason|
       it "reports #{reason} for #{cause}" do
@@ -2236,6 +2238,13 @@ module PostHog
           expect(error).to be_a(InconclusiveMatchError).or be_a(RequiresServerEvaluation)
         end)
       end
+    end
+
+    it 'lets a later condition resolve when an unexpected error follows a filter that cannot be checked' do
+      keyless_filter = { operator: 'exact', value: 'x', type: 'person' }
+
+      expect(evaluate(flag('checkout', [email_is_set, keyless_filter], []), {})).to be(true)
+      expect { evaluate(flag('checkout', [keyless_filter], []), {}) }.to raise_error(NoMethodError)
     end
 
     it 'reports the highest-precedence reason of a condition' do
@@ -2372,7 +2381,14 @@ module PostHog
     end
 
     describe '.definition_unresolved_reason' do
-      let(:cohorts) { { '1': { type: 'OR', values: [static_cohort] } } }
+      let(:country_is_us) { { key: 'country', operator: 'exact', value: 'US', type: 'person' } }
+      let(:cohorts) do
+        {
+          '1': { type: 'OR', values: [static_cohort] },
+          '2': { type: 'OR', values: [{ type: 'AND', values: [country_is_us] }] },
+          '3': { type: 'OR', values: [{ type: 'AND', values: [static_cohort] }] }
+        }
+      end
 
       {
         'a resolvable flag' => [-> { flag('checkout', [plan_is_pro]) }, nil],
@@ -2386,6 +2402,11 @@ module PostHog
         ],
         'a static cohort nested in a cohort' => [
           -> { flag('checkout', [{ key: 'id', value: 1, type: 'cohort' }]) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a dynamic cohort' => [-> { flag('checkout', [{ key: 'id', value: 2, type: 'cohort' }]) }, nil],
+        'a static cohort in a nested cohort group' => [
+          -> { flag('checkout', [{ key: 'id', value: 3, type: 'cohort' }]) },
           UnresolvedFlagReason::UNSUPPORTED_DEFINITION
         ],
         'an unknown operator' => [-> { flag('checkout', [unknown_operator]) }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
@@ -2408,13 +2429,16 @@ module PostHog
         'an unknown group type' => [
           -> { flag('checkout', []).merge(filters: { aggregation_group_type_index: 9, groups: [] }) },
           UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a known group type' => [
+          -> { flag('checkout', []).merge(filters: { aggregation_group_type_index: 0, groups: [] }) }, nil
         ]
       }.each do |description, (build_flag, expected)|
         it "returns #{expected.inspect} for #{description}" do
           checkout = instance_exec(&build_flag)
 
-          expect(FeatureFlagsPoller.definition_unresolved_reason(checkout, { 'checkout' => checkout }, cohorts, {}))
-            .to eq(expected)
+          expect(FeatureFlagsPoller.definition_unresolved_reason(checkout, { 'checkout' => checkout }, cohorts,
+                                                                 { '0': 'company' })).to eq(expected)
         end
       end
     end
@@ -2461,6 +2485,10 @@ module PostHog
       '304 not modified' => lambda {
         refresh_with({ status: 200, body: definitions(checkout, beta_ui), headers: { 'ETag' => '"1"' } },
                      { status: 304, body: '', headers: { 'ETag' => '"1"' } })
+      },
+      'unchanged definitions with reordered keys' => lambda {
+        refresh_with({ status: 200, body: definitions(checkout, beta_ui) },
+                     { status: 200, body: definitions(checkout.to_a.reverse.to_h, beta_ui) })
       },
       'successful shared-cache load' => lambda {
         provider = double(
