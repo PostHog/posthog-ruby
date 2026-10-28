@@ -10,5 +10,4 @@ Behavior changes (these apply to every flag method, including `get_feature_flag`
 - An inactive flag with experience continuity enabled now resolves to `false` locally instead of falling back to a remote request.
 - A flag that depends on a flag with experience continuity enabled is no longer evaluated locally. It falls back to a remote request, or stays unresolved with `only_evaluate_locally: true`.
 - `$feature_flag_called` events from snapshot reads report `local_evaluation_inconclusive` instead of `flag_missing` for flags in `unresolved_flags`.
-- When local evaluation left a flag unresolved and the remote fallback marks it as failed, the snapshot no longer holds it as `false`. The flag is absent from the snapshot and listed in `unresolved_flags`, so `enabled?` returns the `default_value:` you pass (this reverses the 3.27.0 rule for these flags) and `get_flag` returns `nil`. A failed flag that has no local definition keeps its `false` value and still ignores `default_value:`.
 - The load-time warning is logged at WARN level, so it shows without debug logging.

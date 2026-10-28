@@ -99,8 +99,8 @@ module PostHog
     #   snapshot — it was never loaded, the `/flags` request failed, or no flag with that
     #   key exists. A flag that does have a value, including `false` and variant strings,
     #   always wins over this default; so does a flag the server returned but marked as
-    #   failed, which resolves to `false` unless it is in {#unresolved_flags}. Defaults to
-    #   `nil`, which keeps the historical `false` result for a missing flag.
+    #   failed, which resolves to `false`. Defaults to `nil`, which keeps the historical
+    #   `false` result for a missing flag.
     # @return [Boolean] true when the flag is enabled, false when disabled, and the
     #   caller-supplied default (or false when none was supplied) when the flag is missing.
     def enabled?(key, default_value: nil)

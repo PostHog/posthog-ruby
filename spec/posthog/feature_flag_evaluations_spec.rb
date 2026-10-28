@@ -876,13 +876,7 @@ module PostHog
       {
         'the remote request fails' => -> { stub_request(:post, FLAGS_ENDPOINT).to_return(status: 500, body: '{}') },
         'the remote request raises' => -> { stub_request(:post, FLAGS_ENDPOINT).to_raise(Errno::ECONNREFUSED) },
-        'the remote response returns no flags' => -> { stub_flags(flags: {}) },
-        'the remote response marks the flag as failed' => lambda {
-          stub_flags(
-            flags: { 'checkout' => { key: 'checkout', enabled: false, variant: nil, failed: true } },
-            errorsWhileComputingFlags: true
-          )
-        }
+        'the remote response returns no flags' => -> { stub_flags(flags: {}) }
       }.each do |outcome, stub_outcome|
         it "leaves the flag unresolved when #{outcome}" do
           c = local_client(checkout_with_continuity)
@@ -911,6 +905,24 @@ module PostHog
         expect(snapshot.keys).to include('remote-only')
         expect(snapshot.get_flag('remote-only')).to be(false)
         expect(snapshot.unresolved_flags).to eq({})
+      end
+
+      it 'keeps a failed remote flag that local evaluation left unresolved as false' do
+        c = local_client(checkout_with_continuity)
+        stub_flags(
+          flags: { 'checkout' => { key: 'checkout', enabled: false, variant: nil, failed: true } },
+          errorsWhileComputingFlags: true
+        )
+
+        snapshot = c.evaluate_flags('user-123')
+
+        expect(snapshot.keys).to include('checkout')
+        expect(snapshot.get_flag('checkout')).to be(false)
+        expect(snapshot.enabled?('checkout', default_value: true)).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
+        c.capture(distinct_id: 'user-123', event: 'test-event', flags: snapshot)
+        event = drain_messages(c).find { |m| m[:event] == 'test-event' }
+        expect(event[:properties]['$feature/checkout']).to be(false)
       end
 
       it 'reports a key without a local definition as missing, not unresolved' do

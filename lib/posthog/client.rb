@@ -752,8 +752,6 @@ module PostHog
           remote_flags.each do |key, ff|
             key_str = key.to_s
             next if locally_evaluated_keys.include?(key_str)
-            # A failed server evaluation has no value, so a flag local evaluation left unresolved stays so.
-            next if ff.failed == true && unresolved_flags.key?(key_str)
 
             metadata = ff.metadata
             reason = ff.reason
