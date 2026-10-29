@@ -8,6 +8,6 @@ Behavior changes (these apply to every flag method, including `get_feature_flag`
 
 - A condition or a cohort property group no longer stops at the first filter that local evaluation can't check, unless that filter is a static cohort inside a cohort. If another filter does not match, the flag can now resolve locally. Before, such a flag fell back to a remote request, or stayed unresolved with `only_evaluate_locally: true`.
 - An inactive flag with experience continuity enabled now resolves to `false` locally instead of falling back to a remote request.
-- A flag that depends on a flag with experience continuity enabled is no longer evaluated locally. It falls back to a remote request, or stays unresolved with `only_evaluate_locally: true`.
+- A condition that depends on a flag with experience continuity enabled is now inconclusive locally. A later condition can still resolve the flag. If none does, the flag falls back to a remote request, or stays unresolved with `only_evaluate_locally: true`.
 - `$feature_flag_called` events from snapshot reads report `local_evaluation_inconclusive` instead of `flag_missing` for flags in `unresolved_flags`.
 - The load-time warning is logged at WARN level, so it shows without debug logging.
