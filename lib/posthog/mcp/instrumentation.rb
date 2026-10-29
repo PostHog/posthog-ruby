@@ -588,7 +588,9 @@ module PostHog
           'session_id' => (@session.respond_to?(:session_id) ? @session.session_id : nil) || header_session_id,
           'request_id' => @request_id,
           'protocol_version' => protocol_version,
-          'headers' => @headers,
+          # A deep copy, because session and protocol resolution read @headers after
+          # callbacks run, and the values are the Rack env's own Strings.
+          'headers' => @headers.transform_values(&:dup),
           'session' => @session
         }
       end

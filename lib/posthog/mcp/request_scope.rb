@@ -17,14 +17,6 @@ module PostHog
       KEY = :posthog_mcp_request_scope
       FIBER_STORAGE = Fiber.respond_to?(:[]) && Fiber.respond_to?(:[]=)
 
-      # Rack `env` keys for the headers the integration reads, by header name.
-      HEADER_ENV_KEYS = {
-        'user-agent' => 'HTTP_USER_AGENT',
-        'x-anthropic-client' => 'HTTP_X_ANTHROPIC_CLIENT',
-        'mcp-session-id' => 'HTTP_MCP_SESSION_ID',
-        'mcp-protocol-version' => 'HTTP_MCP_PROTOCOL_VERSION'
-      }.freeze
-
       module_function
 
       # @return [Hash, nil] `{headers:, transport:, mint:, session_id:}` for the in-flight HTTP request,
@@ -46,20 +38,39 @@ module PostHog
         end
       end
 
-      # @param headers [Hash{String => String}] lowercase header names
-      # @param transport [Symbol] `:http` for the Streamable HTTP transport, `:other`
-      #   for a transport that publishes no headers (stdio, a custom dispatcher)
+      # Rack `env` keys for the two request headers Rack stores without `HTTP_`.
+      UNPREFIXED_HEADER_ENV_KEYS = { 'CONTENT_TYPE' => 'content-type', 'CONTENT_LENGTH' => 'content-length' }.freeze
+      # The request line's protocol, which some servers (WEBrick, Thin) put in `env`.
+      PROTOCOL_ENV_KEY = 'HTTP_VERSION'
+
+      # Every request header, so `identify`, `intent_fallback` and `event_properties`
+      # can read the ones they need (an `authorization` bearer token, an API key)
+      # from `extra['headers']`. The SDK doesn't capture this bag: {Identity} keeps
+      # only scalars from `extra`. {TransportIdentity} still stamps `user-agent` and
+      # `x-anthropic-client`, as before. A callback that returns a raw header value in
+      # identity properties or `event_properties` sends it, unredacted.
+      #
       # @param env [Hash] a Rack `env`
-      # @return [Hash{String => String}] the headers {Instrumentation} reads, lowercase
+      # @return [Hash{String => String}] lowercase header names
       def headers_from_env(env)
         return {} unless env.is_a?(Hash)
 
-        HEADER_ENV_KEYS.each_with_object({}) do |(name, env_key), acc|
-          value = env[env_key]
-          acc[name] = value if value.is_a?(String) && !value.empty?
+        env.each_with_object({}) do |(key, value), acc|
+          name = header_name(key)
+          acc[name] = value if name && value.is_a?(String) && !value.empty?
         end
       end
 
+      def header_name(env_key)
+        return UNPREFIXED_HEADER_ENV_KEYS[env_key] unless env_key.is_a?(String) && env_key.start_with?('HTTP_')
+        return nil if env_key == PROTOCOL_ENV_KEY
+
+        env_key.delete_prefix('HTTP_').downcase.tr('_', '-')
+      end
+
+      # @param headers [Hash{String => String}] lowercase header names
+      # @param transport [Symbol] `:http` for the Streamable HTTP transport, `:other`
+      #   for a transport that publishes no headers (stdio, a custom dispatcher)
       def with(headers:, transport: :http)
         previous = current
         self.current = { headers: headers, transport: transport, mint: nil, session_id: nil }
