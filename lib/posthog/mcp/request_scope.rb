@@ -45,9 +45,9 @@ module PostHog
 
       # Every request header, so `identify`, `intent_fallback` and `event_properties`
       # can read the ones they need (an `authorization` bearer token, an API key)
-      # from `extra['headers']`. The SDK captures no header value: {Identity} keeps
-      # only scalars from `extra`, and {TransportIdentity} stamps `user-agent` and
-      # `x-anthropic-client` alone. A callback that returns a raw header value in
+      # from `extra['headers']`. The SDK doesn't capture this bag: {Identity} keeps
+      # only scalars from `extra`. {TransportIdentity} still stamps `user-agent` and
+      # `x-anthropic-client`, as before. A callback that returns a raw header value in
       # identity properties or `event_properties` sends it, unredacted.
       #
       # @param env [Hash] a Rack `env`
