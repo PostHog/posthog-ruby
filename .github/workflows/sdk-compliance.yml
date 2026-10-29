@@ -22,7 +22,7 @@ jobs:
             dockerfile: sdk_compliance_adapter/Dockerfile
           - mode: sync
             dockerfile: sdk_compliance_adapter/Dockerfile.sync
-    uses: PostHog/posthog-sdk-test-harness/.github/workflows/test-sdk-action.yml@64ffa6ab19166541880c077d349abe18a7e42395
+    uses: PostHog/posthog-sdk-test-harness/.github/workflows/test-sdk-action.yml@aa725c89eec72cb8ac75f4e418662bf2e161feb8
     with:
       adapter-dockerfile: ${{ matrix.dockerfile }}
       adapter-context: "."
