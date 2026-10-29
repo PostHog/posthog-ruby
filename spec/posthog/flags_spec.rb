@@ -2120,6 +2120,501 @@ module PostHog
     end
   end
 
+  describe 'Unresolved flag reasons' do
+    let(:client) { Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true) }
+    let(:poller) { client.instance_variable_get(:@feature_flags_poller) }
+    let(:plan_is_pro) { { key: 'plan', operator: 'exact', value: 'pro', type: 'person' } }
+    let(:plan_is_free) { { key: 'plan', operator: 'exact', value: 'free', type: 'person' } }
+    let(:email_is_set) { { key: 'email', operator: 'is_set', type: 'person' } }
+    let(:unknown_operator) { { key: 'plan', operator: 'bogus', value: 'x', type: 'person' } }
+    let(:static_cohort) { { key: 'id', value: 42, type: 'cohort' } }
+
+    before do
+      stub_request(:get, 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true')
+        .to_return(status: 200, body: { flags: [] }.to_json)
+    end
+
+    def flag(key, *conditions, **extra)
+      {
+        key: key, active: true,
+        filters: { groups: conditions.map { |properties| { properties: properties, rollout_percentage: 100 } } }
+      }.merge(extra)
+    end
+
+    def depends_on(key)
+      { key: key, type: 'flag', value: true, operator: 'flag_evaluates_to', dependency_chain: [key] }
+    end
+
+    def evaluate(flag, properties, flags: [], cohorts: {}, **options)
+      poller._apply_flag_definitions(flags: [flag, *flags], cohorts: cohorts)
+      snapshot = poller._evaluation_snapshot
+      poller.match_feature_flag_properties(snapshot[:flags_by_key][flag[:key]], 'user-123', properties, {},
+                                           snapshot[:cohorts], **options)
+    end
+
+    def expect_unresolved(error_class, reason, &block)
+      expect(&block).to raise_error(error_class) { |error| expect(error.reason).to eq(reason) }
+    end
+
+    it 'defaults the reason of both errors to unsupported_definition' do
+      expect(InconclusiveMatchError.new('message').reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+      expect(RequiresServerEvaluation.new('message').reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+      expect(InconclusiveMatchError.new('message', reason: UnresolvedFlagReason::MISSING_CONTEXT).message)
+        .to eq('message')
+    end
+
+    [
+      [nil, UnresolvedFlagReason::EXPERIENCE_CONTINUITY, UnresolvedFlagReason::EXPERIENCE_CONTINUITY],
+      [UnresolvedFlagReason::MISSING_CONTEXT, UnresolvedFlagReason::UNSUPPORTED_DEFINITION,
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      [UnresolvedFlagReason::MISSING_CONTEXT, UnresolvedFlagReason::UNRESOLVED_DEPENDENCY,
+       UnresolvedFlagReason::UNRESOLVED_DEPENDENCY],
+      [UnresolvedFlagReason::UNSUPPORTED_DEFINITION, UnresolvedFlagReason::UNRESOLVED_DEPENDENCY,
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      [UnresolvedFlagReason::EXPERIENCE_CONTINUITY, UnresolvedFlagReason::UNSUPPORTED_DEFINITION,
+       UnresolvedFlagReason::EXPERIENCE_CONTINUITY]
+    ].each do |current, reason, expected|
+      it "keeps #{expected} when #{reason.inspect} follows #{current.inspect}" do
+        expect(FeatureFlagsPoller.pick_unresolved_reason(current, reason)).to eq(expected)
+      end
+    end
+
+    [
+      ['a missing property', 'exact', 'x', {}, UnresolvedFlagReason::MISSING_CONTEXT],
+      ['an unknown operator', 'bogus', 'x', { key: 'x' }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an unknown operator and a missing property', 'bogus', 'x', {}, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid numeric filter', 'gt', 'abc', { key: 5 }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid numeric filter and a missing property', 'gt', 'abc', {},
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid date filter', 'is_date_before', 'not-a-date', { key: '2024-01-01' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['a boolean date filter', 'is_date_after', true, { key: '2024-01-01' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid context date', 'is_date_before', '2024-01-01', { key: 'not-a-date' },
+       UnresolvedFlagReason::MISSING_CONTEXT],
+      ['an invalid date filter and context', 'is_date_after', 'not-a-date', { key: 'nope' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid semver filter', 'semver_gt', 'x.y', { key: '1.2.3' }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid context semver', 'semver_gt', '1.2.3', { key: 'x.y' }, UnresolvedFlagReason::MISSING_CONTEXT],
+      ['an invalid semver filter and context', 'semver_gt', 'x.y', { key: 'a.b' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid semver filter and a missing property', 'semver_gt', 'x.y', {},
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid wildcard filter', 'semver_wildcard', '1x.*', { key: '1.8.0' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid wildcard filter and context', 'semver_wildcard', '1x.*', { key: 'a.b' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['an invalid context semver for a range', 'semver_tilde', '1.2.3', { key: 'x' },
+       UnresolvedFlagReason::MISSING_CONTEXT],
+      ['a regex the server must evaluate', 'regex', '\bfoo', { key: 'foo' }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['a regex the server must evaluate and a missing property', 'regex', '\bfoo', {},
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['a regex the server must evaluate for the context value', 'regex', '\w+', { key: 'é' },
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['a regex with an invalid byte and a missing property', 'regex', "\\\xFF", {},
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['a portable regex and a missing property', 'regex', 'foo', {}, UnresolvedFlagReason::MISSING_CONTEXT]
+    ].each do |cause, operator, value, property_values, reason|
+      it "reports #{reason} for #{cause}" do
+        property = { key: 'key', operator: operator, value: value }
+
+        expect_unresolved(InconclusiveMatchError, reason) do
+          FeatureFlagsPoller.match_property(property, property_values)
+        end
+      end
+    end
+
+    [
+      ['a missing property first', :email_is_set, :plan_is_free],
+      ['a missing property last', :plan_is_free, :email_is_set],
+      ['a static cohort first', :static_cohort, :plan_is_free],
+      ['an unknown operator first', :unknown_operator, :plan_is_free]
+    ].each do |description, first, second|
+      it "rules a condition out when a filter does not match, with #{description}" do
+        checkout = flag('checkout', [send(first), send(second)])
+
+        expect(evaluate(checkout, { plan: 'pro' })).to be(false)
+        expect { evaluate(checkout, { plan: 'free' }) }.to(raise_error do |error|
+          expect(error).to be_a(InconclusiveMatchError).or be_a(RequiresServerEvaluation)
+        end)
+      end
+    end
+
+    it 'lets a later condition resolve when an unexpected error follows a filter that cannot be checked' do
+      keyless_filter = { operator: 'exact', value: 'x', type: 'person' }
+
+      expect(evaluate(flag('checkout', [email_is_set, keyless_filter], []), {})).to be(true)
+      expect { evaluate(flag('checkout', [keyless_filter], []), {}) }.to raise_error(NoMethodError)
+    end
+
+    it 'reports the highest-precedence reason of a condition' do
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        evaluate(flag('checkout', [plan_is_pro, unknown_operator]), {})
+      end
+    end
+
+    it 'requires the server when a static cohort is the first filter that cannot be checked' do
+      expect_unresolved(RequiresServerEvaluation, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        evaluate(flag('checkout', [static_cohort, plan_is_pro]), {})
+      end
+    end
+
+    it 'lets later conditions resolve when a static cohort follows a filter that cannot be checked' do
+      checkout = flag('checkout', [plan_is_pro, static_cohort], [email_is_set])
+
+      expect(evaluate(checkout, { email: 'a@b.c' })).to be(true)
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        evaluate(checkout, {})
+      end
+    end
+
+    it 'keeps the static cohort reason when a later condition requires the server' do
+      expect_unresolved(RequiresServerEvaluation, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        evaluate(flag('checkout', [plan_is_pro], [static_cohort]), {})
+      end
+    end
+
+    [
+      ['alone', [%i[dependency]], UnresolvedFlagReason::UNRESOLVED_DEPENDENCY],
+      ['after a condition with an unknown operator', [%i[unknown_operator], %i[dependency]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before a condition with an unknown operator', [%i[dependency], %i[unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before an unknown operator in its condition', [%i[dependency unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['after a ruled-out condition with an unknown operator', [%i[plan_is_free unknown_operator], %i[dependency]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before a matching cohort with an unknown operator last', [%i[dependency pro_or_unknown_operator]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+      ['before a matching cohort with an unknown operator first', [%i[dependency unknown_operator_or_pro]],
+       UnresolvedFlagReason::UNSUPPORTED_DEFINITION]
+    ].each do |description, conditions, reason|
+      it "requires the server for a dependency that requires the server, #{description}" do
+        base = flag('base', [static_cohort])
+        filters = {
+          dependency: depends_on('base'), unknown_operator: unknown_operator, plan_is_free: plan_is_free,
+          pro_or_unknown_operator: { key: 'id', value: 1, type: 'cohort' },
+          unknown_operator_or_pro: { key: 'id', value: 2, type: 'cohort' }
+        }
+        cohorts = {
+          '1' => { type: 'OR', values: [plan_is_pro, unknown_operator] },
+          '2' => { type: 'OR', values: [unknown_operator, plan_is_pro] }
+        }
+        checkout = flag('checkout', *conditions.map { |names| names.map { |name| filters.fetch(name) } })
+
+        expect_unresolved(RequiresServerEvaluation, reason) do
+          evaluate(checkout, { plan: 'pro' }, flags: [base], cohorts: cohorts)
+        end
+      end
+    end
+
+    it 'caches nothing for a dependency that requires the server' do
+      poller._apply_flag_definitions(flags: [flag('base', [static_cohort])], cohorts: {})
+      evaluation_cache = {}
+
+      2.times do
+        expect_unresolved(RequiresServerEvaluation, UnresolvedFlagReason::UNRESOLVED_DEPENDENCY) do
+          poller.evaluate_flag_dependency(depends_on('base'), evaluation_cache, 'user-123', {}, {})
+        end
+      end
+      expect(evaluation_cache).to eq({})
+    end
+
+    it 'reports a dependency with experience continuity as unresolved_dependency' do
+      base = flag('base', [], ensure_experience_continuity: true)
+
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNRESOLVED_DEPENDENCY) do
+        evaluate(flag('checkout', [depends_on('base')]), {}, flags: [base])
+      end
+    end
+
+    it 'resolves an inactive dependency with experience continuity as false' do
+      base = flag('base', [], active: false, ensure_experience_continuity: true)
+
+      expect(evaluate(flag('checkout', [depends_on('base')]), {}, flags: [base])).to be(false)
+    end
+
+    it 'reports a missing dependency before an inconclusive one earlier in the chain' do
+      dependency = depends_on('missing').merge(dependency_chain: %w[base missing])
+
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        evaluate(flag('checkout', [dependency]), {}, flags: [flag('base', [plan_is_pro])])
+      end
+    end
+
+    it 'reports a missing dependency the same way on a later lookup' do
+      evaluation_cache = {}
+
+      2.times do
+        expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+          poller.evaluate_flag_dependency(depends_on('missing'), evaluation_cache, 'user-123', {}, {})
+        end
+      end
+      expect(evaluation_cache).to eq({})
+    end
+
+    [['a circular chain', []], ['a chain that is not a list', nil]].each do |description, dependency_chain|
+      it "reports #{description} as unsupported_definition" do
+        dependency = depends_on('base').merge(dependency_chain: dependency_chain)
+
+        expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+          evaluate(flag('checkout', [dependency]), {}, flags: [flag('base', [])])
+        end
+      end
+    end
+
+    it 'reports missing group properties as missing_context' do
+      checkout = flag('checkout', [])
+      checkout[:filters][:groups][0][:aggregation_group_type_index] = 0
+      poller._apply_flag_definitions(flags: [checkout], group_type_mapping: { '0' => 'company' })
+      snapshot = poller._evaluation_snapshot
+
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::MISSING_CONTEXT) do
+        poller.match_feature_flag_properties(snapshot[:flags_by_key]['checkout'], 'user-123', {}, {}, {},
+                                             groups: { company: 'acme' }, group_properties: {})
+      end
+    end
+
+    it 'reports the highest-precedence reason of a cohort property group' do
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        FeatureFlagsPoller.match_property_group({ type: 'AND', values: [plan_is_pro, unknown_operator] }, {}, {})
+      end
+    end
+
+    it 'resolves a nested cohort property group when another group decides it' do
+      inconclusive_group = { type: 'AND', values: [plan_is_pro] }
+      country_group = { type: 'AND', values: [{ key: 'country', operator: 'exact', value: 'US' }] }
+
+      expect(FeatureFlagsPoller.match_property_group(
+               { type: 'AND', values: [inconclusive_group, country_group] }, { country: 'CA' }, {}
+             )).to be(false)
+      expect(FeatureFlagsPoller.match_property_group(
+               { type: 'OR', values: [inconclusive_group, country_group] }, { country: 'US' }, {}
+             )).to be(true)
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::MISSING_CONTEXT) do
+        FeatureFlagsPoller.match_property_group({ type: 'OR', values: [inconclusive_group, country_group] },
+                                                { country: 'CA' }, {})
+      end
+    end
+
+    it 'resolves an inactive flag with experience continuity as false' do
+      checkout = flag('checkout', [static_cohort], active: false, ensure_experience_continuity: true)
+
+      expect(poller._compute_flag_locally(checkout, 'user-123')).to be(false)
+      expect_unresolved(RequiresServerEvaluation, UnresolvedFlagReason::EXPERIENCE_CONTINUITY) do
+        poller._compute_flag_locally(checkout.merge(active: true), 'user-123')
+      end
+    end
+
+    it 'reports an unknown group type as unsupported_definition' do
+      checkout = flag('checkout', [])
+      checkout[:filters][:aggregation_group_type_index] = 9
+
+      expect_unresolved(InconclusiveMatchError, UnresolvedFlagReason::UNSUPPORTED_DEFINITION) do
+        poller._compute_flag_locally(checkout, 'user-123', { company: 'acme' })
+      end
+    end
+
+    describe '.definition_unresolved_reason' do
+      let(:country_is_us) { { key: 'country', operator: 'exact', value: 'US', type: 'person' } }
+      let(:cohorts) do
+        {
+          '1': { type: 'OR', values: [static_cohort] },
+          '2': { type: 'OR', values: [{ type: 'AND', values: [country_is_us] }] },
+          '3': { type: 'OR', values: [{ type: 'AND', values: [static_cohort] }] }
+        }
+      end
+
+      {
+        'a resolvable flag' => [-> { flag('checkout', [plan_is_pro]) }, nil],
+        'an inactive flag' => [-> { flag('checkout', [static_cohort], active: false) }, nil],
+        'experience continuity' => [
+          -> { flag('checkout', [static_cohort], ensure_experience_continuity: true) },
+          UnresolvedFlagReason::EXPERIENCE_CONTINUITY
+        ],
+        'a static cohort' => [
+          -> { flag('checkout', [plan_is_pro], [static_cohort]) }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a static cohort nested in a cohort' => [
+          -> { flag('checkout', [{ key: 'id', value: 1, type: 'cohort' }]) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a dynamic cohort' => [-> { flag('checkout', [{ key: 'id', value: 2, type: 'cohort' }]) }, nil],
+        'a static cohort in a nested cohort group' => [
+          -> { flag('checkout', [{ key: 'id', value: 3, type: 'cohort' }]) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'an unknown operator' => [-> { flag('checkout', [unknown_operator]) }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+        'a malformed value' => [
+          -> { flag('checkout', [{ key: 'n', operator: 'gt', value: 'abc', type: 'person' }]) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a regex the server must evaluate' => [
+          -> { flag('checkout', [{ key: 'email', operator: 'regex', value: '\bfoo', type: 'person' }]) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a missing dependency' => [
+          -> { flag('checkout', [depends_on('missing')]) }, UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a circular dependency' => [
+          -> { flag('checkout', [depends_on('checkout').merge(dependency_chain: [])]) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a dependency with a loaded definition' => [-> { flag('checkout', [depends_on('checkout')]) }, nil],
+        'an unknown group type' => [
+          -> { flag('checkout', []).merge(filters: { aggregation_group_type_index: 9, groups: [] }) },
+          UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+        ],
+        'a known group type' => [
+          -> { flag('checkout', []).merge(filters: { aggregation_group_type_index: 0, groups: [] }) }, nil
+        ]
+      }.each do |description, (build_flag, expected)|
+        it "returns #{expected.inspect} for #{description}" do
+          checkout = instance_exec(&build_flag)
+
+          expect(FeatureFlagsPoller.definition_unresolved_reason(checkout, { 'checkout' => checkout }, cohorts,
+                                                                 { '0': 'company' })).to eq(expected)
+        end
+      end
+    end
+  end
+
+  # Mirrors the @unresolvable_flag_warning_capable scenarios of the evaluate-flags spec.
+  describe 'Unresolvable flag warning' do
+    let(:feature_flag_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
+    let(:log) { StringIO.new }
+    let(:checkout) do
+      { id: 1, key: 'checkout', active: true, ensure_experience_continuity: true,
+        filters: { groups: [{ properties: [], rollout_percentage: 100 }] } }
+    end
+    let(:beta_ui) do
+      { id: 2, key: 'beta-ui', active: true, filters: { groups: [{ properties: [], rollout_percentage: 100 }] } }
+    end
+
+    before do
+      # Same level as the default SDK logger, so these warnings show without debug logging.
+      PostHog::Logging.logger = Logger.new(log, level: Logger::WARN)
+    end
+
+    def definitions(*flags)
+      { flags: flags, group_type_mapping: {}, cohorts: {} }.to_json
+    end
+
+    def refresh_with(*responses)
+      stub_request(:get, feature_flag_endpoint).to_return(*responses)
+      client = Client.new(api_key: API_KEY, secret_key: API_KEY, test_mode: true)
+      poller = client.instance_variable_get(:@feature_flags_poller)
+      (responses.length - 1).times { poller.load_feature_flags(true) }
+      poller
+    end
+
+    def warnings(key, reason)
+      log.string.lines.select { |line| line.include?(key) && line.include?("(reason: #{reason})") }
+    end
+
+    {
+      'unchanged definitions' => lambda {
+        refresh_with({ status: 200, body: definitions(checkout, beta_ui), headers: { 'ETag' => '"1"' } },
+                     { status: 200, body: definitions(checkout, beta_ui), headers: { 'ETag' => '"2"' } })
+      },
+      '304 not modified' => lambda {
+        refresh_with({ status: 200, body: definitions(checkout, beta_ui), headers: { 'ETag' => '"1"' } },
+                     { status: 304, body: '', headers: { 'ETag' => '"1"' } })
+      },
+      'unchanged definitions with reordered keys' => lambda {
+        refresh_with({ status: 200, body: definitions(checkout, beta_ui) },
+                     { status: 200, body: definitions(checkout.to_a.reverse.to_h, beta_ui) })
+      },
+      'successful shared-cache load' => lambda {
+        provider = double(
+          'cache provider',
+          flag_definitions: JSON.parse(definitions(checkout, beta_ui)),
+          should_fetch_flag_definitions?: false, on_flag_definitions_received: nil, shutdown: nil
+        )
+        client = Client.new(api_key: API_KEY, secret_key: API_KEY, test_mode: true,
+                            flag_definition_cache_provider: provider)
+        client.instance_variable_get(:@feature_flags_poller).load_feature_flags(true)
+      }
+    }.each do |refresh_result, refresh|
+      it "logs one warning for a flag local evaluation never resolves after #{refresh_result}" do
+        instance_exec(&refresh)
+
+        logged = warnings('checkout', UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
+        expect(logged.length).to eq(1)
+        expect(logged.first).to include('WARN')
+        expect(logged.first).not_to include('beta-ui')
+        expect(WebMock).not_to have_requested(:post, 'https://us.i.posthog.com/flags/?v=2')
+      end
+    end
+
+    it 'logs the warning again when the definition changes' do
+      refresh_with({ status: 200, body: definitions(checkout) },
+                   { status: 200, body: definitions(checkout.merge(id: 3)) })
+
+      expect(warnings('checkout', UnresolvedFlagReason::EXPERIENCE_CONTINUITY).length).to eq(2)
+      expect(WebMock).not_to have_requested(:post, 'https://us.i.posthog.com/flags/?v=2')
+    end
+
+    it 'does not log the warning again when another flag changes' do
+      refresh_with({ status: 200, body: definitions(checkout, beta_ui) },
+                   { status: 200, body: definitions(checkout, beta_ui.merge(id: 3)) })
+
+      expect(warnings('checkout', UnresolvedFlagReason::EXPERIENCE_CONTINUITY).length).to eq(1)
+    end
+
+    it 'forgets a removed flag and warns again when it returns' do
+      poller = refresh_with({ status: 200, body: definitions(checkout) },
+                            { status: 200, body: definitions(beta_ui) },
+                            { status: 200, body: definitions(checkout) })
+
+      expect(warnings('checkout', UnresolvedFlagReason::EXPERIENCE_CONTINUITY).length).to eq(2)
+      expect(poller.instance_variable_get(:@warned_unresolvable_flags).keys).to eq(['checkout'])
+    end
+
+    {
+      'a static cohort' => { key: 'id', value: 42, type: 'cohort' },
+      'an unknown operator' => { key: 'plan', operator: 'bogus', value: 'x', type: 'person' },
+      'a malformed value' => { key: 'since', operator: 'is_date_after', value: 'x', type: 'person' },
+      'a missing dependency' => {
+        key: 'missing', type: 'flag', value: true, operator: 'flag_evaluates_to', dependency_chain: ['missing']
+      },
+      'a circular dependency' => {
+        key: 'checkout', type: 'flag', value: true, operator: 'flag_evaluates_to', dependency_chain: []
+      }
+    }.each do |cause, property|
+      it "logs one unsupported_definition warning for #{cause}" do
+        unsupported = { id: 1, key: 'checkout', active: true,
+                        filters: { groups: [{ properties: [property], rollout_percentage: 100 }] } }
+
+        refresh_with({ status: 200, body: definitions(unsupported) }, { status: 200, body: definitions(unsupported) })
+
+        expect(warnings('checkout', UnresolvedFlagReason::UNSUPPORTED_DEFINITION).length).to eq(1)
+      end
+    end
+
+    it 'logs one line per reason and none for flags that depend on the call' do
+      flags = [
+        checkout,
+        checkout.merge(id: 3, key: 'inactive', active: false),
+        beta_ui.merge(id: 4, key: 'needs-plan',
+                      filters: { groups: [{ properties: [{ key: 'plan', value: 'pro', type: 'person' }] }] }),
+        beta_ui.merge(id: 5, key: 'dependent', filters: { groups: [{ properties: [
+                        { key: 'checkout', type: 'flag', value: true, operator: 'flag_evaluates_to',
+                          dependency_chain: ['checkout'] }
+                      ] }] }),
+        beta_ui.merge(id: 6, key: 'static',
+                      filters: { groups: [{ properties: [{ key: 'id', value: 42, type: 'cohort' }] }] })
+      ]
+
+      refresh_with({ status: 200, body: definitions(*flags) })
+
+      expect(log.string.lines.length).to eq(2)
+      expect(warnings('checkout', UnresolvedFlagReason::EXPERIENCE_CONTINUITY).length).to eq(1)
+      expect(warnings('static', UnresolvedFlagReason::UNSUPPORTED_DEFINITION).length).to eq(1)
+      %w[inactive needs-plan dependent].each { |key| expect(log.string).not_to include(key) }
+    end
+  end
+
   describe FeatureFlagsPoller do
     it 'applies open, read, and write timeouts to feature flag requests' do
       poller = described_class.allocate

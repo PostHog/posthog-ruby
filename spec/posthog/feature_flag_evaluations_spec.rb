@@ -690,5 +690,337 @@ module PostHog
         expect(snapshot.get_flag_payload('variant-flag')).to eq('key' => 'value')
       end
     end
+
+    # Mirrors the @unresolved_flags_capable scenarios of the evaluate-flags spec.
+    describe 'unresolved flags' do
+      let(:definitions_endpoint) { 'https://us.i.posthog.com/flags/definitions?token=testsecret&send_cohorts=true' }
+      let(:plan_is_pro) { { key: 'plan', operator: 'exact', value: 'pro', type: 'person' } }
+      let(:static_cohort) { { key: 'id', value: 42, type: 'cohort' } }
+      let(:beta_ui) { flag_definition('beta-ui') }
+      let(:checkout_with_continuity) { flag_definition('checkout', ensure_experience_continuity: true) }
+
+      def flag_definition(key, *properties, **extra)
+        { id: 1, key: key, active: true, filters: { groups: [{ properties: properties, rollout_percentage: 100 }] } }
+          .merge(extra)
+      end
+
+      def depends_on(key)
+        { key: key, type: 'flag', value: true, operator: 'flag_evaluates_to', dependency_chain: [key] }
+      end
+
+      def local_client(*flags, **options)
+        stub_request(:get, definitions_endpoint).to_return(status: 200, body: { flags: flags }.to_json)
+        Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true, **options)
+      end
+
+      def flag_called_events(client)
+        drain_messages(client)
+          .select { |m| m[:event] == '$feature_flag_called' }
+          .to_h { |m| [m[:properties]['$feature_flag'], m[:properties]] }
+      end
+
+      it 'reports an experience continuity flag as unresolved in local-only evaluation' do
+        c = local_client(beta_ui, checkout_with_continuity)
+
+        snapshot = c.evaluate_flags('user-123', only_evaluate_locally: true)
+
+        expect(snapshot.keys).to eq(['beta-ui'])
+        expect(snapshot.unresolved_flags).to eq('checkout' => UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
+        expect(snapshot.unresolved_flags).to be_frozen
+        expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+        expect(flag_called_events(c)).to eq({})
+        expect(snapshot.only_accessed.keys).to eq([])
+        expect(snapshot.only(%w[beta-ui checkout]).unresolved_flags).to eq({})
+        expect(snapshot.get_flag('beta-ui')).to be(true)
+      end
+
+      # The spec's device-id row does not apply: this SDK has no device-id bucketing.
+      [
+        ['a missing person property', :plan_only, {}, UnresolvedFlagReason::MISSING_CONTEXT],
+        ['an operator this SDK does not recognize', :unknown_operator, { plan: 'enterprise' },
+         UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+        ['a static cohort', :static_cohort_only, {}, UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+        ['a static cohort and a missing person property', :static_cohort_and_plan, {},
+         UnresolvedFlagReason::UNSUPPORTED_DEFINITION],
+        ['a missing person property and a static cohort', :plan_and_static_cohort, {},
+         UnresolvedFlagReason::UNSUPPORTED_DEFINITION]
+      ].each do |cause, filters, person_properties, reason|
+        it "reports #{reason} for #{cause}" do
+          properties = {
+            plan_only: [plan_is_pro],
+            unknown_operator: [{ key: 'plan', operator: 'bogus', value: 'x', type: 'person' }],
+            static_cohort_only: [static_cohort],
+            static_cohort_and_plan: [static_cohort, plan_is_pro],
+            plan_and_static_cohort: [plan_is_pro, static_cohort]
+          }.fetch(filters)
+          c = local_client(flag_definition('checkout', *properties, ensure_experience_continuity: false))
+
+          snapshot = c.evaluate_flags('user-123', person_properties: person_properties, only_evaluate_locally: true)
+
+          expect(snapshot.keys).not_to include('checkout')
+          expect(snapshot.unresolved_flags).to eq('checkout' => reason)
+        end
+      end
+
+      it 'reports a flag blocked by an unresolved dependency as unresolved_dependency' do
+        c = local_client(checkout_with_continuity, flag_definition('beta-ui', depends_on('checkout')))
+
+        snapshot = c.evaluate_flags('user-123', flag_keys: ['beta-ui'], only_evaluate_locally: true)
+
+        expect(snapshot.keys).not_to include('beta-ui')
+        expect(snapshot.unresolved_flags).to eq('beta-ui' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+      end
+
+      it 'reports the dependency with its own reason when it is in scope' do
+        c = local_client(flag_definition('checkout', plan_is_pro), flag_definition('beta-ui', depends_on('checkout')))
+
+        snapshot = c.evaluate_flags('user-123', only_evaluate_locally: true)
+
+        expect(snapshot.unresolved_flags).to eq(
+          'checkout' => UnresolvedFlagReason::MISSING_CONTEXT,
+          'beta-ui' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY
+        )
+      end
+
+      context 'when a flag depends on a flag that needs the server' do
+        let(:static_cohort_dep) { flag_definition('dep', { key: 'id', type: 'cohort', value: 999 }) }
+        let(:target) do
+          {
+            id: 2, key: 'target', active: true,
+            filters: {
+              multivariate: { variants: [{ key: 'a', rollout_percentage: 50 }, { key: 'b', rollout_percentage: 50 }] },
+              groups: [
+                { properties: [depends_on('dep')], rollout_percentage: 100, variant: 'a' },
+                { properties: [], rollout_percentage: 100, variant: 'b' }
+              ]
+            }
+          }
+        end
+
+        [['target alone', { flag_keys: ['target'] }], ['all flags', {}]].each do |description, options|
+          it "uses the server value with #{description} requested" do
+            c = local_client(static_cohort_dep, target)
+            stub_flags(flags: { 'target' => { key: 'target', enabled: true, variant: 'a' } })
+
+            snapshot = c.evaluate_flags('user-123', **options)
+
+            expect(snapshot.get_flag('target')).to eq('a')
+            expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
+          end
+        end
+
+        it 'leaves the flag unresolved in local-only evaluation' do
+          c = local_client(static_cohort_dep, target)
+
+          snapshot = c.evaluate_flags('user-123', flag_keys: ['target'], only_evaluate_locally: true)
+
+          expect(snapshot.keys).not_to include('target')
+          expect(snapshot.unresolved_flags).to eq('target' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+        end
+
+        context 'with a malformed later condition' do
+          let(:malformed_target) do
+            target.merge(filters: target[:filters].merge(
+              groups: [target[:filters][:groups][0], { properties: ['not-a-filter'], rollout_percentage: 100 }]
+            ))
+          end
+
+          it 'uses the server value without reporting an error' do
+            errors = []
+            c = local_client(static_cohort_dep, malformed_target, on_error: proc { |_, error| errors << error })
+            stub_flags(flags: { 'target' => { key: 'target', enabled: true, variant: 'a' } })
+
+            expect(c.get_feature_flag('target', 'user-123')).to eq('a')
+            expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).once
+            expect(errors).to eq([])
+          end
+
+          it 'leaves the flag unresolved in local-only evaluation' do
+            c = local_client(static_cohort_dep, malformed_target)
+
+            snapshot = c.evaluate_flags('user-123', flag_keys: ['target'], only_evaluate_locally: true)
+
+            expect(snapshot.unresolved_flags).to eq('target' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+          end
+        end
+
+        it 'resolves the flag locally when the dependency resolves locally' do
+          c = local_client(flag_definition('dep', plan_is_pro), target)
+
+          snapshot = c.evaluate_flags('user-123', person_properties: { plan: 'pro' }, flag_keys: ['target'])
+
+          expect(snapshot.get_flag('target')).to eq('a')
+          expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+        end
+      end
+
+      it 'reports a flag that depends on a flag with no loaded definition as unsupported_definition' do
+        c = local_client(flag_definition('beta-ui', depends_on('checkout')))
+
+        snapshot = c.evaluate_flags('user-123', flag_keys: ['beta-ui'], only_evaluate_locally: true)
+
+        expect(snapshot.keys).not_to include('beta-ui')
+        expect(snapshot.unresolved_flags).to eq('beta-ui' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+      end
+
+      it 'does not report a flag the remote fallback resolved' do
+        c = local_client(checkout_with_continuity)
+        stub_flags(flags: { 'checkout' => { key: 'checkout', enabled: true, variant: nil } })
+
+        snapshot = c.evaluate_flags('user-123')
+
+        expect(snapshot.get_flag('checkout')).to be(true)
+        expect(snapshot.unresolved_flags).to eq({})
+      end
+
+      {
+        'the remote request fails' => -> { stub_request(:post, FLAGS_ENDPOINT).to_return(status: 500, body: '{}') },
+        'the remote request raises' => -> { stub_request(:post, FLAGS_ENDPOINT).to_raise(Errno::ECONNREFUSED) },
+        'the remote response returns no flags' => -> { stub_flags(flags: {}) }
+      }.each do |outcome, stub_outcome|
+        it "leaves the flag unresolved when #{outcome}" do
+          c = local_client(checkout_with_continuity)
+          instance_exec(&stub_outcome)
+
+          snapshot = c.evaluate_flags('user-123')
+
+          expect(snapshot.keys).not_to include('checkout')
+          expect(snapshot.unresolved_flags).to eq('checkout' => UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
+          expect(snapshot.enabled?('checkout')).to be(false)
+          error = flag_called_events(c)['checkout']['$feature_flag_error']
+          expect(error.split(',')).to include('local_evaluation_inconclusive')
+          expect(error.split(',')).not_to include('flag_missing')
+        end
+      end
+
+      it 'keeps a failed remote flag without a local definition as false' do
+        c = local_client(beta_ui)
+        stub_flags(
+          flags: { 'remote-only' => { key: 'remote-only', enabled: false, variant: nil, failed: true } },
+          errorsWhileComputingFlags: true
+        )
+
+        snapshot = c.evaluate_flags('user-123')
+
+        expect(snapshot.keys).to include('remote-only')
+        expect(snapshot.get_flag('remote-only')).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
+      end
+
+      it 'keeps a failed remote flag that local evaluation left unresolved as false' do
+        c = local_client(checkout_with_continuity)
+        stub_flags(
+          flags: { 'checkout' => { key: 'checkout', enabled: false, variant: nil, failed: true } },
+          errorsWhileComputingFlags: true
+        )
+
+        snapshot = c.evaluate_flags('user-123')
+
+        expect(snapshot.keys).to include('checkout')
+        expect(snapshot.get_flag('checkout')).to be(false)
+        expect(snapshot.enabled?('checkout', default_value: true)).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
+        c.capture(distinct_id: 'user-123', event: 'test-event', flags: snapshot)
+        event = drain_messages(c).find { |m| m[:event] == 'test-event' }
+        expect(event[:properties]['$feature/checkout']).to be(false)
+      end
+
+      it 'reports a key without a local definition as missing, not unresolved' do
+        c = local_client(beta_ui)
+        stub_flags(flags: {})
+
+        snapshot = c.evaluate_flags('user-123', flag_keys: %w[beta-ui typo-flag])
+        snapshot.enabled?('typo-flag')
+
+        expect(snapshot.unresolved_flags).to eq({})
+        expect(flag_called_events(c)['typo-flag']['$feature_flag_error']).to eq('flag_missing')
+      end
+
+      it 'does not report a flag outside the requested keys' do
+        c = local_client(beta_ui, checkout_with_continuity)
+
+        snapshot = c.evaluate_flags('user-123', flag_keys: ['beta-ui'])
+
+        expect(snapshot.keys).to eq(['beta-ui'])
+        expect(snapshot.get_flag('beta-ui')).to be(true)
+        expect(snapshot.unresolved_flags).to eq({})
+        expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+      end
+
+      it 'resolves an inactive flag with experience continuity to false' do
+        c = local_client(checkout_with_continuity.merge(active: false))
+
+        snapshot = c.evaluate_flags('user-123', only_evaluate_locally: true)
+
+        expect(snapshot.keys).to eq(['checkout'])
+        expect(snapshot.get_flag('checkout')).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
+      end
+
+      it 'reports no error when reading a flag the remote fallback resolved' do
+        c = local_client(checkout_with_continuity)
+        stub_flags(flags: { 'checkout' => { key: 'checkout', enabled: true, variant: nil } })
+
+        snapshot = c.evaluate_flags('user-123')
+
+        expect(snapshot.enabled?('checkout')).to be(true)
+        properties = flag_called_events(c)['checkout']
+        expect(properties['$feature_flag_response']).to be(true)
+        expect(properties).not_to have_key('$feature_flag_error')
+      end
+
+      it 'reports local_evaluation_inconclusive when reading an unresolved flag' do
+        c = local_client(checkout_with_continuity)
+
+        snapshot = c.evaluate_flags('user-123', only_evaluate_locally: true)
+
+        expect(snapshot.enabled?('checkout')).to be(false)
+        expect(flag_called_events(c)['checkout']['$feature_flag_error']).to eq('local_evaluation_inconclusive')
+      end
+
+      it 'keeps response-level errors next to local_evaluation_inconclusive' do
+        c = local_client(checkout_with_continuity)
+        stub_flags(flags: {}, errorsWhileComputingFlags: true)
+
+        c.evaluate_flags('user-123').enabled?('checkout')
+
+        expect(flag_called_events(c)['checkout']['$feature_flag_error'])
+          .to eq('errors_while_computing_flags,local_evaluation_inconclusive')
+      end
+
+      it 'carries no unresolved flags on filtered snapshots' do
+        c = local_client(beta_ui, checkout_with_continuity)
+        snapshot = c.evaluate_flags('user-123', only_evaluate_locally: true)
+        snapshot.enabled?('beta-ui')
+
+        expect(snapshot.only_accessed.unresolved_flags).to eq({})
+        filtered = snapshot.only(['beta-ui'])
+        expect(filtered.unresolved_flags).to eq({})
+        filtered.get_flag('checkout')
+        expect(flag_called_events(c)['checkout']['$feature_flag_error']).to eq('flag_missing')
+        expect(snapshot.unresolved_flags).to eq('checkout' => UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
+      end
+
+      it 'does not report a flag that fails with an unexpected error' do
+        c = local_client(flag_definition('checkout').merge(filters: { groups: [{ properties: 'oops' }] }))
+
+        snapshot = c.evaluate_flags('user-123', only_evaluate_locally: true)
+        snapshot.enabled?('checkout')
+
+        expect(snapshot.unresolved_flags).to eq({})
+        expect(flag_called_events(c)['checkout']['$feature_flag_error']).to eq('flag_missing')
+      end
+
+      it 'resolves a flag locally when a filter does not match next to one local evaluation cannot check' do
+        free_plan = { key: 'plan', operator: 'exact', value: 'free', type: 'person' }
+        c = local_client(flag_definition('checkout', static_cohort, free_plan))
+
+        snapshot = c.evaluate_flags('user-123', person_properties: { plan: 'pro' }, flag_keys: ['checkout'])
+
+        expect(snapshot.get_flag('checkout')).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
+        expect(WebMock).not_to have_requested(:post, FLAGS_ENDPOINT)
+      end
+    end
   end
 end
