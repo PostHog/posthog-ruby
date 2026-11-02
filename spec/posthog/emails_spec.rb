@@ -308,6 +308,29 @@ module PostHog
         expect(send_template.id).to eq('msg_1')
       end
 
+      it 'retries an acceptance whose body was cut off' do
+        server = TCPServer.new('127.0.0.1', 0)
+        replies = ['{"message_id":"msg', JSON.generate(message_id: 'msg_1')]
+        responder = Thread.new do
+          Thread.current.report_on_exception = false
+          replies.each do |body|
+            connection = server.accept
+            connection.readpartial(65_536)
+            connection.write("HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n" \
+                             "Content-Length: 22\r\nConnection: close\r\n\r\n#{body}")
+            connection.close
+          end
+        end
+        options.merge!(host: 'http://127.0.0.1:9', app_host: "http://127.0.0.1:#{server.addr[1]}")
+        WebMock.disable_net_connect!(allow_localhost: true)
+
+        expect(send_template.id).to eq('msg_1')
+        expect(responder.join(5)).to be_truthy
+      ensure
+        WebMock.disable_net_connect!
+        server&.close
+      end
+
       it 'waits for a longer Retry-After' do
         stub_request(:post, send_url).to_return(refuse(429, 'throttled', headers: { 'Retry-After' => '5' }), accept)
 

@@ -407,7 +407,9 @@ module PostHog
       response = Net::HTTP.start(
         uri.hostname, uri.port,
         use_ssl: uri.scheme == 'https', open_timeout: @timeout, read_timeout: @timeout, write_timeout: @timeout,
-        max_retries: 0
+        # Net::HTTP returns a body cut off by a closed connection as if it were whole. Raise instead, so the
+        # send retries with the same idempotency key.
+        max_retries: 0, ignore_eof: false
       ) { |http| http.request(request) }
       [response.code.to_i, parse_json(response.body), parse_retry_after(response['Retry-After'])]
     rescue *NETWORK_ERRORS
