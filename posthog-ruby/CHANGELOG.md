@@ -1,5 +1,32 @@
 # posthog-ruby
 
+## 3.29.0
+
+### Minor Changes
+
+- f1aca86: Add the active OpenTelemetry trace and span IDs to captured exception events when the application provides OpenTelemetry.
+- 306fcf3: MCP: `identify`, `intent_fallback` and `event_properties` callbacks now receive every HTTP request header in `extra['headers']` (lowercase names, in a copy, so a callback that changes it cannot change how the SDK resolves the session), so a callback can resolve a user from an `Authorization` bearer token or an API key. The SDK doesn't capture this header bag automatically, and the existing `User-Agent` and `X-Anthropic-Client` telemetry (`$mcp_client_user_agent`, `$mcp_vendor_client`) is unchanged. Resolve a header to an id instead of returning its raw value in identity properties or `event_properties`, which are sent unredacted.
+- 85bbb40: Add an optional context span processor for application OpenTelemetry spans. Rails request context adds session and person IDs to the active recording request span and preserves explicit span attributes.
+- 7d6cbd6: Report flags that local evaluation could not resolve on `evaluate_flags` snapshots. `FeatureFlagEvaluations#unresolved_flags` maps each such flag key to a `PostHog::UnresolvedFlagReason` value (`experience_continuity`, `unsupported_definition`, `unresolved_dependency` or `missing_context`). `InconclusiveMatchError` and `RequiresServerEvaluation` have a new `reason` with the same values. When flag definitions load, log one warning for each flag that local evaluation can never resolve (experience continuity, a static cohort, an unknown operator, a malformed value, a regex that only the server can evaluate, or a missing or circular flag dependency), and log it again only when the definition of that flag changes.
+  
+  Behavior changes (these apply to every flag method, including `get_feature_flag`, `is_feature_enabled` and `get_all_flags`, not only to `evaluate_flags`):
+  
+  - A condition or a cohort property group no longer stops at the first filter that local evaluation can't check, unless that filter is a static cohort inside a cohort. If another filter does not match, the flag can now resolve locally. Before, such a flag fell back to a remote request, or stayed unresolved with `only_evaluate_locally: true`.
+  - An inactive flag with experience continuity enabled now resolves to `false` locally instead of falling back to a remote request.
+  - A condition that depends on a flag with experience continuity enabled is now inconclusive locally. A later condition can still resolve the flag. If none does, the flag falls back to a remote request, or stays unresolved with `only_evaluate_locally: true`.
+  - `$feature_flag_called` events from snapshot reads report `local_evaluation_inconclusive` instead of `flag_missing` for flags in `unresolved_flags`.
+  - The load-time warning is logged at WARN level, so it shows without debug logging.
+
+### Patch Changes
+
+- 4003bb2: Defer incompatible local feature flag regex patterns to server evaluation instead of returning incorrect results, including Unicode shorthand classes, line anchors, and unsupported syntax.
+- 3cf8079: Capture handled errors reported through `Rails.error` during web requests by replacing Rails-specific suppression with shared exception deduplication.
+  
+  For mutable exceptions, `capture_exception` now suppresses subsequent captures of the same exception object and its captured causes, including manual calls and calls through another client. The first successful capture wins; subsequent calls return `false` without merging context. Supply the required identity and context on the first report. Failed captures remain retryable.
+  
+  Remove `PostHog::Rails::IN_WEB_REQUEST_KEY` and the request-tracking and exception-marker helpers documented as private. Remove any application references to these integration internals.
+- 790d366: Allow framework job scopes to preserve unrelated caller spans while retaining event and child-span context.
+
 ## 3.28.4
 
 ### Patch Changes

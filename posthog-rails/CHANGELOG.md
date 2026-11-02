@@ -1,5 +1,28 @@
 # posthog-rails
 
+## 3.20.0
+
+### Minor Changes
+
+- 790d366: Carry session and person IDs from requests into Active Job execution when automatic job instrumentation is enabled.
+
+### Patch Changes
+
+- 3cf8079: Capture handled errors reported through `Rails.error` during web requests by replacing Rails-specific suppression with shared exception deduplication.
+  
+  For mutable exceptions, `capture_exception` now suppresses subsequent captures of the same exception object and its captured causes, including manual calls and calls through another client. The first successful capture wins; subsequent calls return `false` without merging context. Supply the required identity and context on the first report. Failed captures remain retryable.
+  
+  Remove `PostHog::Rails::IN_WEB_REQUEST_KEY` and the request-tracking and exception-marker helpers documented as private. Remove any application references to these integration internals.
+- 85bbb40: Add an optional context span processor for application OpenTelemetry spans. Rails request context adds session and person IDs to the active recording request span and preserves explicit span attributes.
+- Updated dependencies [f1aca86]
+- Updated dependencies [4003bb2]
+- Updated dependencies [306fcf3]
+- Updated dependencies [3cf8079]
+- Updated dependencies [85bbb40]
+- Updated dependencies [790d366]
+- Updated dependencies [7d6cbd6]
+  - posthog-ruby@3.29.0
+
 ## 3.19.6
 
 ### Patch Changes
