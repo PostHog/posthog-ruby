@@ -111,6 +111,7 @@ module PostHog
       @disabled = disabled
       @closed = false
       @in_flight = 0
+      @pid = Process.pid
       @mutex = Mutex.new
       @idle = ConditionVariable.new
     end
@@ -193,6 +194,7 @@ module PostHog
     def close(timeout: nil)
       deadline = timeout && (monotonic_time + timeout)
       @mutex.synchronize do
+        forget_parent_requests
         @closed = true
         until @in_flight.zero?
           remaining = deadline && (deadline - monotonic_time)
@@ -336,6 +338,7 @@ module PostHog
       end
 
       @mutex.synchronize do
+        forget_parent_requests
         if @closed
           raise EmailError.new(code: 'client_closed',
                                message: "The PostHog client is shut down, so #{nothing_done}.")
@@ -343,6 +346,14 @@ module PostHog
 
         @in_flight += 1
       end
+    end
+
+    # A forked child inherits the parent's count, but not the threads that would settle those requests.
+    def forget_parent_requests
+      return if @pid == Process.pid
+
+      @pid = Process.pid
+      @in_flight = 0
     end
 
     def finish

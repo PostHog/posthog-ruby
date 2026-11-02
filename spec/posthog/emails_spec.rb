@@ -447,6 +447,25 @@ module PostHog
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
 
+      it 'does not wait in a forked child for a send that runs in the parent', skip: !Process.respond_to?(:fork) do
+        request_started = Queue.new
+        release = Queue.new
+        stub_request(:post, send_url).to_return do
+          request_started << true
+          release.pop
+          accept
+        end
+        sender = Thread.new { send_template }
+        request_started.pop
+
+        child = fork { exit!(client.shutdown(timeout: 5) ? 0 : 1) }
+        _, status = Process.wait2(child)
+        release << true
+
+        expect(status.exitstatus).to eq(0)
+        expect(sender.value.id).to eq('msg_1')
+      end
+
       context 'with a send in its retry backoff' do
         let(:backoff_started) { Queue.new }
 
