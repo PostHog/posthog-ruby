@@ -26,6 +26,11 @@ module PostHog
       FLAG_REQUEST_MAX_RETRIES = 1
     end
 
+    module Emails
+      REQUEST_TIMEOUT_SECONDS = 15
+      REQUEST_MAX_RETRIES = 2
+    end
+
     module Queue
       MAX_SIZE = 10_000
     end

@@ -10,6 +10,7 @@ instance_method PostHog::Client#capture(attrs)
 instance_method PostHog::Client#capture_exception(exception, distinct_id = ..., additional_properties = ..., flags: ..., mechanism: ...)
 instance_method PostHog::Client#clear()
 instance_method PostHog::Client#dequeue_last_message()
+instance_method PostHog::Client#emails()
 instance_method PostHog::Client#enabled?()
 instance_method PostHog::Client#evaluate_flags(distinct_id, groups: ..., person_properties: ..., group_properties: ..., only_evaluate_locally: ..., disable_geoip: ..., flag_keys: ...)
 instance_method PostHog::Client#feature_flags_loaded?()
@@ -39,6 +40,9 @@ constant PostHog::Defaults::BackoffPolicy::MAX_TIMEOUT_MS: Integer
 constant PostHog::Defaults::BackoffPolicy::MIN_TIMEOUT_MS: Integer
 constant PostHog::Defaults::BackoffPolicy::MULTIPLIER: Float
 constant PostHog::Defaults::BackoffPolicy::RANDOMIZATION_FACTOR: Float
+module PostHog::Defaults::Emails
+constant PostHog::Defaults::Emails::REQUEST_MAX_RETRIES: Integer
+constant PostHog::Defaults::Emails::REQUEST_TIMEOUT_SECONDS: Integer
 module PostHog::Defaults::FeatureFlags
 constant PostHog::Defaults::FeatureFlags::FLAG_REQUEST_MAX_RETRIES: Integer
 constant PostHog::Defaults::FeatureFlags::FLAG_REQUEST_TIMEOUT_SECONDS: Integer
@@ -59,6 +63,59 @@ constant PostHog::Defaults::Request::PATH: String
 constant PostHog::Defaults::Request::PORT: Integer
 constant PostHog::Defaults::Request::RETRIES: Integer
 constant PostHog::Defaults::Request::SSL: Boolean
+class PostHog::EmailError < StandardError
+instance_method PostHog::EmailError#code()
+instance_method PostHog::EmailError#docs_url()
+instance_method PostHog::EmailError#field()
+instance_method PostHog::EmailError#fix()
+instance_method PostHog::EmailError#name()
+instance_method PostHog::EmailError#retry_after()
+instance_method PostHog::EmailError#status_code()
+instance_method PostHog::EmailError#why()
+class PostHog::Emails
+instance_method PostHog::Emails#get(message_id)
+instance_method PostHog::Emails#send(to:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., capture_engagement: ..., distinct_id: ..., idempotency_key: ..., max_retries: ...)
+class_method PostHog::Emails.logger()
+class PostHog::Emails::SendResult < Struct
+instance_method PostHog::Emails::SendResult#id()
+instance_method PostHog::Emails::SendResult#id=(_)
+instance_method PostHog::Emails::SendResult#replayed()
+instance_method PostHog::Emails::SendResult#replayed=(_)
+instance_method PostHog::Emails::SendResult#warnings()
+instance_method PostHog::Emails::SendResult#warnings=(_)
+class_method PostHog::Emails::SendResult.[](*arg0)
+class_method PostHog::Emails::SendResult.inspect()
+class_method PostHog::Emails::SendResult.keyword_init?()
+class_method PostHog::Emails::SendResult.members()
+class_method PostHog::Emails::SendResult.new(*arg0)
+class PostHog::Emails::Status < Struct
+instance_method PostHog::Emails::Status#created_at()
+instance_method PostHog::Emails::Status#created_at=(_)
+instance_method PostHog::Emails::Status#id()
+instance_method PostHog::Emails::Status#id=(_)
+instance_method PostHog::Emails::Status#reason()
+instance_method PostHog::Emails::Status#reason=(_)
+instance_method PostHog::Emails::Status#status()
+instance_method PostHog::Emails::Status#status=(_)
+instance_method PostHog::Emails::Status#status_at()
+instance_method PostHog::Emails::Status#status_at=(_)
+class_method PostHog::Emails::Status.[](*arg0)
+class_method PostHog::Emails::Status.inspect()
+class_method PostHog::Emails::Status.keyword_init?()
+class_method PostHog::Emails::Status.members()
+class_method PostHog::Emails::Status.new(*arg0)
+class PostHog::Emails::Warning < Struct
+instance_method PostHog::Emails::Warning#code()
+instance_method PostHog::Emails::Warning#code=(_)
+instance_method PostHog::Emails::Warning#fix()
+instance_method PostHog::Emails::Warning#fix=(_)
+instance_method PostHog::Emails::Warning#message()
+instance_method PostHog::Emails::Warning#message=(_)
+class_method PostHog::Emails::Warning.[](*arg0)
+class_method PostHog::Emails::Warning.inspect()
+class_method PostHog::Emails::Warning.keyword_init?()
+class_method PostHog::Emails::Warning.members()
+class_method PostHog::Emails::Warning.new(*arg0)
 class PostHog::FeatureFlagEvaluations
 instance_method PostHog::FeatureFlagEvaluations#distinct_id()
 instance_method PostHog::FeatureFlagEvaluations#enabled?(key, default_value: ...)
