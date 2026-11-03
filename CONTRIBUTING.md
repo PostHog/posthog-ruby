@@ -77,7 +77,7 @@ A diff in `public_api_snapshot.txt` (see "CI-aligned checks" above) means your c
 
 ## SDK performance benchmarks
 
-Every PR runs the 20-workload [`sdk-benchmarks/v1` specification](https://github.com/PostHog/.github/blob/04f8421ec4daa7f4066eaeb4c53621ba79ddc3ca/.github/workflows/sdk-benchmark-specification.md) against its merge base and exact head. The same head-side fixtures run against separately built, installed gems. Four independent workload shards keep all six alternating base/head pairs on one runner, with a fresh Ruby process for each workload, measurement pass and repetition. No performance percentage is a CI gate; build, correctness and execution errors remain failures.
+Every PR runs the 20-workload [`sdk-benchmarks/v1` specification](https://github.com/PostHog/.github/blob/3322f26f21f088ad5e5960d65a916971e309ac0b/.github/workflows/sdk-benchmark-specification.md) against its merge base and exact head. The same head-side fixtures run against separately built, installed gems. Four independent workload shards keep all six alternating base/head pairs on one runner, with a fresh Ruby process for each workload, measurement pass and repetition. No performance percentage is a CI gate; build, correctness and execution errors remain failures.
 
 The benchmark preparation step installs each checkout's frozen Bundler dependencies (with the repository's RubyGems cooldown), builds its SDK gem, and installs that gem into a fresh external directory. Worker processes use those installed gems, not source imports:
 
