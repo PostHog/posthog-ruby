@@ -181,27 +181,46 @@ class Controls(unittest.TestCase):
             calls.append(installation.name)
             return {"status": "timeout", "pass": measurement_pass}
 
-        with tempfile.TemporaryDirectory() as t, patch.object(
-            run, "document_for", side_effect=lambda *a: copy.deepcopy(doc)
-        ), patch.object(run, "run_worker", side_effect=fake_worker):
-            code = run.main(
-                [
-                    "--base",
-                    t,
-                    "--head",
-                    t,
-                    "--build-directory",
-                    t,
-                    "--output",
-                    t,
-                    "--shard",
-                    "flags-single",
-                ]
-            )
-            self.assertEqual(code, 1)
-            self.assertEqual(calls, ["base", "head"])
-            saved = json.loads((Path(t) / "head.json").read_text())
-            self.assertEqual(saved["benchmarks"][0]["status"], "timeout")
+        for shard in (None, *run.load_shards()):
+            calls.clear()
+            with self.subTest(
+                shard=shard
+            ), tempfile.TemporaryDirectory() as t, patch.object(
+                run, "document_for", side_effect=lambda *a: copy.deepcopy(doc)
+            ), patch.object(
+                run, "run_worker", side_effect=fake_worker
+            ):
+                code = run.main(
+                    [
+                        "--base",
+                        t,
+                        "--head",
+                        t,
+                        "--build-directory",
+                        t,
+                        "--output",
+                        t,
+                        *(["--shard", shard] if shard else []),
+                    ]
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(calls, ["base", "head"])
+                expected = (
+                    run.load_shards()[shard]
+                    if shard
+                    else [spec["id"] for spec in fixtures.workloads()]
+                )
+                for role in ("base", "head"):
+                    saved = json.loads((Path(t) / f"{role}.json").read_text())
+                    records = saved["benchmarks"]
+                    self.assertEqual([record["id"] for record in records], expected)
+                    self.assertEqual(records[0]["status"], "timeout")
+                    self.assertEqual(len(records[0]["runs"]), 1)
+                    for record in records[1:]:
+                        self.assertEqual(record["status"], "error")
+                        self.assertIn("not run", record["reason"])
+                        self.assertEqual(record["metrics"], [])
+                        self.assertEqual(record["runs"], [])
 
     def test_alternating_pairs(self):
         doc = {
