@@ -3,6 +3,12 @@
 require 'spec_helper'
 
 module PostHog
+  module Base64Check
+    def self.decode(text)
+      text.unpack1('m0')
+    end
+  end
+
   describe Emails do
     let(:send_url) { 'https://us.posthog.com/api/projects/@current/messaging/send/email/' }
     let(:template_id) { '0190f6d2-7c1e-7b3a-9f5e-1c2d3e4f5a6b' }
@@ -144,6 +150,102 @@ module PostHog
       end
     end
 
+    describe 'copies and attachments' do
+      let(:pdf) { "%PDF-1.7\n\xFF\x00\xE2".b }
+
+      def refused_attachment(**overrides)
+        send_code(**overrides)
+      rescue EmailError => e
+        e
+      end
+
+      it 'sends cc and bcc as lists' do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(cc: 'finance@example.com', bcc: %w[audit@example.com archive@example.com])
+
+        expect(sent_bodies.first).to include('cc' => ['finance@example.com'],
+                                             'bcc' => %w[audit@example.com archive@example.com])
+      end
+
+      it 'sends the bytes of each file as Base64, with its type and content ID' do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(attachments: [
+                    { filename: 'invoice.pdf', content: pdf, content_type: 'application/pdf' },
+                    { 'filename' => 'logo.png', 'content' => [137, 80, 78, 71], 'content_id' => 'logo' },
+                    { filename: 'notes.txt', content: 'aGVsbG8=' }
+                  ])
+
+        expect(sent_bodies.first['attachments']).to eq([
+                                                         { 'filename' => 'invoice.pdf',
+                                                           'content' => 'JVBERi0xLjcK/wDi',
+                                                           'content_type' => 'application/pdf' },
+                                                         { 'filename' => 'logo.png', 'content' => 'iVBORw==',
+                                                           'content_id' => 'logo' },
+                                                         { 'filename' => 'notes.txt', 'content' => 'aGVsbG8=' }
+                                                       ])
+        expect(Base64Check.decode(sent_bodies.first['attachments'][0]['content'])).to eq(pdf)
+      end
+
+      it 'leaves out empty lists, so a PostHog version without these fields still sends the email' do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(cc: [], bcc: [], attachments: [])
+
+        expect(sent_bodies.first.keys).not_to include('cc', 'bcc', 'attachments')
+      end
+
+      it 'sends the same encoded files on every attempt' do
+        stub_request(:post, send_url).to_return(refuse(503, 'service_unavailable'), accept)
+
+        send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect(a_request(:post, send_url)).to have_been_made.twice
+        expect(sent_bodies.map { |body| body['attachments'] })
+          .to eq([[{ 'filename' => 'invoice.pdf', 'content' => 'JVBERi0xLjcK/wDi' }]])
+      end
+
+      it 'refuses a file it cannot send before any request, naming the field and never the content' do
+        cases = {
+          { attachments: { filename: 'a.pdf', content: pdf } } => ['attachments', /list of files/],
+          { attachments: ['a.pdf'] } => ['attachments__0', /Hash with filename and content/],
+          { attachments: [{ filename: 'a.pdf', path: '/tmp/a.pdf' }] } => ['attachments__0__path', /File.binread/],
+          { attachments: [{ filename: 'a.pdf', content: pdf, headers: {} }] } =>
+            ['attachments__0__headers', /not headers/],
+          { attachments: [{ filename: 'a.pdf' }] } => ['attachments__0__content', /needs content/],
+          { attachments: [{ filename: 'a.pdf', content: [256] }] } => ['attachments__0__content', /needs content/],
+          { attachments: [{ filename: 'a.pdf', content: 'secret text, not Base64' }] } =>
+            ['attachments__0__content', /isn't Base64/],
+          { attachments: [{ filename: :a, content: pdf }] } => ['attachments__0__filename', /filename/],
+          { attachments: [{ filename: 'a.pdf', content: pdf, content_type: 1 }] } =>
+            ['attachments__0__content_type', /content_type/]
+        }
+
+        cases.each do |arguments, (field, message)|
+          error = refused_attachment(**arguments)
+          expect(error).to be_a(EmailError), "#{arguments} raised #{error.inspect}"
+          expect([error.code, error.name, error.field]).to eq(['invalid_attachment', 'validation_error', field])
+          expect(error.message).to match(message)
+          expect(error.message).not_to include('secret text')
+        end
+        expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+      end
+
+      it 'refuses an address list that is not one', :aggregate_failures do
+        expect { send_code(cc: [nil]) }.to raise_error(ArgumentError, /cc must be one address or a list/)
+        expect { send_code(bcc: 3) }.to raise_error(ArgumentError, /bcc must be one address or a list/)
+      end
+
+      it 'refuses them on a template send, because the template sets its own recipients and files' do
+        %i[cc bcc attachments].each do |field|
+          expect { send_template(field => []) }
+            .to raise_error(ArgumentError, /template_id doesn't take #{field}.*send with template_key/)
+        end
+        expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+      end
+    end
+
     describe 'argument checks' do
       it 'needs exactly one form' do
         expect { emails.send(to: 'user@example.com') }.to raise_error(ArgumentError, /either template_id, or/)
@@ -159,7 +261,7 @@ module PostHog
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
         expect { send_code(capture_engagement: 'no') }.to raise_error(ArgumentError, /capture_engagement/)
         expect { send_code(reply_to: [1]) }.to raise_error(ArgumentError, /reply_to/)
-        expect { send_template(cc: 'x@example.com') }.to raise_error(ArgumentError, /unknown keyword: :cc/)
+        expect { send_template(headers: {}) }.to raise_error(ArgumentError, /unknown keyword: :headers/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
     end

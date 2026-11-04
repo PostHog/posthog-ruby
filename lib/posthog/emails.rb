@@ -89,7 +89,9 @@ module PostHog
                         "project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'
     TEMPLATE_FIELDS = %i[template_data].freeze
-    CODE_FIELDS = %i[subject html text from reply_to capture_engagement].freeze
+    CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments capture_engagement].freeze
+    ATTACHMENT_FIELDS = %w[filename content content_type content_id].freeze
+    BASE64_PATTERN = %r{\A(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\z}
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError
@@ -97,7 +99,8 @@ module PostHog
     private_constant :SEND_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
                      :HEADER_TOKEN_PATTERN, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY,
-                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :NETWORK_ERRORS
+                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :ATTACHMENT_FIELDS, :BASE64_PATTERN,
+                     :NETWORK_ERRORS
 
     # @api private
     def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:)
@@ -133,6 +136,18 @@ module PostHog
     # @param from [String] Code form: a verified sender, such as `Acme <hello@example.com>`. Without it, the
     #   project's default sender.
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
+    # @param cc [String, Array<String>] Code form: one address or a list of addresses that get a visible copy, at
+    #   most 10. An empty list sends no copy.
+    # @param bcc [String, Array<String>] Code form: one address or a list of addresses that get a hidden copy, at
+    #   most 10. An empty list sends no copy.
+    # @param attachments [Array<Hash>] Code form: files sent with the email, at most 10 and 512 KB in total. Each
+    #   file is a Hash with:
+    #   - +filename+ [String] the name the recipient sees, such as `invoice.pdf`;
+    #   - +content+ [String, Array<Integer>] the file's bytes, as a binary String such as `File.binread(path)`
+    #     returns or as a list of byte values, which the client encodes as Base64. Any other String is taken as the
+    #     file already Base64 encoded. PostHog can't fetch a file from a path or URL;
+    #   - +content_type+ [String] the MIME type, optional. Without it, the type follows the file name;
+    #   - +content_id+ [String] optional: shows the file inline where `html` has `<img src="cid:...">` with this ID.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
     #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
@@ -145,14 +160,16 @@ module PostHog
     #   retries off.
     # @return [SendResult] The queued email.
     # @raise [EmailError] PostHog did not queue the email, or the client could not tell whether it did.
+    #   {EmailError#code} is `invalid_attachment`, before any request, for a file the client can't send.
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
-      reply_to: nil, capture_engagement: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
+      reply_to: nil, cc: nil, bcc: nil, attachments: nil, capture_engagement: nil, distinct_id: nil,
+      idempotency_key: nil, max_retries: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
-        capture_engagement: capture_engagement
+        cc: cc, bcc: bcc, attachments: attachments, capture_engagement: capture_engagement
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
@@ -292,7 +309,14 @@ module PostHog
       end
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
-      code[:reply_to] = addresses(fields[:reply_to]) if fields.key?(:reply_to)
+      code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
+      # An empty list goes out as no list, because a PostHog version without the field refuses it even empty.
+      %i[cc bcc].each do |name|
+        list = addresses(name, fields[name]) if fields.key?(name)
+        code[name] = list unless list.nil? || list.empty?
+      end
+      files = attachment_list(fields[:attachments]) if fields.key?(:attachments)
+      code[:attachments] = files unless files.nil? || files.empty?
       code[:capture_engagement] = fields.fetch(:capture_engagement, true)
       code
     end
@@ -305,11 +329,70 @@ module PostHog
       raise ArgumentError, "#{message} #{why} Remove #{field}, or send with #{other_form}."
     end
 
-    def addresses(reply_to)
-      list = reply_to.is_a?(String) ? [reply_to] : reply_to
+    def addresses(name, value)
+      list = value.is_a?(String) ? [value] : value
       return list if list.is_a?(Array) && list.all? { |address| nonempty_string?(address) }
 
-      raise ArgumentError, 'reply_to must be one address or a list of addresses.'
+      raise ArgumentError, "#{name} must be one address or a list of addresses."
+    end
+
+    def attachment_list(files)
+      raise invalid_attachment('attachments must be a list of files.', 'attachments') unless files.is_a?(Array)
+
+      files.each_with_index.map { |file, index| attachment(file, "attachments__#{index}") }
+    end
+
+    def attachment(file, field)
+      unless file.is_a?(Hash)
+        raise invalid_attachment("An attachment is a Hash with filename and content. Pass the file's bytes as its " \
+                                 'content.', field)
+      end
+
+      file = file.transform_keys(&:to_s).compact
+      if file.key?('path')
+        raise invalid_attachment("PostHog can't fetch an attachment from a path or URL. Read the file with " \
+                                 'File.binread and pass it as content instead.', "#{field}__path")
+      end
+      unknown = file.keys.find { |key| !ATTACHMENT_FIELDS.include?(key) }
+      if unknown
+        raise invalid_attachment("An attachment takes filename, content, content_type and content_id, not #{unknown}.",
+                                 "#{field}__#{unknown}")
+      end
+
+      %w[filename content_type content_id].each do |name|
+        next if name != 'filename' && !file.key?(name)
+        next if file[name].is_a?(String)
+
+        raise invalid_attachment("An attachment's #{name} must be a String.", "#{field}__#{name}")
+      end
+      file.merge('content' => base64_content(file['content'], "#{field}__content"))
+    end
+
+    # A binary String or a list of byte values is the file itself. Any other String is the file already in Base64:
+    # Ruby has one String type for bytes and text, and File.binread returns a binary one.
+    def base64_content(content, field)
+      bytes = file_bytes(content)
+      return [bytes].pack('m0') if bytes
+      return content if content.is_a?(String) && BASE64_PATTERN.match?(content)
+
+      if content.is_a?(String)
+        raise invalid_attachment("An attachment's content is text that isn't Base64. Pass the file's bytes, read " \
+                                 'with File.binread, or the file encoded as Base64.', field)
+      end
+      raise invalid_attachment('An attachment needs content: the bytes File.binread returns, a list of byte values, ' \
+                               'or the file encoded as Base64.', field)
+    end
+
+    def file_bytes(content)
+      return content if content.is_a?(String) && content.encoding == Encoding::BINARY
+      return unless content.is_a?(Array) && content.all? { |byte| byte.is_a?(Integer) && byte.between?(0, 255) }
+
+      content.pack('C*')
+    end
+
+    # The message never holds the file's content, so the error is safe to log.
+    def invalid_attachment(message, field)
+      EmailError.new(code: 'invalid_attachment', message: message, field: field)
     end
 
     def call(nothing_done, key_needed)

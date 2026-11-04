@@ -37,10 +37,13 @@ module PostHog
       @retry_after = retry_after
     end
 
+    SDK_ERROR_NAMES = { 'network_error' => 'service_unavailable', 'invalid_attachment' => 'validation_error' }.freeze
+    private_constant :SDK_ERROR_NAMES
+
     # @api private
     def self.name_for(status_code, code)
       return 'missing_api_key' if code == 'missing_secret_key' || status_code == 401
-      return code == 'network_error' ? 'service_unavailable' : 'application_error' if status_code.nil?
+      return SDK_ERROR_NAMES.fetch(code, 'application_error') if status_code.nil?
 
       case status_code
       when 400 then 'validation_error'
