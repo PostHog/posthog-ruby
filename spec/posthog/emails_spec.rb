@@ -712,12 +712,12 @@ module PostHog
         it 'waits for the retry to settle' do
           sender = Thread.new { send_template }
           backoff_started.pop
-          Thread.new do
-            Kernel.sleep(0.05)
-            release_retry << true
-          end
+          shutdown = Thread.new { client.shutdown(timeout: 5) }
 
-          expect(client.shutdown(timeout: 5)).to be(true)
+          expect(shutdown.join(0.2)).to be_nil
+          release_retry << true
+
+          expect(shutdown.value).to be(true)
           expect(a_request(:post, send_url)).to have_been_made.twice
           expect(sender.value.id).to eq('msg_1')
         end
