@@ -163,6 +163,19 @@ module PostHog
       @lib = opts[:_lib] || 'posthog-ruby'
       @lib_version = (opts[:_lib_version] || PostHog::VERSION).to_s
       @headers = Defaults::Request::HEADERS.merge('User-Agent' => "#{@lib}/#{@lib_version}")
+      # Built before the worker, the instance count and the flags poller start, so a bad email option raises
+      # before anything runs or sends the secret key.
+      @emails = Emails.new(
+        secret_key: secret_key,
+        host: opts[:host],
+        app_host: opts[:app_host],
+        timeout: opts[:email_request_timeout_seconds] || Defaults::Emails::REQUEST_TIMEOUT_SECONDS,
+        max_retries: opts[:email_request_max_retries] || Defaults::Emails::REQUEST_MAX_RETRIES,
+        migrated_from: opts[:migrated_from],
+        user_agent: @headers['User-Agent'],
+        disabled: @disabled,
+        skip_ssl_verification: opts[:skip_ssl_verification] == true
+      )
       @worker_mutex = Mutex.new
       @shutdown_mutex = Mutex.new
       @shutdown_condition = ConditionVariable.new
@@ -236,16 +249,6 @@ module PostHog
           )
       end
 
-      @emails = Emails.new(
-        secret_key: secret_key,
-        host: opts[:host],
-        app_host: opts[:app_host],
-        timeout: opts.fetch(:email_request_timeout_seconds, Defaults::Emails::REQUEST_TIMEOUT_SECONDS),
-        max_retries: opts.fetch(:email_request_max_retries, Defaults::Emails::REQUEST_MAX_RETRIES),
-        migrated_from: opts[:migrated_from],
-        user_agent: @headers['User-Agent'],
-        disabled: @disabled
-      )
       @before_send = opts[:before_send]
       @is_server = opts.fetch(:is_server, true) != false
       @release_id = normalize_string_option(ENV.fetch(RELEASE_ID_ENV_VAR, nil), blank_as_nil: true)
