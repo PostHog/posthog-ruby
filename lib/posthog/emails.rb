@@ -393,10 +393,13 @@ module PostHog
                                  'values, or the file encoded as Base64.', field)
       end
 
-      # Base64.encode64 breaks lines every 60 characters, and PostHog takes Base64 without them. A String that isn't
-      # ASCII, such as a PDF read with File.read, can't be Base64.
-      encoded = content.ascii_only? && content.delete("\r\n")
-      return encoded if encoded && BASE64_PATTERN.match?(encoded)
+      # A String that isn't ASCII, such as a PDF read with File.read, can't be Base64.
+      if content.ascii_only?
+        return content if BASE64_PATTERN.match?(content)
+        # PostHog takes Base64 without line breaks. Only Base64.encode64's own layout loses them, so a text file
+        # that happens to hold Base64 characters on several lines is still refused.
+        return content.delete("\n") if content.include?("\n") && [content.unpack1('m')].pack('m') == content
+      end
 
       raise invalid_attachment("An attachment's content is text that isn't Base64. Pass the file's bytes, read " \
                                'with File.binread, or the file encoded as Base64.', field)

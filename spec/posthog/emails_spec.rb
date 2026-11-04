@@ -276,7 +276,9 @@ module PostHog
           { attachments: [{ filename: 'a.pdf', content: 'secret text, not Base64' }] } =>
             ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: 'a.pdf', content: "%PDF secret text \xE2\xE3".dup.force_encoding('UTF-8') }] } =>
-            ['attachments__0__content', /File.binread/],
+            ['attachments__0__content', /isn't Base64/],
+          { attachments: [{ filename: 'codes.txt', content: "ABCD1234\nEFGH5678\n" }] } =>
+            ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: 'a.txt', content: 'aGVsbG8='.encode('UTF-16LE') }] } =>
             ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: :a, content: pdf }] } => ['attachments__0__filename', /filename/],
