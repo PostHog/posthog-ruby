@@ -598,6 +598,7 @@ module PostHog
       context 'with a send in its retry backoff' do
         let(:backoff_started) { Queue.new }
         let(:release_retry) { Queue.new }
+        let(:threads) { [] }
 
         before do
           allow(emails).to receive(:sleep) do |_seconds|
@@ -607,10 +608,16 @@ module PostHog
           stub_request(:post, send_url).to_return(refuse(503, 'delivery_unavailable'), accept)
         end
 
+        # Releases a held retry even when an assertion failed, so no thread stays blocked.
+        after do
+          release_retry << true
+          threads.each { |thread| thread.join(5) }
+        end
+
         it 'waits for the retry to settle' do
-          sender = Thread.new { send_template }
+          sender = Thread.new { send_template }.tap { |thread| threads << thread }
           backoff_started.pop
-          shutdown = Thread.new { client.shutdown(timeout: 5) }
+          shutdown = Thread.new { client.shutdown(timeout: 5) }.tap { |thread| threads << thread }
 
           expect(shutdown.join(0.2)).to be_nil
           release_retry << true
@@ -621,14 +628,12 @@ module PostHog
         end
 
         it 'keeps to its timeout' do
-          sender = Thread.new { send_template }
+          threads << Thread.new { send_template }
           backoff_started.pop
 
           started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           expect(client.shutdown(timeout: 0.05)).to be(false)
           expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 0.25
-          release_retry << true
-          sender.join
         end
       end
     end
