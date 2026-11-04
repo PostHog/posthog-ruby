@@ -325,13 +325,8 @@ module PostHog
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
-      # An empty list goes out as no list, because a PostHog version without the field refuses it even empty.
-      %i[cc bcc].each do |name|
-        list = addresses(name, fields[name]) if fields.key?(name)
-        code[name] = list unless list.nil? || list.empty?
-      end
-      files = attachment_list(fields[:attachments]) if fields.key?(:attachments)
-      code[:attachments] = files unless files.nil? || files.empty?
+      %i[cc bcc].each { |name| put_unless_empty(code, name, addresses(name, fields[name])) if fields.key?(name) }
+      put_unless_empty(code, :attachments, attachment_list(fields[:attachments])) if fields.key?(:attachments)
       code[:capture_engagement] = fields.fetch(:capture_engagement, true)
       code
     end
@@ -342,6 +337,10 @@ module PostHog
 
       message = "A send with #{form} doesn't take #{field}, so no email was sent."
       raise ArgumentError, "#{message} #{why} Remove #{field}, or send with #{other_form}."
+    end
+
+    def put_unless_empty(code, name, list)
+      code[name] = list unless list.empty?
     end
 
     def addresses(name, value)
@@ -383,8 +382,6 @@ module PostHog
       file.merge('content' => base64_content(file['content'], "#{field}__content"))
     end
 
-    # A binary String or a list of byte values is the file itself. Any other String is the file already in Base64:
-    # Ruby has one String type for bytes and text, and File.binread returns a binary one.
     def base64_content(content, field)
       bytes = file_bytes(content)
       return [bytes].pack('m0') if bytes
@@ -392,17 +389,19 @@ module PostHog
         raise invalid_attachment('An attachment needs content: the bytes File.binread returns, a list of byte ' \
                                  'values, or the file encoded as Base64.', field)
       end
-
-      # A String that isn't ASCII, such as a PDF read with File.read, can't be Base64.
-      if content.ascii_only?
-        return content if BASE64_PATTERN.match?(content)
-        # PostHog takes Base64 without line breaks. Only Base64.encode64's own layout loses them, so a text file
-        # that happens to hold Base64 characters on several lines is still refused.
-        return content.delete("\n") if content.include?("\n") && [content.unpack1('m')].pack('m') == content
-      end
+      return content if single_line_base64?(content)
+      return content.delete("\n") if encode64_layout?(content)
 
       raise invalid_attachment("An attachment's content is text that isn't Base64. Pass the file's bytes, read " \
                                'with File.binread, or the file encoded as Base64.', field)
+    end
+
+    def single_line_base64?(content)
+      content.ascii_only? && BASE64_PATTERN.match?(content)
+    end
+
+    def encode64_layout?(content)
+      content.ascii_only? && content.include?("\n") && [content.unpack1('m')].pack('m') == content
     end
 
     def file_bytes(content)
@@ -412,7 +411,6 @@ module PostHog
       content.pack('C*')
     end
 
-    # The message never holds the file's content, so the error is safe to log.
     def invalid_attachment(message, field)
       EmailError.new(code: 'invalid_attachment', message: message, field: field)
     end
