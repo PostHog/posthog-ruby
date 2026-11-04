@@ -507,15 +507,33 @@ module PostHog
         end
       end
 
-      it "keeps a refusal's status and Retry-After when its body was cut off" do
+      it 'retries a refusal whose body was cut off, as a network error' do
+        cut_off = http_response('409 Conflict', '{"code":"idempotency_key_in', 'Content-Length' => '60')
+
+        serve(cut_off, http_response('202 Accepted', JSON.generate(message_id: 'msg_1'))) do
+          expect(send_template.id).to eq('msg_1')
+        end
+      end
+
+      it 'keeps the Retry-After of a refusal whose body was cut off' do
         cut_off = http_response('429 Too Many Requests', '{"code":"thro',
                                 'Content-Length' => '40', 'Retry-After' => '60')
 
         serve(cut_off) do
           expect { send_template }.to raise_error(EmailError) { |error|
-            expect([error.status_code, error.name, error.retry_after]).to eq([429, 'rate_limit_exceeded', 60.0])
+            expect([error.code, error.retry_after]).to eq(['network_error', 60.0])
           }
         end
+      end
+
+      it 'waits out the Retry-After of a cut-off refusal before it retries' do
+        cut_off = http_response('503 Service Unavailable', '{"code":"deliv',
+                                'Content-Length' => '40', 'Retry-After' => '3')
+        serve(cut_off, http_response('202 Accepted', JSON.generate(message_id: 'msg_1'))) do
+          emails
+          expect(send_template.id).to eq('msg_1')
+        end
+        expect(delays).to eq([3.0])
       end
 
       it 'waits for a longer Retry-After' do

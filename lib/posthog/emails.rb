@@ -508,11 +508,9 @@ module PostHog
       end
       [response.code.to_i, parse_json(response.body), parse_retry_after(response['Retry-After'])]
     rescue *NETWORK_ERRORS
-      # A refusal whose body broke off still carries its status and Retry-After. An acceptance whose body broke off
-      # has no message ID, so it retries with the same idempotency key.
-      return [head.code.to_i, nil, parse_retry_after(head['Retry-After'])] if head && !head.is_a?(Net::HTTPSuccess)
-
-      raise EmailError.new(code: 'network_error', message: 'The request to PostHog failed.')
+      # A reply whose body broke off retries with the same idempotency key, after its Retry-After when it sent one.
+      raise EmailError.new(code: 'network_error', message: 'The request to PostHog failed.',
+                           retry_after: head && parse_retry_after(head['Retry-After']))
     end
 
     def connection_options(uri)
