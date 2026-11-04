@@ -3,12 +3,6 @@
 require 'spec_helper'
 
 module PostHog
-  module Base64Check
-    def self.decode(text)
-      text.unpack1('m0')
-    end
-  end
-
   describe Emails do
     let(:send_url) { 'https://us.posthog.com/api/projects/@current/messaging/send/email/' }
     let(:template_id) { '0190f6d2-7c1e-7b3a-9f5e-1c2d3e4f5a6b' }
@@ -239,7 +233,7 @@ module PostHog
                                                            'content_id' => 'logo' },
                                                          { 'filename' => 'notes.txt', 'content' => 'aGVsbG8=' }
                                                        ])
-        expect(Base64Check.decode(sent_bodies.first['attachments'][0]['content'])).to eq(pdf)
+        expect(sent_bodies.first['attachments'][0]['content'].unpack1('m0')).to eq(pdf)
       end
 
       it 'leaves out empty lists, so a PostHog version without these fields still sends the email' do
@@ -255,9 +249,19 @@ module PostHog
 
         send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
 
-        expect(a_request(:post, send_url)).to have_been_made.twice
-        expect(sent_bodies.map { |body| body['attachments'] })
-          .to eq([[{ 'filename' => 'invoice.pdf', 'content' => 'JVBERi0xLjcK/wDi' }]])
+        encoded_once = [{ 'filename' => 'invoice.pdf', 'content' => 'JVBERi0xLjcK/wDi' }]
+        expect(a_request(:post, send_url).with { |request| JSON.parse(request.body)['attachments'] == encoded_once })
+          .to have_been_made.twice
+      end
+
+      it 'takes Base64 with line breaks, as Base64.encode64 writes it' do
+        stub_request(:post, send_url).to_return(accept)
+        file = (0..99).to_a.pack('C*')
+
+        send_code(attachments: [{ filename: 'data.bin', content: [file].pack('m') }])
+
+        expect([file].pack('m')).to include("\n")
+        expect(sent_bodies.first['attachments'][0]['content']).to eq([file].pack('m0'))
       end
 
       it 'refuses a file it cannot send before any request, naming the field and never the content' do
@@ -270,6 +274,10 @@ module PostHog
           { attachments: [{ filename: 'a.pdf' }] } => ['attachments__0__content', /needs content/],
           { attachments: [{ filename: 'a.pdf', content: [256] }] } => ['attachments__0__content', /needs content/],
           { attachments: [{ filename: 'a.pdf', content: 'secret text, not Base64' }] } =>
+            ['attachments__0__content', /isn't Base64/],
+          { attachments: [{ filename: 'a.pdf', content: "%PDF secret text \xE2\xE3".dup.force_encoding('UTF-8') }] } =>
+            ['attachments__0__content', /File.binread/],
+          { attachments: [{ filename: 'a.txt', content: 'aGVsbG8='.encode('UTF-16LE') }] } =>
             ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: :a, content: pdf }] } => ['attachments__0__filename', /filename/],
           { attachments: [{ filename: 'a.pdf', content: pdf, content_type: 1 }] } =>

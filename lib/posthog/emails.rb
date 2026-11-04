@@ -388,14 +388,18 @@ module PostHog
     def base64_content(content, field)
       bytes = file_bytes(content)
       return [bytes].pack('m0') if bytes
-      return content if content.is_a?(String) && BASE64_PATTERN.match?(content)
-
-      if content.is_a?(String)
-        raise invalid_attachment("An attachment's content is text that isn't Base64. Pass the file's bytes, read " \
-                                 'with File.binread, or the file encoded as Base64.', field)
+      unless content.is_a?(String)
+        raise invalid_attachment('An attachment needs content: the bytes File.binread returns, a list of byte ' \
+                                 'values, or the file encoded as Base64.', field)
       end
-      raise invalid_attachment('An attachment needs content: the bytes File.binread returns, a list of byte values, ' \
-                               'or the file encoded as Base64.', field)
+
+      # Base64.encode64 breaks lines every 60 characters, and PostHog takes Base64 without them. A String that isn't
+      # ASCII, such as a PDF read with File.read, can't be Base64.
+      encoded = content.ascii_only? && content.delete("\r\n")
+      return encoded if encoded && BASE64_PATTERN.match?(encoded)
+
+      raise invalid_attachment("An attachment's content is text that isn't Base64. Pass the file's bytes, read " \
+                               'with File.binread, or the file encoded as Base64.', field)
     end
 
     def file_bytes(content)
