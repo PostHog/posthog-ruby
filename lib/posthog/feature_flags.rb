@@ -150,6 +150,9 @@ module PostHog
       only_evaluate_locally = false,
       raise_on_error = false
     )
+      groups, person_properties, group_properties = normalize_flag_evaluation_inputs(
+        groups, person_properties, group_properties
+      )
       # TODO: Convert to options hash for easier argument passing
       flags_data = get_all_flags_and_payloads(
         distinct_id,
@@ -245,14 +248,6 @@ module PostHog
       # make sure they're loaded on first run
       load_feature_flags
       snapshot ||= _evaluation_snapshot
-
-      symbolize_keys! groups
-      symbolize_keys! person_properties
-      symbolize_keys! group_properties
-
-      group_properties.each_value do |value|
-        symbolize_keys!(value)
-      end
 
       response = nil
       payload = nil
@@ -734,9 +729,6 @@ module PostHog
     def self.match_property(property, property_values, cohort_properties = {}, property_matching_version: 1)
       # only looks for matches where key exists in property_values
 
-      PostHog::Utils.symbolize_keys! property
-      PostHog::Utils.symbolize_keys! property_values
-
       # Handle cohort properties
       if extract_value(property, :type) == 'cohort'
         return match_cohort(property, property_values, cohort_properties,
@@ -753,25 +745,23 @@ module PostHog
     end
 
     def self.match_property_value(property, property_values, property_matching_version)
-      key = property[:key].to_sym
-      value = property[:value]
-      operator = property[:operator] || 'exact'
-
-      if !property_values.key?(key)
-        raise InconclusiveMatchError.new("Property #{key} not found in property_values",
-                                         reason: UnresolvedFlagReason::MISSING_CONTEXT)
-      elsif operator == 'is_not_set'
-        return false
+      key = (property[:key] || property['key']).to_sym
+      value = property.key?(:value) ? property[:value] : property['value']
+      operator = property[:operator] || property['operator'] || 'exact'
+      override_value = property_values.fetch(key) do
+        property_values.fetch(key.to_s) do
+          raise InconclusiveMatchError.new("Property #{key} not found in property_values",
+                                           reason: UnresolvedFlagReason::MISSING_CONTEXT)
+        end
       end
-
-      override_value = property_values[key]
+      return false if operator == 'is_not_set'
 
       case operator
       when 'exact', 'is_not'
         matches = exact_property_match?(value, override_value, property_matching_version)
         operator == 'exact' ? matches : !matches
       when 'is_set'
-        property_values.key?(key)
+        true
       when 'icontains'
         string_operand(override_value).downcase(:ascii).include?(value.to_s.downcase(:ascii))
       when 'not_icontains'
@@ -847,8 +837,9 @@ module PostHog
     # Raises an unsupported_definition error when local evaluation cannot use the filter, whatever
     # the call passes: an unknown operator, or a filter value that the operator cannot parse.
     def self.assert_filter_supported(property)
-      value = property[:value]
-      case property[:operator] || 'exact'
+      value = property.key?(:value) ? property[:value] : property['value']
+      operator = property[:operator] || property['operator'] || 'exact'
+      case operator
       when 'exact', 'is_not', 'is_set', 'is_not_set', 'icontains', 'not_icontains', 'starts_with',
            'not_starts_with', 'ends_with', 'not_ends_with'
         nil
@@ -871,7 +862,7 @@ module PostHog
       when 'semver_wildcard'
         semver_wildcard_bounds(value)
       else
-        raise InconclusiveMatchError.new("Unknown operator: #{property[:operator]}",
+        raise InconclusiveMatchError.new("Unknown operator: #{operator}",
                                          reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
     end
@@ -1086,10 +1077,9 @@ module PostHog
         end
       else
         property_group_items_match?(properties, group_type) do |prop|
-          PostHog::Utils.symbolize_keys!(prop)
           matches = match_property(prop, property_values, cohort_properties,
                                    property_matching_version: property_matching_version)
-          prop[:negation] ? !matches : matches
+          extract_value(prop, :negation) ? !matches : matches
         end
       end
     end
