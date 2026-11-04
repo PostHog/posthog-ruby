@@ -42,6 +42,60 @@ module PostHog
       bodies
     end
 
+    # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. WebMock
+    # is off meanwhile: its Net::HTTP wrapper reads the whole body before it hands over the response.
+    def serve(*responses, tls: nil)
+      server = TCPServer.new('127.0.0.1', 0)
+      listener = tls ? OpenSSL::SSL::SSLServer.new(server, tls) : server
+      responder = Thread.new do
+        Thread.current.report_on_exception = false
+        responses.each do |response|
+          connection = listener.accept
+          read_request(connection)
+          connection.write(response)
+          connection.close
+        end
+      end
+      options.merge!(host: 'http://127.0.0.1:9', app_host: "#{tls ? 'https' : 'http'}://127.0.0.1:#{server.addr[1]}")
+      WebMock.disable!
+      yield
+      expect(responder.join(5)).to be_truthy
+    ensure
+      WebMock.enable!
+      server&.close
+    end
+
+    # Reads one whole request, so closing the connection never resets a client still writing its body.
+    def read_request(connection)
+      request = +''
+      request << connection.readpartial(65_536) until request.include?("\r\n\r\n")
+      head, body = request.split("\r\n\r\n", 2)
+      length = head[/^content-length: *(\d+)/i, 1].to_i
+      body << connection.readpartial(65_536) while body.bytesize < length
+    end
+
+    def http_response(status, body, headers = {})
+      head = headers.merge('Content-Type' => 'application/json', 'Connection' => 'close')
+      head['Content-Length'] ||= body.bytesize.to_s
+      "HTTP/1.1 #{status}\r\n#{head.map { |name, value| "#{name}: #{value}\r\n" }.join}\r\n#{body}"
+    end
+
+    def self_signed_tls
+      key = OpenSSL::PKey::RSA.new(2048)
+      cert = OpenSSL::X509::Certificate.new
+      cert.version = 2
+      cert.serial = 1
+      cert.subject = cert.issuer = OpenSSL::X509::Name.parse('/CN=127.0.0.1')
+      cert.public_key = key.public_key
+      cert.not_before = Time.now - 60
+      cert.not_after = Time.now + 3600
+      cert.sign(key, OpenSSL::Digest.new('SHA256'))
+      OpenSSL::SSL::SSLContext.new.tap do |context|
+        context.cert = cert
+        context.key = key
+      end
+    end
+
     def send_template(**overrides)
       emails.send(to: 'user@example.com', template_id: template_id, **overrides)
     end
@@ -323,6 +377,31 @@ module PostHog
         expect do
           Client.new(options.merge(migrated_from: 'my provider'))
         end.to raise_error(ArgumentError, /migrated_from/)
+        %w[posthog.example.com ftp://posthog.example.com https://].each do |app_host|
+          expect { Client.new(options.merge(app_host: app_host)) }.to raise_error(ArgumentError, /app_host/)
+        end
+      end
+
+      it 'refuses a bad email option before it polls flags with the secret key' do
+        expect do
+          Client.new(options.merge(test_mode: false, email_request_timeout_seconds: 0))
+        end.to raise_error(ArgumentError, /timeout/)
+        expect(a_request(:get, %r{/flags/definitions})).not_to have_been_made
+      end
+
+      it 'uses the defaults for email options passed as nil' do
+        stub_request(:post, send_url).to_return(refuse(503, 'delivery_unavailable'), refuse(503, 'x'), accept)
+        options.merge!(email_request_timeout_seconds: nil, email_request_max_retries: nil)
+
+        expect(send_template.id).to eq('msg_1')
+      end
+
+      it 'skips certificate checks when the client sets skip_ssl_verification' do
+        options[:skip_ssl_verification] = true
+
+        serve(http_response('202 Accepted', JSON.generate(message_id: 'msg_1')), tls: self_signed_tls) do
+          expect(send_template.id).to eq('msg_1')
+        end
       end
     end
 
@@ -411,26 +490,32 @@ module PostHog
       end
 
       it 'retries an acceptance whose body was cut off' do
-        server = TCPServer.new('127.0.0.1', 0)
-        replies = ['{"message_id":"msg', JSON.generate(message_id: 'msg_1')]
-        responder = Thread.new do
-          Thread.current.report_on_exception = false
-          replies.each do |body|
-            connection = server.accept
-            connection.readpartial(65_536)
-            connection.write("HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n" \
-                             "Content-Length: 22\r\nConnection: close\r\n\r\n#{body}")
-            connection.close
-          end
-        end
-        options.merge!(host: 'http://127.0.0.1:9', app_host: "http://127.0.0.1:#{server.addr[1]}")
-        WebMock.disable_net_connect!(allow_localhost: true)
+        cut_off = http_response('202 Accepted', '{"message_id":"msg', 'Content-Length' => '22')
 
-        expect(send_template.id).to eq('msg_1')
-        expect(responder.join(5)).to be_truthy
-      ensure
-        WebMock.disable_net_connect!
-        server&.close
+        serve(cut_off, http_response('202 Accepted', JSON.generate(message_id: 'msg_1'))) do
+          expect(send_template.id).to eq('msg_1')
+        end
+      end
+
+      it 'retries an acceptance whose compressed body is corrupt' do
+        # A gzip header, then a deflate block of a type that does not exist.
+        corrupt = http_response('202 Accepted', "\x1F\x8B\x08\x00\x00\x00\x00\x00\x00\x03\xFF\xFF".b,
+                                'Content-Encoding' => 'gzip')
+
+        serve(corrupt, http_response('202 Accepted', JSON.generate(message_id: 'msg_1'))) do
+          expect(send_template.id).to eq('msg_1')
+        end
+      end
+
+      it "keeps a refusal's status and Retry-After when its body was cut off" do
+        cut_off = http_response('429 Too Many Requests', '{"code":"thro',
+                                'Content-Length' => '40', 'Retry-After' => '60')
+
+        serve(cut_off) do
+          expect { send_template }.to raise_error(EmailError) { |error|
+            expect([error.status_code, error.name, error.retry_after]).to eq([429, 'rate_limit_exceeded', 60.0])
+          }
+        end
       end
 
       it 'waits for a longer Retry-After' do
@@ -467,9 +552,12 @@ module PostHog
         stub_request(:post, send_url).to_return(
           accept('msg_1', replayed: true, warnings: [{ code: 'unverified_link', detail: 'Check links.', fix: 'Fix.' }])
         )
-        expect(emails.logger).to receive(:warn).with('PostHog email warning unverified_link: Check links.')
+        log = StringIO.new
+        PostHog::Logging.logger = Logger.new(log, level: Logger::WARN)
 
         result = send_template
+
+        expect(log.string).to include('PostHog email warning unverified_link: Check links.')
 
         expect(result.replayed).to be(true)
         expect(result.warnings).to eq([Emails::Warning.new(code: 'unverified_link', message: 'Check links.',
@@ -593,11 +681,12 @@ module PostHog
 
       context 'with a send in its retry backoff' do
         let(:backoff_started) { Queue.new }
+        let(:release_retry) { Queue.new }
 
         before do
           allow(emails).to receive(:sleep) do |_seconds|
             backoff_started << true
-            Kernel.sleep(0.3)
+            release_retry.pop
           end
           stub_request(:post, send_url).to_return(refuse(503, 'delivery_unavailable'), accept)
         end
@@ -605,6 +694,10 @@ module PostHog
         it 'waits for the retry to settle' do
           sender = Thread.new { send_template }
           backoff_started.pop
+          Thread.new do
+            Kernel.sleep(0.05)
+            release_retry << true
+          end
 
           expect(client.shutdown(timeout: 5)).to be(true)
           expect(a_request(:post, send_url)).to have_been_made.twice
@@ -618,6 +711,7 @@ module PostHog
           started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           expect(client.shutdown(timeout: 0.05)).to be(false)
           expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 0.25
+          release_retry << true
           sender.join
         end
       end

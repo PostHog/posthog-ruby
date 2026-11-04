@@ -5,6 +5,8 @@ require 'net/http'
 require 'openssl'
 require 'securerandom'
 require 'time'
+require 'uri'
+require 'zlib'
 
 require 'posthog/email_error'
 require 'posthog/logging'
@@ -94,7 +96,7 @@ module PostHog
     BASE64_PATTERN = %r{\A(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\z}
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
-      Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError
+      Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
     ].freeze
     private_constant :SEND_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
@@ -103,7 +105,8 @@ module PostHog
                      :NETWORK_ERRORS
 
     # @api private
-    def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:)
+    def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:,
+                   skip_ssl_verification: false)
       check_options(timeout, max_retries, migrated_from)
       @secret_key = secret_key.is_a?(String) ? secret_key.strip : nil
       @app_host = resolve_app_host(host, app_host)
@@ -112,6 +115,7 @@ module PostHog
       @migrated_from = migrated_from
       @user_agent = user_agent
       @disabled = disabled
+      @skip_ssl_verification = skip_ssl_verification
       @closed = false
       @in_flight = 0
       @pid = Process.pid
@@ -247,9 +251,20 @@ module PostHog
 
     def resolve_app_host(host, app_host)
       explicit = app_host.is_a?(String) ? app_host.strip.chomp('/') : ''
-      return CLOUD_APP_HOSTS.fetch(explicit, explicit) unless explicit.empty?
+      return CLOUD_APP_HOSTS[host.to_s.strip.chomp('/')] if explicit.empty?
+      # A host without a scheme would send the secret key to the wrong place, such as localhost.
+      unless web_url?(explicit)
+        raise ArgumentError, 'app_host must be an http or https URL, such as https://us.posthog.com.'
+      end
 
-      CLOUD_APP_HOSTS[host.to_s.strip.chomp('/')]
+      CLOUD_APP_HOSTS.fetch(explicit, explicit)
+    end
+
+    def web_url?(value)
+      uri = URI(value)
+      %w[http https].include?(uri.scheme) && !uri.host.to_s.empty?
+    rescue URI::InvalidURIError
+      false
     end
 
     def check_recipient(to, distinct_id, idempotency_key, max_retries)
@@ -487,16 +502,27 @@ module PostHog
       headers.each { |name, value| request[name] = value }
       request.body = body if body
 
-      response = Net::HTTP.start(
-        uri.hostname, uri.port,
-        use_ssl: uri.scheme == 'https', open_timeout: @timeout, read_timeout: @timeout, write_timeout: @timeout,
-        # Net::HTTP returns a body cut off by a closed connection as if it were whole. Raise instead, so the
-        # send retries with the same idempotency key.
-        max_retries: 0, ignore_eof: false
-      ) { |http| http.request(request) }
+      head = nil
+      response = Net::HTTP.start(uri.hostname, uri.port, connection_options(uri)) do |http|
+        http.request(request) { |started| head = started }
+      end
       [response.code.to_i, parse_json(response.body), parse_retry_after(response['Retry-After'])]
     rescue *NETWORK_ERRORS
+      # A refusal whose body broke off still carries its status and Retry-After. An acceptance whose body broke off
+      # has no message ID, so it retries with the same idempotency key.
+      return [head.code.to_i, nil, parse_retry_after(head['Retry-After'])] if head && !head.is_a?(Net::HTTPSuccess)
+
       raise EmailError.new(code: 'network_error', message: 'The request to PostHog failed.')
+    end
+
+    def connection_options(uri)
+      options = {
+        use_ssl: uri.scheme == 'https', open_timeout: @timeout, read_timeout: @timeout, write_timeout: @timeout,
+        # Net::HTTP returns a body cut off by a closed connection as if it were whole. Raise instead.
+        max_retries: 0, ignore_eof: false
+      }
+      options[:verify_mode] = OpenSSL::SSL::VERIFY_NONE if @skip_ssl_verification
+      options
     end
 
     def parse_json(body)
