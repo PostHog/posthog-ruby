@@ -330,6 +330,34 @@ module PostHog
       end
     end
 
+    describe 'integration marker' do
+      before { stub_request(:post, send_url).to_return(refuse(503, 'delivery_unavailable'), accept) }
+
+      it 'names the integration that made the send on every attempt, and keeps the User-Agent' do
+        send_code(integration: 'action-mailer/3.14.0')
+
+        expect(a_request(:post, send_url).with(
+                 headers: { 'X-PostHog-Integration' => 'action-mailer/3.14.0',
+                            'User-Agent' => "posthog-ruby/#{PostHog::VERSION}" }
+               )).to have_been_made.twice
+      end
+
+      it 'sends no marker without the option' do
+        send_template
+
+        expect(a_request(:post, send_url).with { |request| request.headers.key?('X-Posthog-Integration') })
+          .not_to have_been_made
+      end
+
+      it 'refuses a marker outside name/version before any request' do
+        ['action-mailer', 'Action-Mailer/1.0', 'action mailer/1.0', 'action-mailer/1.0 beta', "#{'a' * 41}/1.0", 7]
+          .each do |integration|
+            expect { send_code(integration: integration) }.to raise_error(ArgumentError, /integration must be/)
+          end
+        expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+      end
+    end
+
     describe 'client setup' do
       it 'maps an EU ingestion host to the EU app host' do
         options[:host] = 'https://eu.i.posthog.com/'
