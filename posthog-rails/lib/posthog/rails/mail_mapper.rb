@@ -14,6 +14,7 @@ module PostHog
       MAPPED_HEADERS = %w[from to cc bcc reply-to subject].freeze
       IGNORED_HEADERS = %w[message-id date mime-version x-mailer return-path sender content-type
                            content-transfer-encoding].freeze
+      PART_HEADERS = %w[content-type content-transfer-encoding content-disposition content-id].freeze
       CONTAINERS = %w[multipart/mixed multipart/alternative multipart/related].freeze
       OPTION_HEADERS = {
         'x-posthog-distinct-id' => :distinct_id,
@@ -24,7 +25,7 @@ module PostHog
       TEMPLATE_HEADER = 'x-posthog-template-id'
       NORMAL_PRIORITY = { 'x-priority' => /\A3\b/, 'priority' => /\Anormal\z/i, 'importance' => /\Anormal\z/i }.freeze
       private_constant :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS, :TEMPLATE_HEADER,
-                       :NORMAL_PRIORITY, :CONTAINERS
+                       :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS
 
       # @param default_template_key [String, nil] The key for mail that sets none and has no mailer name.
       def initialize(default_template_key: nil)
@@ -121,7 +122,7 @@ module PostHog
       end
 
       def content(mail)
-        files, bodies = leaves(mail).partition(&:attachment?)
+        files, bodies = leaves(mail).partition { |part| attached?(part) }
         content = bodies.each_with_object({}) do |part, by_kind|
           kind = body_kind(part)
           refuse('unsupported_part', "PostHog sends one HTML and one text body, so it can't send #{part.mime_type}") if
@@ -131,12 +132,26 @@ module PostHog
         files.empty? ? content : content.merge(attachments: files.map { |file| attachment(file) })
       end
 
-      def leaves(part)
+      def leaves(part, root: true)
+        check_part_headers(part) unless root
         return [part] unless part.multipart?
-        return part.parts.flat_map { |child| leaves(child) } if CONTAINERS.include?(part.mime_type) &&
-                                                                !part.attachment?
+        return part.parts.flat_map { |child| leaves(child, root: false) } if CONTAINERS.include?(part.mime_type) &&
+                                                                             !attached?(part)
 
         refuse('unsupported_part', "PostHog can't send a #{part.mime_type} part as it was built")
+      end
+
+      def check_part_headers(part)
+        part.header.fields.each do |field|
+          next if PART_HEADERS.include?(field.name.downcase)
+
+          refuse('unsupported_header', "PostHog can't send the #{field.name} header of a #{part.mime_type} part")
+        end
+      end
+
+      # Mail's own attachment? looks for a filename, but a Content-Disposition of attachment needs none.
+      def attached?(part)
+        part.attachment? || part.content_disposition.to_s.downcase.start_with?('attachment')
       end
 
       def body_kind(part)
@@ -147,12 +162,17 @@ module PostHog
       end
 
       def attachment(part)
+        if part.filename.nil?
+          refuse('unsupported_part', "PostHog sends each attachment with a filename, and a #{part.mime_type} " \
+                                     'attachment has none')
+        end
         file = { filename: part.filename, content_type: part.mime_type, content: part.body.decoded.b }
         return file unless part.inline?
 
         refuse('inline_without_cid', "The inline attachment #{part.filename} has no Content-ID") unless
           part.has_content_id?
-        file.merge(content_id: part.cid)
+        # Mail's cid escapes the ID as a URL, so the HTML's cid: reference would no longer match it.
+        file.merge(content_id: part.content_id.to_s.delete_prefix('<').delete_suffix('>'))
       end
 
       def refuse(code, detail)

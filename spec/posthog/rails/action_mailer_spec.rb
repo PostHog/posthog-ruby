@@ -71,6 +71,16 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
     end
   end
 
+  def text_only_mail
+    Mail.new do
+      from 'Shop <shop@example.com>'
+      to 'ana@example.com'
+      subject 'Your order shipped'
+      content_type 'multipart/mixed'
+      text_part { body 'On its way.' }
+    end
+  end
+
   def deliver(mail)
     mail.delivery_method(described_class, settings)
     mail.deliver
@@ -242,11 +252,45 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(mail)).to eq('unsupported_part')
     end
 
+    it 'refuses a multipart attachment that has no filename' do
+      mail = text_only_mail
+      forwarded = Mail::Part.new(content_type: 'multipart/alternative', content_disposition: 'attachment')
+      forwarded.add_part(Mail::Part.new(content_type: 'text/html', body: '<p>Forwarded</p>'))
+      mail.add_part(forwarded)
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'refuses an attachment that has no filename, and does not send it as a body' do
+      mail = text_only_mail
+      mail.add_part(Mail::Part.new(content_type: 'text/html', content_disposition: 'attachment',
+                                   body: '<p>Notes</p>'))
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
     it 'refuses a content header PostHog does not carry, such as Content-Language' do
       mail = shipped_mail
       mail['Content-Language'] = 'de'
 
       expect(refusal_of(mail)).to eq('unsupported_header')
+    end
+
+    it 'refuses a header PostHog does not carry on a body part too' do
+      mail = shipped_mail
+      mail.html_part['Content-Language'] = 'de'
+
+      expect(refusal_of(mail)).to eq('unsupported_header')
+    end
+
+    it 'sends the content ID of an inline attachment as written' do
+      mail = shipped_mail
+      mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
+      mail.attachments['logo.png'].content_id = '<logo%1@example.com>'
+
+      deliver(mail)
+
+      expect(sent_body['attachments'].first['content_id']).to eq('logo%1@example.com')
     end
 
     it 'sends normal priority and refuses any other' do
