@@ -2,4 +2,29 @@
 "posthog-ruby": minor
 ---
 
-Send transactional email with `client.emails.send`, from an email template made in PostHog (`template_id:` with `template_data:`) or from content your code rendered (`template_key:`, `subject:` and `html:` or `text:`). Read what happened to a sent email with `client.emails.get(message_id)`. Sends need `secret_key`, a project secret API key with the `transactional_email:write` scope (status reads also accept `transactional_email:read`), and go to the PostHog Cloud app host of the client's `host`; set `app_host` for any other host. A send retries network errors, rate limits and an unavailable service with the same idempotency key, and raises `PostHog::EmailError` when PostHog doesn't queue the email. To send a React email, render it to HTML in your app first. New client options: `app_host`, `email_request_timeout_seconds`, `email_request_max_retries` and `migrated_from`.
+The new `client.emails` sends transactional email from your Ruby code and reads each email's delivery status.
+
+```ruby
+posthog = PostHog::Client.new(api_key: 'phc_...', secret_key: 'phs_...')
+
+result = posthog.emails.send(
+  to: 'user@example.com',
+  distinct_id: 'user_123',
+  template_key: 'password-reset',
+  subject: 'Reset your password',
+  html: rendered_html
+)
+
+# 'delivered', 'bounced', ...
+status = posthog.emails.get(result.id).status
+```
+
+You can also send a template made in PostHog by its `template_id:`.
+
+You need a project secret API key, the kind that starts with `phs_`. Create one under **Project secret API keys** in your project settings. Set its **Transactional email** scope to Write to send emails, or to Read for a key that only reads statuses. Pass it to the client as `secret_key`. Set `app_host` to your PostHog app URL when you self-host PostHog or send through a reverse proxy.
+
+PostHog records each email's delivery, opens and clicks on the person with that `distinct_id`. It groups every email with the same `template_key`, so you see their metrics and logs in one place. The SDK retries a request that hits a network error, a rate limit or an outage twice by default. Every send carries an idempotency key, so a retry never sends the email twice. Pass your own `idempotency_key`, such as `welcome:user_123`, and your job runner's retries are safe too.
+
+A send with your own content also takes `from:`, `reply_to:` and `capture_engagement: false`. Set `migrated_from` on the client to tell PostHog which email provider you moved from. A failed call raises a `PostHog::EmailError` with PostHog's `code` and the HTTP `status_code`.
+
+Docs: [Send transactional emails with Ruby](https://posthog.com/docs/workflows/transactional-emails/ruby) and the [transactional email overview](https://posthog.com/docs/workflows/transactional-emails).
