@@ -17,6 +17,8 @@ module PostHog
       PART_HEADERS = %w[content-type content-transfer-encoding content-disposition content-id].freeze
       CONTAINERS = %w[multipart/mixed multipart/alternative multipart/related].freeze
       ATTACHMENT_CHARSETS = %w[utf-8 us-ascii].freeze
+      BODY_PARAMETERS = %w[charset].freeze
+      ATTACHMENT_PARAMETERS = %w[charset name filename].freeze
       OPTION_HEADERS = {
         'x-posthog-distinct-id' => :distinct_id,
         'x-posthog-template-key' => :template_key,
@@ -26,7 +28,8 @@ module PostHog
       TEMPLATE_HEADER = 'x-posthog-template-id'
       NORMAL_PRIORITY = { 'x-priority' => /\A3\b/, 'priority' => /\Anormal\z/i, 'importance' => /\Anormal\z/i }.freeze
       private_constant :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS, :TEMPLATE_HEADER,
-                       :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS, :ATTACHMENT_CHARSETS
+                       :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS, :ATTACHMENT_CHARSETS,
+                       :BODY_PARAMETERS, :ATTACHMENT_PARAMETERS
 
       # @param default_template_key [String, nil] The key for mail that sets none and has no mailer name.
       def initialize(default_template_key: nil)
@@ -125,6 +128,7 @@ module PostHog
       def content(mail)
         files, bodies = leaves(mail).partition { |part| attached?(part) }
         content = bodies.each_with_object({}) do |part, by_kind|
+          check_parameters(part, BODY_PARAMETERS)
           kind = body_kind(part)
           refuse('unsupported_part', "PostHog sends one HTML and one text body, so it can't send #{part.mime_type}") if
             kind.nil? || by_kind.key?(kind)
@@ -155,6 +159,14 @@ module PostHog
         part.attachment? || part.content_disposition.to_s.downcase.start_with?('attachment')
       end
 
+      # PostHog sends a body or an attachment by its MIME type, so a parameter such as format=flowed would be lost.
+      def check_parameters(part, allowed)
+        dropped = part.content_type_parameters.to_h.keys.map { |name| name.to_s.downcase } - allowed
+        return if dropped.empty?
+
+        refuse('unsupported_part', "PostHog can't send the #{dropped.join(', ')} parameter of a #{part.mime_type} part")
+      end
+
       def body_kind(part)
         case part.mime_type
         when 'text/html' then :html
@@ -167,6 +179,7 @@ module PostHog
           refuse('unsupported_part', "PostHog sends each attachment with a filename, and a #{part.mime_type} " \
                                      'attachment has none')
         end
+        check_parameters(part, ATTACHMENT_PARAMETERS)
         # PostHog takes an attachment's MIME type alone, so it would lose any charset but the UTF-8 that Mail writes.
         unless part.charset.nil? || ATTACHMENT_CHARSETS.include?(part.charset.downcase)
           refuse('unsupported_part', "PostHog can't send the #{part.charset} charset of #{part.filename}")

@@ -296,6 +296,13 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
                                                 'content' => 'Y2Fmw6k=' }])
     end
 
+    it 'refuses a Content-Type parameter PostHog would drop, such as format=flowed' do
+      mail = shipped_mail
+      mail.text_part.content_type = 'text/plain; charset=UTF-8; format=flowed; delsp=yes'
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
     it 'sends the content ID of an inline attachment as written' do
       mail = shipped_mail
       mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
