@@ -102,6 +102,15 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(mail.message_id).to eq(message_id)
     end
 
+    it '01 keeps the quotes a From display name needs' do
+      mail = shipped_mail
+      mail.from = '"Doe, Jane" <jane@example.com>'
+
+      deliver(mail)
+
+      expect(sent_body['from']).to eq('"Doe, Jane" <jane@example.com>')
+    end
+
     it '02 and 03 drop recipient display names and send cc, bcc and reply-to as lists' do
       mail = shipped_mail
       mail.cc = 'Bo <bo@example.com>'
@@ -213,6 +222,31 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       mail.add_part(Mail::Part.new(content_type: 'text/calendar; method=REQUEST', body: 'BEGIN:VCALENDAR'))
 
       expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'refuses a signed message, whose signature a rebuilt message would break' do
+      mail = shipped_mail
+      mail.content_type = 'multipart/signed; protocol="application/pkcs7-signature"; micalg=sha-256'
+      mail.add_file(filename: 'smime.p7s', content: 'signature')
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'refuses an attachment that is itself a multipart message' do
+      mail = shipped_mail
+      forwarded = Mail::Part.new(content_type: 'multipart/alternative',
+                                 content_disposition: 'attachment; filename="fwd"')
+      forwarded.add_part(Mail::Part.new(content_type: 'text/html', body: '<p>Forwarded</p>'))
+      mail.add_part(forwarded)
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'refuses a content header PostHog does not carry, such as Content-Language' do
+      mail = shipped_mail
+      mail['Content-Language'] = 'de'
+
+      expect(refusal_of(mail)).to eq('unsupported_header')
     end
 
     it 'sends normal priority and refuses any other' do

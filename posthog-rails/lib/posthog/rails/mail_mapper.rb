@@ -12,7 +12,9 @@ module PostHog
       INTEGRATION_NAME = 'action-mailer'
       TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
       MAPPED_HEADERS = %w[from to cc bcc reply-to subject].freeze
-      IGNORED_HEADERS = %w[message-id date mime-version x-mailer return-path sender].freeze
+      IGNORED_HEADERS = %w[message-id date mime-version x-mailer return-path sender content-type
+                           content-transfer-encoding].freeze
+      CONTAINERS = %w[multipart/mixed multipart/alternative multipart/related].freeze
       OPTION_HEADERS = {
         'x-posthog-distinct-id' => :distinct_id,
         'x-posthog-template-key' => :template_key,
@@ -22,7 +24,7 @@ module PostHog
       TEMPLATE_HEADER = 'x-posthog-template-id'
       NORMAL_PRIORITY = { 'x-priority' => /\A3\b/, 'priority' => /\Anormal\z/i, 'importance' => /\Anormal\z/i }.freeze
       private_constant :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS, :TEMPLATE_HEADER,
-                       :NORMAL_PRIORITY
+                       :NORMAL_PRIORITY, :CONTAINERS
 
       # @param default_template_key [String, nil] The key for mail that sets none and has no mailer name.
       def initialize(default_template_key: nil)
@@ -56,7 +58,7 @@ module PostHog
         mail.header.fields.each_with_object({}) do |field, options|
           name = field.name.downcase
           value = field.value.to_s
-          next if MAPPED_HEADERS.include?(name) || IGNORED_HEADERS.include?(name) || name.start_with?('content-')
+          next if MAPPED_HEADERS.include?(name) || IGNORED_HEADERS.include?(name)
           next if NORMAL_PRIORITY.key?(name) && NORMAL_PRIORITY[name].match?(value.strip)
 
           options[OPTION_HEADERS.fetch(name) { refuse_header(name, field.name) }] = option_value(name, value)
@@ -91,7 +93,7 @@ module PostHog
         address = addresses.first
         return if address.nil?
 
-        address.display_name ? "#{address.display_name} <#{address.address}>" : address.address
+        address.format
       end
 
       def check_envelope(mail, recipient)
@@ -119,8 +121,7 @@ module PostHog
       end
 
       def content(mail)
-        leaves = mail.multipart? ? mail.all_parts.reject(&:multipart?) : [mail]
-        files, bodies = leaves.partition(&:attachment?)
+        files, bodies = leaves(mail).partition(&:attachment?)
         content = bodies.each_with_object({}) do |part, by_kind|
           kind = body_kind(part)
           refuse('unsupported_part', "PostHog sends one HTML and one text body, so it can't send #{part.mime_type}") if
@@ -128,6 +129,14 @@ module PostHog
           by_kind[kind] = part.decoded
         end
         files.empty? ? content : content.merge(attachments: files.map { |file| attachment(file) })
+      end
+
+      def leaves(part)
+        return [part] unless part.multipart?
+        return part.parts.flat_map { |child| leaves(child) } if CONTAINERS.include?(part.mime_type) &&
+                                                                !part.attachment?
+
+        refuse('unsupported_part', "PostHog can't send a #{part.mime_type} part as it was built")
       end
 
       def body_kind(part)
