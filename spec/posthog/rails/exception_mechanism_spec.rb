@@ -279,6 +279,15 @@ RSpec.describe 'automatic exception capture mechanisms' do
       )
     end
 
+    it 'skips job exceptions listed in excluded_exceptions' do
+      PostHog::Rails.config.auto_instrument_active_job = true
+      PostHog::Rails.config.excluded_exceptions = ['StandardError']
+
+      expect { job_class.new.perform_now }.to raise_error(StandardError, 'job failed')
+
+      expect(PostHog).not_to have_received(:capture_exception)
+    end
+
     it 'prevents Rails error subscriber from capturing the same job exception again' do
       PostHog::Rails.config.auto_instrument_active_job = true
       error = nil
