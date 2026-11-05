@@ -16,6 +16,7 @@ module PostHog
                            content-transfer-encoding].freeze
       PART_HEADERS = %w[content-type content-transfer-encoding content-disposition content-id].freeze
       CONTAINERS = %w[multipart/mixed multipart/alternative multipart/related].freeze
+      ATTACHMENT_CHARSETS = %w[utf-8 us-ascii].freeze
       OPTION_HEADERS = {
         'x-posthog-distinct-id' => :distinct_id,
         'x-posthog-template-key' => :template_key,
@@ -25,7 +26,7 @@ module PostHog
       TEMPLATE_HEADER = 'x-posthog-template-id'
       NORMAL_PRIORITY = { 'x-priority' => /\A3\b/, 'priority' => /\Anormal\z/i, 'importance' => /\Anormal\z/i }.freeze
       private_constant :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS, :TEMPLATE_HEADER,
-                       :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS
+                       :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS, :ATTACHMENT_CHARSETS
 
       # @param default_template_key [String, nil] The key for mail that sets none and has no mailer name.
       def initialize(default_template_key: nil)
@@ -165,6 +166,10 @@ module PostHog
         if part.filename.nil?
           refuse('unsupported_part', "PostHog sends each attachment with a filename, and a #{part.mime_type} " \
                                      'attachment has none')
+        end
+        # PostHog takes an attachment's MIME type alone, so it would lose any charset but the UTF-8 that Mail writes.
+        unless part.charset.nil? || ATTACHMENT_CHARSETS.include?(part.charset.downcase)
+          refuse('unsupported_part', "PostHog can't send the #{part.charset} charset of #{part.filename}")
         end
         file = { filename: part.filename, content_type: part.mime_type, content: part.body.decoded.b }
         return file unless part.inline?

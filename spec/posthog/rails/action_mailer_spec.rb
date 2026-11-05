@@ -283,6 +283,19 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(mail)).to eq('unsupported_header')
     end
 
+    it 'sends a UTF-8 text attachment, and refuses one in a charset its MIME type would drop' do
+      utf8 = shipped_mail
+      utf8.attachments['notes.txt'] = 'café'
+      latin1 = shipped_mail
+      latin1.attachments['latin.txt'] = { mime_type: 'text/plain; charset=ISO-8859-1', content: "caf\xE9".b }
+
+      expect(refusal_of(latin1)).to eq('unsupported_part')
+      deliver(utf8)
+
+      expect(sent_body['attachments']).to eq([{ 'filename' => 'notes.txt', 'content_type' => 'text/plain',
+                                                'content' => 'Y2Fmw6k=' }])
+    end
+
     it 'sends the content ID of an inline attachment as written' do
       mail = shipped_mail
       mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
