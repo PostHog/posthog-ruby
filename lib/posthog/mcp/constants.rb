@@ -31,7 +31,8 @@ module PostHog
 
     # Description of the injected `conversation_id` argument.
     DEFAULT_CONVERSATION_ID_DESCRIPTION =
-      'The conversation_id this server returned earlier in this conversation, unchanged. ' \
+      'The conversation_id this server returned earlier in this conversation, unchanged, ' \
+      'including after later user messages. ' \
       "Omit it if you have none. Recorded for the server developer's analytics."
 
     # PostHog-owned event names. All `$`-prefixed per the PostHog convention.
