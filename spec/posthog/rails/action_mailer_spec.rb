@@ -303,6 +303,13 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(mail)).to eq('unsupported_part')
     end
 
+    it 'refuses an attachment with a Content-Type parameter PostHog would drop' do
+      mail = shipped_mail
+      mail.attachments['notes.txt'] = { mime_type: 'text/plain; charset=UTF-8; format=flowed', content: 'Notes' }
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
     it 'sends the content ID of an inline attachment as written' do
       mail = shipped_mail
       mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
