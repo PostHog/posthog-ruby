@@ -1,0 +1,5 @@
+---
+"posthog-rails": minor
+---
+
+Send Action Mailer mail through PostHog: set `config.action_mailer.delivery_method = :posthog`, and `deliver_now` and `deliver_later` send each mail as one PostHog email through the client `PostHog.init` made, which needs `secret_key`. Each mail is named `<mailer>-<action>`, such as `user_mailer-welcome`, unless it sets `X-PostHog-Template-Key`; `config.action_mailer.posthog_settings = { default_template_key: '...' }` names mail sent without a mailer. The headers `X-PostHog-Distinct-Id`, `X-PostHog-Idempotency-Key` and `X-PostHog-Capture-Engagement` set those send options and are never sent. A queued mail should set `X-PostHog-Idempotency-Key` from a stable ID, so a job retry can't send it twice. A mail PostHog can't carry, such as one with two To addresses or a custom header, raises `PostHog::Rails::UnsupportedMailError` before any request; a send PostHog refuses raises `PostHog::Rails::DeliveryError`, whose `retryable?` says whether to retry it. Both honour `raise_delivery_errors`. After a send, the mail's `message_id` is PostHog's message ID.

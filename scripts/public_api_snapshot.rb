@@ -77,6 +77,8 @@ module PublicApiSnapshot
     add_load_path(RAILS_LIB_DIR)
     require 'rails'
     require 'posthog-rails'
+    # Loaded by Action Mailer's load hook in an app; loaded here so its public surface is tracked too.
+    require 'posthog/rails/delivery_method'
   end
 
   def add_load_path(path)

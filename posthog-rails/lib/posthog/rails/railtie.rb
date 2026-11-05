@@ -11,6 +11,17 @@ module PostHog
         PostHog::Rails.install_posthog_facade!
       end
 
+      # Register the :posthog delivery method before Action Mailer applies config.action_mailer, so apps can set
+      # posthog_settings there. Apps without Action Mailer load none of it.
+      initializer 'posthog.action_mailer', before: 'action_mailer.set_configs' do
+        ActiveSupport.on_load(:action_mailer) do
+          require 'posthog/rails/delivery_method'
+          prepend PostHog::Rails::MailerExtensions
+
+          add_delivery_method :posthog, PostHog::Rails::DeliveryMethod
+        end
+      end
+
       # Insert middleware for request context and exception capturing
       initializer 'posthog.insert_middlewares' do |app|
         # Wrap the Rails exception middleware so request context is active for

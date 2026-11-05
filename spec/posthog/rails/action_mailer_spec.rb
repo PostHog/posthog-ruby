@@ -1,0 +1,359 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'open3'
+require 'logger'
+require 'rails'
+require 'action_mailer'
+require 'active_job'
+$LOAD_PATH.unshift File.expand_path('../../../posthog-rails/lib', __dir__)
+require 'posthog/rails'
+
+initializer = PostHog::Rails::Railtie.initializers.find { |i| i.name == 'posthog.action_mailer' }
+PostHog::Rails::Railtie.instance.instance_exec(nil, &initializer.block)
+
+class ShippingMailer < ActionMailer::Base
+  self.delivery_method = :posthog
+  self.posthog_settings = { default_template_key: 'transactional' }
+
+  def shipped(headers = {})
+    attachments['invoice.pdf'] = "%PDF-1.4\n"
+    addresses = { from: 'Shop <shop@example.com>', to: 'Ana <ana@example.com>' }
+    mail(**addresses, subject: 'Your order shipped', **headers) do |format|
+      format.text { render plain: 'On its way.' }
+      format.html { render html: '<p>On its way.</p>'.html_safe }
+    end
+  end
+end
+
+module Admin
+  class UserMailer < ActionMailer::Base
+    self.delivery_method = :posthog
+
+    def welcome_email
+      mail(from: 'shop@example.com', to: 'ana@example.com', subject: 'Welcome') do |format|
+        format.text { render plain: 'Hi' }
+      end
+    end
+  end
+end
+
+RSpec.describe PostHog::Rails::DeliveryMethod do
+  let(:send_url) { 'https://us.posthog.com/api/projects/@current/messaging/send/email/' }
+  let(:message_id) { '01a18356-c56c-0001-e494-7666bc915188' }
+  let(:settings) { {} }
+  let(:shipped_body) do
+    { 'to' => 'ana@example.com', 'from' => 'Shop <shop@example.com>', 'subject' => 'Your order shipped',
+      'html' => '<p>On its way.</p>', 'text' => 'On its way.', 'template_key' => 'action-mailer',
+      'capture_engagement' => true }
+  end
+
+  before do
+    PostHog::Logging.logger = Logger.new(File::NULL)
+    stub_request(:get, %r{/flags/definitions}).to_return(status: 200, body: '{"flags":[]}')
+    stub_request(:post, send_url).to_return(status: 202, body: JSON.generate(message_id: message_id))
+    PostHog.init(api_key: API_KEY, secret_key: 'phs_test', test_mode: true, email_request_max_retries: 0)
+  end
+
+  after do
+    PostHog.client&.shutdown
+    PostHog.client = nil
+  end
+
+  # The message of conformance case 01: one recipient, a From display name, and HTML and text bodies.
+  def shipped_mail
+    Mail.new do
+      from 'Shop <shop@example.com>'
+      to 'Ana <ana@example.com>'
+      subject 'Your order shipped'
+      text_part { body 'On its way.' }
+      html_part { body '<p>On its way.</p>' }
+    end
+  end
+
+  def deliver(mail)
+    mail.delivery_method(described_class, settings)
+    mail.deliver
+  end
+
+  def sent_request
+    requests = []
+    expect(a_request(:post, send_url).with { |request| requests << request }).to have_been_made.once
+    requests.first
+  end
+
+  def sent_body
+    JSON.parse(sent_request.body)
+  end
+
+  def refusal_of(mail)
+    refusal = nil
+    expect { deliver(mail) }.to raise_error(PostHog::Rails::UnsupportedMailError) { |error| refusal = error.refusal }
+    expect(a_request(:post, send_url)).not_to have_been_made
+    refusal
+  end
+
+  describe 'conformance cases' do
+    it '01 sends a rendered message with the integration marker, and takes its message ID' do
+      mail = deliver(shipped_mail)
+
+      expect(sent_body).to eq(shipped_body)
+      expect(sent_request.headers['X-Posthog-Integration']).to eq("action-mailer/#{PostHog::Rails::VERSION}")
+      expect(mail.message_id).to eq(message_id)
+    end
+
+    it '02 and 03 drop recipient display names and send cc, bcc and reply-to as lists' do
+      mail = shipped_mail
+      mail.cc = 'Bo <bo@example.com>'
+      mail.bcc = 'audit@example.com'
+      mail.reply_to = ['Help <a@example.com>', 'b@example.com']
+
+      deliver(mail)
+
+      expect(sent_body).to eq(shipped_body.merge('cc' => ['bo@example.com'], 'bcc' => ['audit@example.com'],
+                                                 'reply_to' => ['a@example.com', 'b@example.com']))
+    end
+
+    it '04 sends attachments, and an inline one with its content ID' do
+      mail = shipped_mail
+      mail.html_part.body = '<img src="cid:logo">'
+      mail.attachments['invoice.pdf'] = "%PDF-1.4\n"
+      mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
+      mail.attachments['logo.png'].content_id = '<logo>'
+
+      deliver(mail)
+
+      expect(sent_body).to eq(shipped_body.merge(
+                                'html' => '<img src="cid:logo">',
+                                'attachments' => [
+                                  { 'filename' => 'invoice.pdf', 'content_type' => 'application/pdf',
+                                    'content' => 'JVBERi0xLjQK' },
+                                  { 'filename' => 'logo.png', 'content_type' => 'image/png',
+                                    'content' => 'iVBORw0KGgo=', 'content_id' => 'logo' }
+                                ]
+                              ))
+    end
+
+    it '05 reads the PostHog options from the reserved headers and sends none of them' do
+      mail = shipped_mail
+      mail['X-PostHog-Distinct-Id'] = 'user_42'
+      mail['X-PostHog-Template-Key'] = 'order-shipped'
+      mail['X-PostHog-Idempotency-Key'] = 'order-981-shipped'
+      mail['X-PostHog-Capture-Engagement'] = 'false'
+
+      deliver(mail)
+
+      expect(sent_body).to eq(shipped_body.merge('template_key' => 'order-shipped', 'distinct_id' => 'user_42',
+                                                 'capture_engagement' => false))
+      expect(sent_request.headers['Idempotency-Key']).to eq('order-981-shipped')
+      expect(sent_request.headers.keys.grep(/distinct|template|engagement/i)).to be_empty
+    end
+
+    it '06 names mail from its mailer and action, made safe for a template key' do
+      Admin::UserMailer.welcome_email.deliver_now
+
+      expect(sent_body['template_key']).to eq('admin-user_mailer-welcome_email')
+    end
+
+    it '07 falls back to the default template key from posthog_settings' do
+      settings[:default_template_key] = 'transactional'
+
+      deliver(shipped_mail)
+
+      expect(sent_body['template_key']).to eq('transactional')
+    end
+
+    it '08 refuses an explicit template key PostHog does not accept' do
+      mail = shipped_mail
+      mail['X-PostHog-Template-Key'] = 'order shipped!'
+
+      expect(refusal_of(mail)).to eq('invalid_template_key')
+    end
+
+    it '09 refuses more than one To address' do
+      mail = shipped_mail
+      mail.to = ['ana@example.com', 'bo@example.com']
+
+      expect(refusal_of(mail)).to eq('multiple_to')
+    end
+
+    it '10 refuses an inline attachment without a content ID' do
+      mail = shipped_mail
+      mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
+
+      expect(refusal_of(mail)).to eq('inline_without_cid')
+    end
+
+    it '11 ignores the headers Mail writes itself and refuses any other' do
+      mail = shipped_mail
+      mail.message_id = '<x@example.com>'
+      mail['X-Campaign'] = 'spring'
+
+      expect(refusal_of(mail)).to eq('unsupported_header')
+    end
+
+    it '13 refuses an envelope sender other than From' do
+      mail = shipped_mail
+      mail.smtp_envelope_from = 'bounce@example.com'
+
+      expect(refusal_of(mail)).to eq('envelope_mismatch')
+    end
+
+    it '16 refuses a template made in PostHog, since Action Mailer sends rendered mail' do
+      mail = shipped_mail
+      mail['X-PostHog-Template-Id'] = '0190f0c2-7d1e-7a3b-9c2e-5f1a2b3c4d5e'
+
+      expect(refusal_of(mail)).to eq('template_unsupported')
+    end
+  end
+
+  describe 'other refusals' do
+    it 'refuses a body part PostHog cannot send, such as a calendar invite' do
+      mail = shipped_mail
+      mail.add_part(Mail::Part.new(content_type: 'text/calendar; method=REQUEST', body: 'BEGIN:VCALENDAR'))
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'sends normal priority and refuses any other' do
+      normal = shipped_mail
+      normal['X-Priority'] = '3 (Normal)'
+      urgent = shipped_mail
+      urgent['Importance'] = 'high'
+
+      expect(refusal_of(urgent)).to eq('unsupported_priority')
+      deliver(normal)
+
+      expect(a_request(:post, send_url)).to have_been_made.once
+    end
+
+    it 'sends nothing and raises nothing when the mail turns delivery errors off' do
+      mail = shipped_mail
+      mail.to = ['ana@example.com', 'bo@example.com']
+      mail.raise_delivery_errors = false
+
+      expect { deliver(mail) }.not_to raise_error
+      expect(a_request(:post, send_url)).not_to have_been_made
+    end
+  end
+
+  describe 'errors' do
+    [
+      [400, 'invalid_input', {}, false, nil],
+      [401, 'authentication_failed', {}, false, nil],
+      [404, 'not_found', {}, false, nil],
+      [409, 'idempotency_key_in_flight', {}, true, nil],
+      [422, 'recipient_suppressed', {}, false, nil],
+      [429, 'quota_limited', {}, false, nil],
+      [429, 'throttled', { 'Retry-After' => '5' }, true, 5.0],
+      [503, 'delivery_unavailable', {}, true, nil],
+      [500, 'server_error', {}, false, nil]
+    ].each do |status, code, headers, retryable, retry_after|
+      it "raises a #{retryable ? 'retryable' : 'permanent'} DeliveryError for #{status} #{code}" do
+        stub_request(:post, send_url).to_return(
+          status: status, headers: headers, body: JSON.generate(code: code, detail: 'No.', attr: 'to')
+        )
+
+        expect { deliver(shipped_mail) }.to raise_error(PostHog::Rails::DeliveryError) { |error|
+          expect([error.status, error.code, error.detail, error.attr]).to eq([status, code, 'No.', 'to'])
+          expect([error.retryable?, error.retry_after]).to eq([retryable, retry_after])
+          expect(error.cause).to be_a(PostHog::EmailError)
+        }
+      end
+    end
+
+    it 'raises a retryable DeliveryError when PostHog could not be reached' do
+      stub_request(:post, send_url).to_raise(Errno::ECONNREFUSED)
+
+      expect { deliver(shipped_mail) }.to raise_error(PostHog::Rails::DeliveryError) { |error|
+        expect([error.status, error.code, error.retryable?]).to eq([nil, 'network_error', true])
+      }
+    end
+  end
+
+  describe 'Action Mailer' do
+    it 'sends a mailer action with deliver_now, its attachment and the headers Rails adds' do
+      ShippingMailer.shipped.deliver_now
+
+      expect(sent_body).to eq(shipped_body.merge(
+                                'template_key' => 'shipping_mailer-shipped',
+                                'attachments' => [{ 'filename' => 'invoice.pdf', 'content_type' => 'application/pdf',
+                                                    'content' => 'JVBERi0xLjQK' }]
+                              ))
+    end
+
+    it 'sends a deliver_later job with the idempotency key the mail sets' do
+      adapter = ActiveJob::Base.queue_adapter
+      ActiveJob::Base.logger = Logger.new(File::NULL)
+      ActiveJob::Base.queue_adapter = :inline
+
+      ShippingMailer.shipped('X-PostHog-Idempotency-Key' => 'order-981-shipped').deliver_later
+
+      expect(sent_request.headers['Idempotency-Key']).to eq('order-981-shipped')
+    ensure
+      ActiveJob::Base.queue_adapter = adapter
+    end
+  end
+
+  describe 'a Rails app' do
+    def run_app(script)
+      stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib', '-e', script)
+      expect(status).to be_success, "#{stdout}\n#{stderr}"
+      stdout
+    end
+
+    it 'sends UserMailer#welcome through delivery_method :posthog with deliver_now' do
+      output = run_app(<<~RUBY)
+        require 'rails'
+        require 'action_mailer/railtie'
+        require 'posthog'
+        require 'posthog/rails'
+        require 'webmock'
+        include WebMock::API
+        WebMock.enable!
+
+        class App < Rails::Application
+          config.eager_load = false
+          config.logger = Logger.new(File::NULL)
+          config.action_mailer.delivery_method = :posthog
+          config.action_mailer.posthog_settings = { default_template_key: 'transactional' }
+        end
+        App.initialize!
+
+        class UserMailer < ActionMailer::Base
+          def welcome
+            mail(from: 'shop@example.com', to: 'ana@example.com', subject: 'Welcome') { |f| f.text { render plain: 'Hi' } }
+          end
+        end
+
+        stub_request(:get, %r{/flags/definitions}).to_return(status: 200, body: '{"flags":[]}')
+        stub_request(:post, '#{send_url}').to_return(status: 202, body: '{"message_id":"#{message_id}"}')
+        PostHog.init(api_key: 'phc_test', secret_key: 'phs_test', test_mode: true)
+        UserMailer.welcome.deliver_now
+        WebMock::RequestRegistry.instance.requested_signatures.hash.each_key do |request|
+          puts request.body if request.method == :post
+        end
+      RUBY
+
+      expect(JSON.parse(output)).to include('to' => 'ana@example.com', 'template_key' => 'user_mailer-welcome',
+                                            'text' => 'Hi')
+    end
+
+    it 'boots without Action Mailer and loads none of the delivery method' do
+      output = run_app(<<~RUBY)
+        require 'rails'
+        require 'posthog'
+        require 'posthog/rails'
+
+        class App < Rails::Application
+          config.eager_load = false
+          config.logger = Logger.new(File::NULL)
+        end
+        App.initialize!
+        p [defined?(ActionMailer), defined?(PostHog::Rails::DeliveryMethod)]
+      RUBY
+
+      expect(output.strip).to eq('[nil, nil]')
+    end
+  end
+end

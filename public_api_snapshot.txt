@@ -397,6 +397,17 @@ instance_method PostHog::Rails::Configuration#use_tracing_headers=(arg0)
 instance_method PostHog::Rails::Configuration#user_id_method()
 instance_method PostHog::Rails::Configuration#user_id_method=(arg0)
 constant PostHog::Rails::Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE: Integer
+class PostHog::Rails::DeliveryError < StandardError
+instance_method PostHog::Rails::DeliveryError#attr()
+instance_method PostHog::Rails::DeliveryError#code()
+instance_method PostHog::Rails::DeliveryError#detail()
+instance_method PostHog::Rails::DeliveryError#retry_after()
+instance_method PostHog::Rails::DeliveryError#retryable?()
+instance_method PostHog::Rails::DeliveryError#status()
+class PostHog::Rails::DeliveryMethod
+instance_method PostHog::Rails::DeliveryMethod#deliver!(mail)
+instance_method PostHog::Rails::DeliveryMethod#settings()
+instance_method PostHog::Rails::DeliveryMethod#settings=(arg0)
 class PostHog::Rails::InitConfig
 instance_method PostHog::Rails::InitConfig#api_key=(value)
 instance_method PostHog::Rails::InitConfig#before_send=(value)
@@ -414,4 +425,6 @@ instance_method PostHog::Rails::InitConfig#test_mode=(value)
 instance_method PostHog::Rails::InitConfig#to_client_options()
 module PostHog::Rails::Logs
 class PostHog::Rails::Railtie < Rails::Railtie
+class PostHog::Rails::UnsupportedMailError < StandardError
+instance_method PostHog::Rails::UnsupportedMailError#refusal()
 constant PostHog::Rails::VERSION: String
