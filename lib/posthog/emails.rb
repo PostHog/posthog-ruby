@@ -84,6 +84,7 @@ module PostHog
     IDEMPOTENCY_KEY_PATTERN = /\A[\x21-\x7e]{1,255}\z/
     TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
     HEADER_TOKEN_PATTERN = /\A[\x21-\x7e]+\z/
+    INTEGRATION_PATTERN = %r{\A[a-z0-9-]{1,40}/[0-9A-Za-z.+-]{1,40}\z}
     SEND_KEY_NEEDED = 'Sending email needs secret_key, a project secret API key with the hog_flow:write scope.'
     READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the hog_flow:read ' \
                       'or hog_flow:write scope.'
@@ -100,9 +101,9 @@ module PostHog
     ].freeze
     private_constant :SEND_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
-                     :HEADER_TOKEN_PATTERN, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY,
-                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :ATTACHMENT_FIELDS, :BASE64_PATTERN,
-                     :NETWORK_ERRORS
+                     :HEADER_TOKEN_PATTERN, :INTEGRATION_PATTERN, :SEND_KEY_NEEDED, :READ_KEY_NEEDED,
+                     :TEMPLATE_FORM_WHY, :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :ATTACHMENT_FIELDS,
+                     :BASE64_PATTERN, :NETWORK_ERRORS
 
     # @api private
     def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:,
@@ -162,6 +163,9 @@ module PostHog
     #   retries the send.
     # @param max_retries [Integer] Overrides the client's `email_request_max_retries` for this send. +0+ turns
     #   retries off.
+    # @param integration [String] For a library that sends on the app's behalf, such as a mailer adapter: its name
+    #   and version, such as `action-mailer/3.14.0`, sent as the `X-PostHog-Integration` header. The name is lowercase
+    #   letters, digits and hyphens; the version is letters, digits, dots, plus signs and hyphens; each at most 40.
     # @return [SendResult] The queued email.
     # @raise [EmailError] PostHog did not queue the email, or the client could not tell whether it did.
     #   {EmailError#code} is `invalid_attachment`, before any request, for a file the client can't send.
@@ -169,17 +173,19 @@ module PostHog
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
       reply_to: nil, cc: nil, bcc: nil, attachments: nil, capture_engagement: nil, distinct_id: nil,
-      idempotency_key: nil, max_retries: nil
+      idempotency_key: nil, max_retries: nil, integration: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
         cc: cc, bcc: bcc, attachments: attachments, capture_engagement: capture_engagement
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
+      check_integration(integration)
       payload = content(template_id, template_key, fields).merge(to: to)
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
+      headers['X-PostHog-Integration'] = integration if integration
 
       result = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
         uri = URI(@app_host + SEND_PATH)
@@ -278,6 +284,12 @@ module PostHog
       return if max_retries.nil? || retry_count?(max_retries)
 
       raise ArgumentError, 'max_retries must be a nonnegative integer.'
+    end
+
+    def check_integration(integration)
+      return if integration.nil? || (integration.is_a?(String) && INTEGRATION_PATTERN.match?(integration))
+
+      raise ArgumentError, "integration must be a name and version, such as 'action-mailer/3.14.0'."
     end
 
     def nonempty_string?(value)
