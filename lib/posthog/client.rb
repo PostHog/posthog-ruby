@@ -256,7 +256,8 @@ module PostHog
     end
 
     # Sends transactional email from email templates made in PostHog or from content your code rendered, and reads
-    # the status of each email sent. Needs +:secret_key+, a project secret API key with the `hog_flow:write` scope.
+    # the status of each email sent. Needs +:secret_key+, a project secret API key with the
+    # `transactional_email:write` scope.
     #
     # @return [PostHog::Emails]
     attr_reader :emails
