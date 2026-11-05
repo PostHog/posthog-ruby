@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'time'
+
 require 'posthog/flag_evaluation_errors'
 
 module PostHog
@@ -141,6 +143,22 @@ module PostHog
       else
         hash[string_key]
       end
+    end
+
+    # public: Seconds to wait from a Retry-After header, given as seconds or as an HTTP date, or nil when the
+    #         header is absent, malformed or in the past
+    #
+    def parse_retry_after(value)
+      return nil if value.nil? || value.empty?
+
+      seconds = Float(value, exception: false)
+      return seconds if seconds&.finite? && seconds >= 0
+
+      parsed_time = Time.httpdate(value)
+      delay = parsed_time - Time.now
+      delay.positive? ? delay : nil
+    rescue ArgumentError
+      nil
     end
 
     # public: Current monotonic clock time in seconds, for measuring durations

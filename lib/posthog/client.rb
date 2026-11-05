@@ -15,6 +15,7 @@ require 'posthog/feature_flags'
 require 'posthog/feature_flag_evaluations'
 require 'posthog/send_feature_flags_options'
 require 'posthog/exception_capture'
+require 'posthog/emails'
 require 'posthog/internal/context'
 
 module PostHog
@@ -127,6 +128,14 @@ module PostHog
     # @option opts [Boolean] :compress_request Set to +false+ to disable gzip compression for batch uploads.
     # @option opts [Object] :flag_definition_cache_provider An object implementing the {FlagDefinitionCacheProvider}
     #   interface for distributed flag definition caching.
+    # @option opts [String, nil] :app_host Your PostHog app host, such as `https://posthog.example.com`, for {#emails}.
+    #   Needed only when +:host+ is not PostHog Cloud, such as a reverse proxy, which must not receive the secret key.
+    # @option opts [Numeric] :email_request_timeout_seconds How long each {#emails} request may take, in seconds.
+    #   Defaults to 15.
+    # @option opts [Integer] :email_request_max_retries How many times {#emails} retries a request after a network
+    #   error, a rate limit or an unavailable service. Defaults to 2. Set to 0 when a job runner already retries.
+    # @option opts [String, nil] :migrated_from The email provider you moved from, such as `resend`. {#emails} sends
+    #   it with every request.
     # @option opts [Boolean] :is_server +true+ to stamp captured events with `$is_server => true` so PostHog
     #   attributes them as server-side. Defaults to +true+. Set to +false+ when running posthog-ruby as a
     #   client/CLI so the device OS is attributed normally and `$is_server` is omitted.
@@ -154,6 +163,19 @@ module PostHog
       @lib = opts[:_lib] || 'posthog-ruby'
       @lib_version = (opts[:_lib_version] || PostHog::VERSION).to_s
       @headers = Defaults::Request::HEADERS.merge('User-Agent' => "#{@lib}/#{@lib_version}")
+      # Built before the worker, the instance count and the flags poller start, so a bad email option raises
+      # before anything runs or sends the secret key.
+      @emails = Emails.new(
+        secret_key: secret_key,
+        host: opts[:host],
+        app_host: opts[:app_host],
+        timeout: opts[:email_request_timeout_seconds] || Defaults::Emails::REQUEST_TIMEOUT_SECONDS,
+        max_retries: opts[:email_request_max_retries] || Defaults::Emails::REQUEST_MAX_RETRIES,
+        migrated_from: opts[:migrated_from],
+        user_agent: @headers['User-Agent'],
+        disabled: @disabled,
+        skip_ssl_verification: opts[:skip_ssl_verification] == true
+      )
       @worker_mutex = Mutex.new
       @shutdown_mutex = Mutex.new
       @shutdown_condition = ConditionVariable.new
@@ -232,6 +254,13 @@ module PostHog
       @release_id = normalize_string_option(ENV.fetch(RELEASE_ID_ENV_VAR, nil), blank_as_nil: true)
       @deprecation_emitted_for = Concurrent::Set.new
     end
+
+    # Sends transactional email from email templates made in PostHog or from content your code rendered, and reads
+    # the status of each email sent. Needs +:secret_key+, a project secret API key with the
+    # `transactional_email:write` scope.
+    #
+    # @return [PostHog::Emails]
+    attr_reader :emails
 
     # When sync_mode is enabled, blocks until in-flight requests are complete
     # and returns true. Timeout parameter has no effect.
@@ -979,7 +1008,8 @@ module PostHog
         @distinct_id_has_sent_flag_calls_mutex.synchronize do
           @distinct_id_has_sent_flag_calls.clear
         end
-        flushed
+        emails_settled = @emails.close(timeout: deadline && [deadline - monotonic_time, 0].max)
+        flushed &&= emails_settled
       ensure
         @shutdown_mutex.synchronize do
           @shutdown_result = flushed

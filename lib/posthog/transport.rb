@@ -151,19 +151,6 @@ module PostHog
       @backoff_policy.next_interval.to_f / 1000
     end
 
-    def parse_retry_after(value)
-      return nil if value.nil? || value.empty?
-
-      seconds = Float(value, exception: false)
-      return seconds if seconds && seconds >= 0
-
-      parsed_time = Time.httpdate(value)
-      delay = parsed_time - Time.now
-      delay.positive? ? delay : nil
-    rescue ArgumentError
-      nil
-    end
-
     # Sends a request for the batch, returns [status_code, body]
     def send_request(api_key, batch)
       @last_retry_after = nil
