@@ -700,7 +700,7 @@ module PostHog
         )
       end
 
-      person_properties, group_properties = add_local_person_and_group_properties(
+      groups, person_properties, group_properties = add_local_person_and_group_properties(
         groups, person_properties, group_properties
       )
 
@@ -835,8 +835,9 @@ module PostHog
     )
       return {} if @disabled
 
-      person_properties, group_properties = add_local_person_and_group_properties(groups, person_properties,
-                                                                                  group_properties)
+      groups, person_properties, group_properties = add_local_person_and_group_properties(
+        groups, person_properties, group_properties
+      )
       @feature_flags_poller.get_all_flags(distinct_id, groups, person_properties, group_properties,
                                           only_evaluate_locally)
     end
@@ -875,8 +876,9 @@ module PostHog
       return nil if @disabled
 
       key = key.to_s
-      person_properties, group_properties = add_local_person_and_group_properties(groups, person_properties,
-                                                                                  group_properties)
+      groups, person_properties, group_properties = add_local_person_and_group_properties(
+        groups, person_properties, group_properties
+      )
       @feature_flags_poller.get_feature_flag_payload(key, distinct_id, match_value, groups, person_properties,
                                                      group_properties, only_evaluate_locally)
     end
@@ -902,7 +904,7 @@ module PostHog
     )
       return { featureFlags: {}, featureFlagPayloads: {} } if @disabled
 
-      person_properties, group_properties = add_local_person_and_group_properties(
+      groups, person_properties, group_properties = add_local_person_and_group_properties(
         groups, person_properties, group_properties
       )
       response = @feature_flags_poller.get_all_flags_and_payloads(
@@ -1154,7 +1156,7 @@ module PostHog
       return nil if @disabled
 
       key = key.to_s
-      person_properties, group_properties = add_local_person_and_group_properties(
+      groups, person_properties, group_properties = add_local_person_and_group_properties(
         groups, person_properties, group_properties
       )
       feature_flag_response, flag_was_locally_evaluated, request_id, evaluated_at, feature_flag_error, payload,
@@ -1320,17 +1322,9 @@ module PostHog
     end
 
     def add_local_person_and_group_properties(groups, person_properties, group_properties)
-      groups ||= {}
-      person_properties ||= {}
-      group_properties ||= {}
-
-      symbolize_keys! groups
-      symbolize_keys! person_properties
-      symbolize_keys! group_properties
-
-      group_properties.each_value do |value|
-        symbolize_keys! value
-      end
+      groups, person_properties, group_properties = normalize_flag_evaluation_inputs(
+        groups, person_properties, group_properties
+      )
 
       all_group_properties = {}
       groups&.each do |group_name, group_key|
@@ -1339,7 +1333,7 @@ module PostHog
         }.merge((group_properties && group_properties[group_name]) || {})
       end
 
-      [person_properties, all_group_properties]
+      [groups, person_properties, all_group_properties]
     end
   end
 end

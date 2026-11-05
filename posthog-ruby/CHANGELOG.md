@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.29.1
+
+### Patch Changes
+
+- aa3fcf9: Prevent concurrent local feature flag lookups from failing with hash iteration errors, and avoid modifying the groups and properties supplied to flag evaluation.
+
 ## 3.29.0
 
 ### Minor Changes
