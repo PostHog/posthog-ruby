@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.30.1
+
+### Patch Changes
+
+- ff00d29: Reworded the descriptions of the injected `conversation_id` and `llm_model` arguments and the `get_more_tools` virtual tool so they describe the field instead of instructing the model. This changes your published tool definitions; if your server is listed in the ChatGPT or Claude directories, those platforms may re-review the updated tools.
+
 ## 3.30.0
 
 ### Minor Changes
