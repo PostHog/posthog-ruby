@@ -11,6 +11,13 @@ module PostHog
         PostHog::Rails.install_posthog_facade!
       end
 
+      initializer 'posthog.controller_helpers' do
+        ActiveSupport.on_load(:action_controller) do
+          include PostHog::Rails::ControllerHelpers unless method_defined?(:capture_exception) ||
+                                                           private_method_defined?(:capture_exception)
+        end
+      end
+
       # Insert middleware for request context and exception capturing
       initializer 'posthog.insert_middlewares' do |app|
         # Wrap the Rails exception middleware so request context is active for
