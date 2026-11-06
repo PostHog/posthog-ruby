@@ -16,7 +16,9 @@ module PostHog
   # Sends transactional email, from an email template made in PostHog or from content your code rendered,
   # and reads the status of each email sent. Reach it through {Client#emails}.
   #
-  # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the `hog_flow:write` scope.
+  # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the
+  # `transactional_email:write` scope: the "Send transactional email" preset in your project settings. A key with
+  # only `transactional_email:read` can read statuses but not send. Keys made with `hog_flow:write` still work.
   # Sends go to the PostHog app host: a client on PostHog Cloud uses its region's app host, and any other `host`
   # needs `app_host`, because a reverse proxy for ingestion must not receive the secret key.
   #
@@ -84,9 +86,10 @@ module PostHog
     IDEMPOTENCY_KEY_PATTERN = /\A[\x21-\x7e]{1,255}\z/
     TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
     HEADER_TOKEN_PATTERN = /\A[\x21-\x7e]+\z/
-    SEND_KEY_NEEDED = 'Sending email needs secret_key, a project secret API key with the hog_flow:write scope.'
-    READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the hog_flow:read ' \
-                      'or hog_flow:write scope.'
+    SEND_KEY_NEEDED = 'Sending email needs secret_key, a project secret API key with the ' \
+                      'transactional_email:write scope.'
+    READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the ' \
+                      'transactional_email:read or transactional_email:write scope.'
     TEMPLATE_FORM_WHY = 'A template made in PostHog sets its own sender, subject and content, and follows the ' \
                         "project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'

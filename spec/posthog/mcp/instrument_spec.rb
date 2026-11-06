@@ -687,6 +687,21 @@ RSpec.describe PostHog::MCP do
       expect(calls[0][:properties]['$mcp_conversation_id']).to be_a(String)
     end
 
+    [
+      'parallel tool calls', 'system prompt', 'even if existing tools', 'Most important',
+      'even if you can work around it', 'send it even if'
+    ].each do |phrase|
+      it "advertises no injected description containing #{phrase.inspect}" do
+        described_class.instrument(server, client, report_missing: true, capture_model: true,
+                                                   enable_conversation_id: true)
+        tools = server.handle(rpc(1, 'tools/list'))[:result][:tools]
+        descriptions = tools.flat_map do |tool|
+          [tool[:description], *tool[:inputSchema][:properties].values.map { |property| property[:description] }]
+        end
+        expect(descriptions.compact.join("\n")).not_to match(/#{Regexp.escape(phrase)}/i)
+      end
+    end
+
     it 'advertises and intercepts get_more_tools as $mcp_missing_capability' do
       described_class.instrument(server, client, report_missing: true, capture_model: false)
       list = server.handle(rpc(1, 'tools/list'))

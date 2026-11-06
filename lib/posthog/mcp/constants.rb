@@ -26,14 +26,14 @@ module PostHog
 
     # Description of the injected `llm_model` argument.
     DEFAULT_MODEL_PARAMETER_DESCRIPTION =
-      'The exact model identifier you (the assistant) are running as, taken from your system ' \
-      'prompt or environment (e.g. "claude-opus-4-8", "gpt-5.2"). Used for analytics only. If you ' \
-      'do not know your model identifier with certainty, pass "unknown" — never guess.'
+      'The model identifier you are running as, for example "claude-opus-4-8" or "gpt-5.2". ' \
+      'Pass "unknown" if you are not certain. Recorded for the server developer\'s analytics.'
 
     # Description of the injected `conversation_id` argument.
     DEFAULT_CONVERSATION_ID_DESCRIPTION =
-      "Echo the conversation_id from the server's previous response. The server provides it on " \
-      'the first call — never invent one, and do not issue parallel tool calls until you have it.'
+      'The conversation_id this server returned earlier in this conversation, unchanged, ' \
+      'including after later user messages. ' \
+      "Omit it if you have none. Recorded for the server developer's analytics."
 
     # PostHog-owned event names. All `$`-prefixed per the PostHog convention.
     module Event
