@@ -13,6 +13,13 @@ module PostHog
       def self.prepended(base)
         base.extend(ClassMethods)
         base.around_perform :with_posthog_job_context, prepend: true if base.respond_to?(:around_perform)
+        return if @retry_subscription
+
+        @retry_subscription = ActiveSupport::Notifications.subscribe('enqueue_retry.active_job') do |*args|
+          payload = args.last
+          job = payload[:job]
+          job.send(:capture_posthog_retry, payload[:error]) if job.is_a?(ActiveJobExtensions)
+        end
       end
 
       module ClassMethods
@@ -143,7 +150,21 @@ module PostHog
         nil
       end
 
-      def capture_job_exception(exception)
+      def capture_posthog_retry(exception)
+        config = PostHog::Rails.config
+        return unless config&.auto_instrument_active_job && config.report_active_job_retries && exception
+        return unless PostHog.initialized? && PostHog.client.enabled?
+
+        Internal::Context.with_context(
+          @posthog_execution_context || posthog_job_context, fresh: true, enrich_current_span: false
+        ) do
+          capture_job_exception(exception, retry_failure: true)
+        end
+      rescue StandardError => e
+        PostHog::Logging.logger.error("Failed to capture job retry: #{e.class}")
+      end
+
+      def capture_job_exception(exception, retry_failure: false)
         return unless PostHog::Rails.config&.auto_instrument_active_job
 
         # Build distinct_id from job arguments if possible
@@ -154,13 +175,15 @@ module PostHog
                       end
 
         properties = {
-          '$exception_source' => 'active_job',
+          '$exception_source' => retry_failure ? 'rails.active_job' : 'active_job',
           '$job_class' => self.class.name,
           '$job_id' => job_id,
           '$queue_name' => queue_name,
           '$job_priority' => priority,
           '$job_executions' => executions
         }
+
+        properties['$exception_level'] = 'error' if retry_failure
 
         # Add serialized job arguments (be careful with sensitive data)
         properties['$job_arguments'] = sanitize_job_arguments(arguments) if arguments.present?
@@ -169,7 +192,7 @@ module PostHog
           exception,
           distinct_id,
           properties,
-          mechanism: { 'type' => 'active_job', 'handled' => false }
+          mechanism: { 'type' => retry_failure ? 'task' : 'active_job', 'handled' => false }
         )
       rescue StandardError => e
         # Don't let PostHog errors break job processing
