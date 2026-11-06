@@ -33,6 +33,25 @@ module PostHog
         )
       end
 
+      initializer 'posthog.action_cable' do
+        require 'posthog/rails/action_cable'
+
+        ActiveSupport.on_load(:action_cable_connection) do
+          prepend ActionCableConnectionExtensions unless self < ActionCableConnectionExtensions
+        end
+        ActiveSupport.on_load(:action_cable_channel) do
+          prepend ActionCableChannelExtensions unless self < ActionCableChannelExtensions
+        end
+
+        # Rails 5.2 has only the server configuration hook.
+        if ::Rails.version.to_f < 6.0
+          ActiveSupport.on_load(:action_cable) do
+            ::ActionCable::Connection::Base.prepend(ActionCableConnectionExtensions)
+            ::ActionCable::Channel::Base.prepend(ActionCableChannelExtensions)
+          end
+        end
+      end
+
       # After initialization, set up remaining integrations
       config.after_initialize do |_app|
         # Hook into ActiveJob only if enabled
