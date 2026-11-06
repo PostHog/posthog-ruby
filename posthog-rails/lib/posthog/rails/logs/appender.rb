@@ -78,7 +78,7 @@ module PostHog
         # instead of writing to a log device.
         #
         # @return [Boolean] Always true so it composes with broadcast loggers.
-        def add(severity, message = nil, progname = nil)
+        def add(severity, message = nil, progname = nil, attributes: {})
           return true if Thread.current[REENTRANCY_KEY]
 
           begin
@@ -99,7 +99,9 @@ module PostHog
             return true if message.nil?
             return true if self_log?(message, progname)
 
-            record = apply_before_send(build_record(severity, message, progname))
+            record = build_record(severity, message, progname)
+            record[:attributes].merge!(attributes)
+            record = apply_before_send(record)
             return true if record.nil?
 
             case @rate_limiter&.record
