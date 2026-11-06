@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.30.2
+
+### Patch Changes
+
+- 2cad6bc: Exclude client-only flag definitions from local evaluation warnings on API and shared-cache loads, while preserving local evaluation and warning again if their runtime changes back.
+
 ## 3.30.1
 
 ### Patch Changes
