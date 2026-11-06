@@ -7,8 +7,6 @@ module PostHog
     #
     # @api private
     class TrackingData
-      MAX_INITIALIZED_SESSIONS = 1000
-
       attr_reader :options, :sink, :server_name, :server_version, :identified_sessions,
                   :tool_descriptions, :tool_categories, :tool_output_instructions, :tool_owned_params
       attr_accessor :session_id, :session_source, :last_mcp_session_id, :last_activity, :warned_no_stateless_session,
@@ -40,7 +38,6 @@ module PostHog
         # Which injected argument names the analytics layer owns per tool (i.e.
         # the tool does not declare them itself).
         @tool_owned_params = {}
-        @initialized_sessions = {}
       end
 
       def synchronize(&block)
@@ -48,31 +45,6 @@ module PostHog
           yield
         else
           @mutex.synchronize(&block)
-        end
-      end
-
-      def mark_session_initialized(session_id)
-        synchronize do
-          @initialized_sessions.delete(session_id)
-          @initialized_sessions[session_id] = true
-          @initialized_sessions.shift while @initialized_sessions.length > MAX_INITIALIZED_SESSIONS
-        end
-      end
-
-      def session_initialized?(session_id)
-        synchronize { @initialized_sessions.key?(session_id) }
-      end
-
-      # Claim the one lazy initialize event a session gets. Check and mark are a
-      # single critical section, so when concurrent first requests race only the
-      # caller that inserted the key sees `true` and emits `$mcp_initialize`.
-      def claim_session_initialized(session_id)
-        synchronize do
-          next false if @initialized_sessions.key?(session_id)
-
-          @initialized_sessions[session_id] = true
-          @initialized_sessions.shift while @initialized_sessions.length > MAX_INITIALIZED_SESSIONS
-          true
         end
       end
 

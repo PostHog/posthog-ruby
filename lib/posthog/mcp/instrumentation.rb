@@ -249,7 +249,7 @@ module PostHog
           yield
         rescue StandardError => e
           safely do
-            session_id = prepare_request(@request, skip_initialize: true)
+            session_id = prepare_request(@request)
             record_initialize(session_id, client_name, client_version, requested_version, error: e)
           end
           raise
@@ -258,7 +258,7 @@ module PostHog
         safely do
           negotiated = (result.is_a?(Hash) ? fetch(result, :protocolVersion) : nil) || requested_version
           minted = mint_session_token(client_name, client_version, negotiated, requested_version)
-          session_id = prepare_request(@request, skip_initialize: true, token: minted)
+          session_id = prepare_request(@request, token: minted)
           record_initialize(session_id, client_name, client_version, negotiated, response: result)
         end
         result
@@ -360,7 +360,6 @@ module PostHog
       end
 
       def record_initialize(session_id, client_name, client_version, protocol_version, response: nil, error: nil)
-        @data.mark_session_initialized(session_id)
         event = base_event(EventType::MCP_INITIALIZE, session_id, @request)
         event['client_name'] = client_name
         event['client_version'] = client_version
@@ -442,8 +441,8 @@ module PostHog
         @scope[:session_id] = session_id if @scope.is_a?(Hash)
       end
 
-      # Resolve the session id, run identify, then lazily emit initialize.
-      def prepare_request(request, conversation_id: nil, skip_initialize: false, token: nil)
+      # Resolve the session id and run identify.
+      def prepare_request(request, conversation_id: nil, token: nil)
         token ||= @token
         session_id, source = Session.resolve(@data, mcp_session_id(token), token: token,
                                                                            conversation_id: conversation_id)
@@ -463,28 +462,7 @@ module PostHog
           @scope[:actor] = actor if @scope.is_a?(Hash)
           self.class.capture_event(@data, identify_event, actor: actor) if identify_event
         end
-        maybe_emit_initialize(session_id, request) unless skip_initialize
         session_id
-      end
-
-      def maybe_emit_initialize(session_id, request)
-        # Claiming is atomic: two threads opening the same session concurrently
-        # must not both get past the check and emit an initialize each.
-        return unless @data.claim_session_initialized(session_id)
-
-        name, version = client_identity(request)
-        event = {
-          'event_type' => EventType::MCP_INITIALIZE,
-          'session_id' => session_id,
-          'client_name' => name,
-          'client_version' => version,
-          'protocol_version' => protocol_version,
-          'timestamp' => Time.now.utc
-        }
-        props = resolve_event_properties({ method: 'initialize', params: {} })
-        event['properties'] = props unless props.nil?
-        TransportIdentity.stamp(event, @headers)
-        self.class.capture_event(@data, event, actor: actor_for(session_id))
       end
 
       # Era is decided by the version the client *asked for*:
