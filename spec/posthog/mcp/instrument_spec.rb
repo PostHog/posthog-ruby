@@ -622,7 +622,7 @@ RSpec.describe PostHog::MCP do
       structured = list[:result][:tools].find { |t| t[:name] == 'structured' }
       expect(structured[:inputSchema][:properties]).to have_key(:conversation_id)
       expect(structured[:outputSchema][:properties]).to have_key(:_mcp_instructions)
-      expect(structured[:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+      expect(structured[:inputSchema][:required]).to contain_exactly('context')
 
       first = server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi', context: 'c' } }))
       prompt_back = JSON.parse(first[:result][:content][1][:text])
@@ -753,7 +753,7 @@ RSpec.describe PostHog::MCP do
       virtual = list[:result][:tools].find { |t| t[:name] == 'get_more_tools' }
       expect(virtual[:inputSchema][:properties].keys).to contain_exactly(:context, :llm_model)
       expect(virtual[:inputSchema][:properties].keys).not_to include(:conversation_id)
-      expect(virtual[:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+      expect(virtual[:inputSchema][:required]).to contain_exactly('context')
       result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools',
                                                     arguments: { context: 'need csv export',
                                                                  llm_model: ' claude-opus-4-8 ' } }))

@@ -43,11 +43,10 @@ module PostHog
             required: ['context']
           },
           annotations: {
-            title: 'Get More Tools',
-            readOnlyHint: true,
-            openWorldHint: true,
-            idempotentHint: true,
-            destructiveHint: false
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false
           }
         }
         return spec unless options.respond_to?(:capture_model_enabled?) && options.capture_model_enabled?
