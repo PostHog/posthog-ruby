@@ -19,6 +19,16 @@ Existing canonical attributes take precedence. Missing IDs stay absent. Spans ke
 
 See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-rails#trace-context) for setup, middleware order, and trust limits. The bridge does not replace the application's provider, exporter, or sampler. Optional Rails log forwarding uses the same request context.
 
+## Controller exception reporting
+
+Controllers and API controllers gain a private `capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)` helper. Existing controller helpers with that name are not replaced. It returns the core capture result (`true`, `false`, or `nil`) and is not a controller action.
+
+Manual reports do not require `auto_capture_exceptions` and do not apply automatic exception exclusions. They retain the core manual handled-exception defaults and duplicate prevention. Missing or disabled clients no-op without initializing a client.
+
+Explicit identity wins over the configured current user, then request identity. Explicit properties win over inferred request properties. The helper respects `capture_user_context`, current-user resolution settings, and `use_tracing_headers`. Request parameters use Rails `filter_parameters`; automatically derived URLs omit queries and fragments. Explicit properties and exception messages are not parameter-filtered. Unavailable or malformed enrichment is omitted without dropping the original report or replacing application exceptions. Request context is not retained after the request.
+
+Manual reports use already-parsed Rails parameter/body caches, with query/path parameters as fallback. The helper does not proactively parse uncached bodies; richer body collection is outside this helper. Rails may independently parse or log bodies before an action runs; the helper does not suppress framework-owned diagnostics. A response status is included only when already known, including after a controller has performed its response; the default pre-response status is not inferred.
+
 ## Active Job context
 
 Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.
