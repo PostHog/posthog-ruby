@@ -133,8 +133,9 @@ RSpec.describe 'Rails runner terminating exception capture' do
     'disabled automatic capture' => 'PostHog::Rails.config.auto_capture_exceptions = false',
     'excluded exceptions' => "PostHog::Rails.config.excluded_exceptions = ['RuntimeError']",
     'disabled client' => "PostHog.init(api_key: '', silence_disabled_client_error: true)",
-    'before_send drop' => "PostHog.init(api_key: 'phc_test', host: host, before_send: ->(_event) { nil })",
-    'before_send failure' => "PostHog.init(api_key: 'phc_test', host: host, " \
+    'before_send drop' => "PostHog.init(api_key: 'phc_test', host: host, compress_request: false, " \
+                          'before_send: ->(_event) { nil })',
+    'before_send failure' => "PostHog.init(api_key: 'phc_test', host: host, compress_request: false, " \
                              "before_send: ->(_event) { raise 'scrubber failed' })"
   }.each do |name, setup|
     it "respects #{name} and preserves the original failure" do
