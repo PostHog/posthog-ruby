@@ -21,6 +21,8 @@ module PostHog
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config&.should_capture_exception?(error)
 
+        return unless PostHog.client&.enabled?
+
         distinct_id = context[:user_id] || context[:distinct_id]
 
         properties = {
@@ -31,12 +33,14 @@ module PostHog
 
         # Add context information (safely serialized to avoid circular references)
         if context.present?
-          context.each do |key, value|
-            next if key.in?(%i[user_id distinct_id])
+          filtered_metadata(context).each do |key, value|
+            next if %w[user_id distinct_id].include?(key)
 
-            properties["$context_#{key}"] = safe_serialize(value)
+            properties["$context_#{key}"] = value
           end
         end
+
+        properties.merge!(execution_context_properties)
 
         PostHog.capture_exception(
           error,
@@ -45,8 +49,7 @@ module PostHog
           mechanism: { 'type' => 'rails_error_reporter', 'handled' => handled }
         )
       rescue StandardError => e
-        PostHog::Logging.logger.error("Failed to report error via subscriber: #{e.message}")
-        PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
+        PostHog::Logging.logger.error("Failed to report error via subscriber: #{e.class}")
       end
     end
   end

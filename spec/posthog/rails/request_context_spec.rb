@@ -181,6 +181,7 @@ RSpec.describe PostHog::Rails::RequestContext do
 
   it 'prefers authenticated Rails user context over tracing headers for exceptions' do
     PostHog::Rails.config.auto_capture_exceptions = true
+    allow(PostHog).to receive(:client).and_return(client)
 
     allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|
       client.capture_exception(*args, **kwargs)
@@ -233,6 +234,7 @@ RSpec.describe PostHog::Rails::RequestContext do
 
   it 'supports current_user_resolver variants for exceptions' do
     PostHog::Rails.config.auto_capture_exceptions = true
+    allow(PostHog).to receive(:client).and_return(client)
 
     current_class = Class.new do
       class << self
@@ -318,6 +320,7 @@ RSpec.describe PostHog::Rails::RequestContext do
 
   it 'captures exceptions with tracing context and re-raises' do
     PostHog::Rails.config.auto_capture_exceptions = true
+    allow(PostHog).to receive(:client).and_return(client)
 
     allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|
       client.capture_exception(*args, **kwargs)
@@ -352,6 +355,7 @@ RSpec.describe PostHog::Rails::RequestContext do
 
   it 'disables tracing headers for exceptions while preserving request metadata' do
     PostHog::Rails.config.auto_capture_exceptions = true
+    allow(PostHog).to receive(:client).and_return(client)
     PostHog::Rails.config.use_tracing_headers = false
 
     allow(PostHog).to receive(:capture_exception) do |*args, **kwargs|

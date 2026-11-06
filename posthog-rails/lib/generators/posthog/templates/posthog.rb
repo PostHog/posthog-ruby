@@ -31,6 +31,16 @@ PostHog::Rails.configure do |config|
   # Authenticated Rails user context takes precedence over client-supplied tracing headers for exception identity
   # config.capture_user_context = true
 
+  # Exception-only sensitive request collection; disabled by default.
+  # Explicit header (case-insensitive) and cookie (case-sensitive) name allowlists.
+  # Values respect Rails filter_parameters. Whole Cookie headers are never collected.
+  # config.exception_request_headers = []
+  # config.exception_request_cookies = []
+  # JSON/form bodies only, up to 10,000 bytes, with seekable input position preserved.
+  # config.exception_request_body = false
+  # Supported Rails versions automatically attach filtered ExecutionContext to exceptions.
+  # None of this extra context is added to ordinary analytics events or forwarded logs.
+
   # Controller method name to get current user (default: :current_user)
   # Change this if your app uses a different method name (e.g., :authenticated_user)
   # When configured, exceptions will include user context (distinct_id, email, name),
