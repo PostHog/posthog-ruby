@@ -89,6 +89,7 @@ module PostHog
       MCP_RESOURCES_READ = 'mcp:resources/read'
       MCP_TOOLS_CALL = 'mcp:tools/call'
       MCP_TOOLS_LIST = 'mcp:tools/list'
+      MCP_UNKNOWN_TOOL = 'mcp:unknown_tool'
 
       EVENT_NAME_BY_TYPE = {
         CUSTOM => Event::CUSTOM,
@@ -100,7 +101,8 @@ module PostHog
         MCP_RESOURCES_LIST => Event::RESOURCES_LIST,
         MCP_RESOURCES_READ => Event::RESOURCE_READ,
         MCP_TOOLS_CALL => Event::TOOL_CALL,
-        MCP_TOOLS_LIST => Event::TOOLS_LIST
+        MCP_TOOLS_LIST => Event::TOOLS_LIST,
+        MCP_UNKNOWN_TOOL => '$mcp_unknown_tool'
       }.freeze
     end
   end

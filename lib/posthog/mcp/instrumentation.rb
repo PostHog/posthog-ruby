@@ -163,6 +163,15 @@ module PostHog
           return result
         end
 
+        if unregistered_tool?(name)
+          begin
+            result = yield
+          ensure
+            safely { record_unknown_tool(name, request, minted ? nil : conversation_id) }
+          end
+          return result
+        end
+
         safely { prime_session(request, minted ? nil : conversation_id) }
         begin
           result = yield
@@ -333,6 +342,15 @@ module PostHog
             event['llm_model_source'] = model[1]
           end
         end
+        finish_event(event, request)
+      end
+
+      def record_unknown_tool(name, request, conversation_id)
+        session_id = prepare_request(request, conversation_id: conversation_id)
+        event = base_event(EventType::MCP_UNKNOWN_TOOL, session_id, request)
+        event['conversation_id'] = conversation_id
+        event.delete('duration')
+        event['resource_name'] = Sanitization.redact_pii(Sanitization.sanitize_captured_value(name))
         finish_event(event, request)
       end
 
@@ -603,6 +621,15 @@ module PostHog
 
         tools = @server.respond_to?(:tools) ? @server.tools : nil
         tools.is_a?(Hash) && tools[name].equal?(@data.virtual_tool)
+      end
+
+      # True when the server's registry is readable and has no tool by this name.
+      # A server whose registry cannot be read stays a failed call.
+      def unregistered_tool?(name)
+        return false unless name.is_a?(String) && !name.empty?
+
+        tools = @server.respond_to?(:tools) ? @server.tools : nil
+        tools.is_a?(Hash) && !tools.key?(name)
       end
 
       # Injected argument names the analytics layer owns for this tool: the ones
