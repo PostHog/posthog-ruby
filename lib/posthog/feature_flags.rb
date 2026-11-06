@@ -1804,6 +1804,8 @@ module PostHog
     # the definition by content and ignores key order, so a reordered copy does not warn again.
     def _unresolvable_flags(flags, flags_by_key, cohorts, group_type_mapping)
       flags.each_with_object({}) do |flag, unresolvable|
+        next if flag[:evaluation_runtime] == 'client'
+
         reason = self.class.definition_unresolved_reason(flag, flags_by_key, cohorts, group_type_mapping)
         next if reason.nil? || flag[:key].nil?
 
