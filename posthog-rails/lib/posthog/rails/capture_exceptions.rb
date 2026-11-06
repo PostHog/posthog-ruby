@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'posthog/rails/parameter_filter'
+require 'posthog/rails/exception_request_metadata'
 
 module PostHog
   module Rails
@@ -9,6 +10,7 @@ module PostHog
     # @api private
     class CaptureExceptions
       include ParameterFilter
+      include ExceptionRequestMetadata
 
       # @param app [#call] Rack application.
       def initialize(app)
@@ -50,6 +52,8 @@ module PostHog
       end
 
       def capture_exception(exception, env)
+        return unless PostHog.client&.enabled?
+
         request = ActionDispatch::Request.new(env)
         distinct_id = extract_distinct_id(env)
         additional_properties = build_properties(request, env)
@@ -61,8 +65,7 @@ module PostHog
           mechanism: { 'type' => 'rails', 'handled' => false }
         )
       rescue StandardError => e
-        PostHog::Logging.logger.error("Failed to capture exception: #{e.message}")
-        PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
+        PostHog::Logging.logger.error("Failed to capture exception: #{e.class}")
       end
 
       def extract_distinct_id(env)
@@ -90,7 +93,7 @@ module PostHog
       def resolve_current_user(resolver, controller)
         call_current_user_resolver(resolver, controller)
       rescue StandardError => e
-        PostHog::Logging.logger.warn("current_user_resolver failed: #{e.message}")
+        PostHog::Logging.logger.warn("current_user_resolver failed: #{e.class}")
         nil
       end
 
@@ -135,11 +138,10 @@ module PostHog
         end
 
         # Add request parameters (be careful with sensitive data)
-        if request.params.present?
-          filtered_params = filter_sensitive_params(request.params)
-          # Safe serialize to handle any complex objects in params
-          properties['$request_params'] = safe_serialize(filtered_params) unless filtered_params.empty?
-        end
+        params = exception_request_params(request)
+        properties['$request_params'] = filtered_metadata(params) unless params.empty?
+        properties.merge!(exception_request_properties(request))
+        properties.merge!(execution_context_properties)
 
         response_status_code = env['posthog.response_status_code']
         properties['$response_status_code'] = response_status_code if response_status_code
