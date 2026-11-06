@@ -721,6 +721,13 @@ RSpec.describe PostHog::MCP do
       expect(events.none? { |e| e[:event] == '$mcp_tool_call' }).to be(true)
     end
 
+    it 'advertises get_more_tools with annotations that say it records data' do
+      described_class.instrument(server, client, report_missing: true)
+      virtual = server.handle(rpc(1, 'tools/list'))[:result][:tools].find { |t| t[:name] == 'get_more_tools' }
+      expect(virtual[:annotations]).to include(readOnlyHint: false, destructiveHint: false,
+                                               idempotentHint: false, openWorldHint: false)
+    end
+
     it 'lets the gem validate get_more_tools arguments and still records the missing capability' do
       described_class.instrument(server, client, report_missing: true)
       result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools', arguments: {} }))
@@ -761,6 +768,52 @@ RSpec.describe PostHog::MCP do
       missing = drain_events(client).find { |e| e[:event] == '$mcp_missing_capability' }
       expect(missing[:properties]).to include('$mcp_llm_model' => 'claude-opus-4-8',
                                               '$mcp_llm_model_source' => 'self_reported')
+    end
+
+    context 'when the call names a tool the server never registered' do
+      let(:unknown_call) { rpc(2, 'tools/call', { name: 'no_such_tool', arguments: { q: 'x' } }) }
+
+      it 'records $mcp_unknown_tool instead of a failed call and answers the client as before' do
+        baseline = MCP::Server.new(name: 'spec-server', version: '9.9.9', tools: tools).handle(unknown_call)
+        described_class.instrument(server, client)
+        expect(server.handle(unknown_call)).to eq(baseline)
+        events = drain_events(client)
+        unknown = events.select { |e| e[:event] == '$mcp_unknown_tool' }
+        expect(unknown.size).to eq(1)
+        expect(unknown[0][:properties]).to include('$mcp_tool_name' => 'no_such_tool')
+        expect(unknown[0][:properties]['$session_id']).to be_a(String)
+        expect(events.map { |e| e[:event] }).to eq(['$mcp_unknown_tool'])
+      end
+
+      it 'keeps the call in the conversation whose handle it echoes, without emitting $mcp_initialize' do
+        described_class.instrument(server, client, enable_conversation_id: true)
+        first = server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi', context: 'c' } }))
+        handle = JSON.parse(first[:result][:content][1][:text])['conversation_id']
+        drain_events(client)
+
+        arguments = { q: 'x', conversation_id: handle.upcase }
+        server.handle(rpc(2, 'tools/call', { name: 'no_such_tool', arguments: arguments }))
+        events = drain_events(client)
+        expect(events.map { |e| e[:event] }).to eq(['$mcp_unknown_tool'])
+        expect(events[0][:properties]).to include(
+          '$mcp_conversation_id' => handle,
+          '$session_id' => PostHog::MCP.derive_session_id_from_conversation(handle)
+        )
+      end
+
+      it 'does not stamp a conversation id on an unknown tool call that echoes none' do
+        described_class.instrument(server, client, enable_conversation_id: true)
+        server.handle(unknown_call)
+        expect(drain_events(client)[0][:properties]).not_to have_key('$mcp_conversation_id')
+      end
+
+      it 'still records a failed call for a registered tool given invalid arguments' do
+        described_class.instrument(server, client)
+        server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: {} }))
+        events = drain_events(client)
+        expect(events.map { |e| e[:event] }).to include('$mcp_tool_call')
+        expect(events.none? { |e| e[:event] == '$mcp_unknown_tool' }).to be(true)
+      end
     end
 
     it 'captures llm_model from the injected argument or client metadata by default' do
