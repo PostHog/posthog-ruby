@@ -18,6 +18,9 @@ module PostHog
       # @param source [String, nil]
       # @return [void]
       def report(error, handled:, severity:, context:, source: nil)
+        # Runner termination is captured at exit, before the SDK drains its queue.
+        # The executor also reports successful SystemExit, which is not a failure.
+        return if !handled && source == 'application.runner.railties'
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config&.should_capture_exception?(error)
 

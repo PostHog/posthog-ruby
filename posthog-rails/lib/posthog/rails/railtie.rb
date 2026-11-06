@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'English'
 require 'posthog/rails/facade'
 
 module PostHog
@@ -53,16 +54,40 @@ module PostHog
         install_posthog_logs if PostHog::Rails.config&.logs_enabled
       end
 
+      runner_started = false
+      runner { runner_started = true }
+
       # Ensure PostHog shuts down gracefully (register only once)
       config.after_initialize do
         next if @posthog_at_exit_registered
 
         @posthog_at_exit_registered = true
         at_exit do
+          capture_runner_exception($ERROR_INFO) if runner_started
           PostHog::Rails::Logs::Setup.shutdown
           PostHog.client&.shutdown if PostHog.initialized?
         end
       end
+
+      # Use the same exit hook so the terminating event is queued before shutdown
+      # drains the client, including on Rails versions without runner error reports.
+      def self.capture_runner_exception(exception)
+        return unless exception
+        return if exception.is_a?(SystemExit) && exception.success?
+        return unless PostHog.initialized? && PostHog.client.enabled?
+        return unless PostHog::Rails.config&.auto_capture_exceptions
+        return unless PostHog::Rails.config.should_capture_exception?(exception)
+
+        PostHog.capture_exception(
+          exception,
+          nil,
+          { '$exception_source' => 'rails.runner', '$exception_level' => 'fatal' },
+          mechanism: { 'type' => 'at_exit', 'handled' => false, 'synthetic' => false }
+        )
+      rescue Exception # rubocop:disable Lint/RescueException -- Reporting must not replace the terminating exception.
+        PostHog::Logging.logger.warn('Failed to capture Rails runner exception')
+      end
+      private_class_method :capture_runner_exception
 
       MISSING_MIDDLEWARE_MESSAGE = 'No such middleware to insert'
       MIDDLEWARE_FALLBACK_OPERATION = :posthog_insert_middleware_with_fallback
