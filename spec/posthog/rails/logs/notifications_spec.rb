@@ -91,7 +91,7 @@ RSpec.describe 'Rails structured notification logs' do
   %i[action_controller active_job].each do |component|
     context "with #{component} custom parameter filters" do
       def configure_parameter_filter(filter)
-        app = double('application', config: double('config', filter_parameters: Array(filter)))
+        app = double('application', config: double('config', root: nil, filter_parameters: Array(filter)))
         allow(Rails).to receive(:application).and_return(app)
       end
 
@@ -243,7 +243,7 @@ RSpec.describe 'Rails structured notification logs' do
       end
     end
     stub_const('StructuredLogsController', controller)
-    app = double('application', config: double('config', filter_parameters: [:password]))
+    app = double('application', config: double('config', root: nil, filter_parameters: [:password]))
     allow(Rails).to receive(:application).and_return(app)
     env = Rack::MockRequest.env_for('/?password=secret&visible=yes',
                                     'HTTP_X_POSTHOG_DISTINCT_ID' => 'request-user',
