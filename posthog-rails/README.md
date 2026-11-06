@@ -80,6 +80,29 @@ what your app logs. Setting it below the Rails logger level (e.g. `:debug`
 with an `:info` app) does not make Rails or ActiveRecord generate extra
 output — only records the app actually produces are forwarded.
 
+Structured notification logs are separately opt-in with `config.logs_notifications`
+(default `[]`), selecting `:action_controller`, `:active_record`, `:active_job`,
+and/or `:action_mailer`. Components register lazily without loading optional Rails
+packages. `logs_enabled` remains the master gate; notification records share the
+forwarding threshold, rate cap, hook, correlation, and shutdown pipeline. Set
+`logs_forward_rails_logger` to `false` to collect notifications without also
+forwarding generic logger lines. SQL records use debug severity; successful
+controller/job/mailer records use info, controller 4xx responses warn, and failures
+error. These records do not create spans or collect timings.
+
+Notification bodies are fixed descriptions with allowlisted event metadata.
+`rails.params` and `rails.job.arguments` contain JSON strings filtered with Rails'
+`filter_parameters`; custom filters receive copied original key/value types before
+JSON normalization. Unkeyed job arguments are redacted. Unsupported, cyclic, or
+oversized parameter trees are wholly redacted rather than partially truncated
+before filtering. Oversized JSON output is also replaced with a redaction marker.
+Without an application filter configuration these parameter fields are empty.
+SQL statements/binds, cookies/headers, and mail recipients/subject/content are not
+collected. Review configured parameter filters and use `logs_before_send` for
+additional scrubbing. Job completion records reuse saved/effective job identity
+only when the existing `auto_instrument_active_job` integration is enabled; logging
+alone does not enable job context propagation or exception capture.
+
 Known limitations of the broadcast approach:
 
 - `Rails.logger.silence` does not silence forwarding — silenced records still
