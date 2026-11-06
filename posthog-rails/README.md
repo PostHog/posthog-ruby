@@ -19,6 +19,12 @@ Existing canonical attributes take precedence. Missing IDs stay absent. Spans ke
 
 See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-rails#trace-context) for setup, middleware order, and trust limits. The bridge does not replace the application's provider, exporter, or sampler. Optional Rails log forwarding uses the same request context.
 
+## Streaming exceptions
+
+With `auto_capture_exceptions` enabled (default `false`), errors reported by ActionController::Live and ActionView streaming templates are captured through the existing exception pipeline, respecting excluded exceptions and duplicate prevention. Rails logging and streaming completion behavior are unchanged.
+
+Live reporters rebuild context from their controller's own filtered request data and headers only while reporting, restoring any ambient context afterward without annotating ambient spans. Authenticated controller identity still takes precedence over header identity. Streaming template bodies use only the context active when Rails reports the error; they do not retain the context from body creation. Errors enumerated after request middleware exits may therefore lack request identity and metadata. Identity is not automatically transferred across arbitrary application-created threads or fibers.
+
 ## Active Job context
 
 Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.
