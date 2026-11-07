@@ -40,13 +40,17 @@ RSpec.describe 'Rails template backtraces' do
     expect(frame['function']).to eq('_custom_views__rder_v__html_erb_')
   end
 
-  it 'handles full identifiers when Rails has no application root' do
+  it 'matches Action View identifiers when Rails has no application root' do
     allow(Rails).to receive(:root).and_return(nil)
-    frame = capture.parse_backtrace_line(
-      "#{file}:7:in '__app_releases__________app_views_orders_show_html_erb__123_456'"
+    template = ActionView::Template.new('', file, ActionView::Template.handler_for_extension(:erb), locals: [])
+    frame = capture.parse_backtrace_line("#{file}:7:in '#{template.method_name}'")
+    mismatched_frame = capture.parse_backtrace_line(
+      "#{root}/app/views/orders/edit.html.erb:7:in '#{template.method_name}'"
     )
 
-    expect(frame['function']).to eq('__app_releases__________app_views_orders_show_html_erb')
+    expect(template.short_identifier).to eq('app/releases/20261106/app/views/orders/show.html.erb')
+    expect(frame['function']).to eq('_app_releases__________app_views_orders_show_html_erb')
+    expect(mismatched_frame['function']).to eq(template.method_name)
   end
 
   it 'leaves ordinary application methods and incomplete generated names unchanged' do
@@ -86,48 +90,55 @@ RSpec.describe 'Rails template backtraces' do
     expect(frame).not_to have_key('context_line')
   end
 
-  it 'cleans a real rendered template cause without changing stack data or deduplication' do
-    Dir.mktmpdir('posthog-template') do |directory|
-      allow(Rails).to receive(:root).and_return(Pathname.new(directory))
-      path = File.join(directory, 'app/views/orders/show.html.erb')
-      FileUtils.mkdir_p(File.dirname(path))
-      File.write(path, "before\n<% [1].each do %>\n<% raise 'template failed' %>\n<% end %>\nafter\n")
-      template = ActionView::Template.new(
-        File.read(path), path, ActionView::Template.handler_for_extension(:erb), locals: []
-      )
-      view = ActionView::Base.with_empty_template_cache.new(ActionView::LookupContext.new([]), {}, nil)
-      error = begin
-        template.render(view, {})
-      rescue ActionView::Template::Error => e
-        e
-      end
-      expect(error).to be_a(ActionView::Template::Error)
-      expect(error.cause).to be_a(RuntimeError)
-      original_backtraces = [error.backtrace.dup, error.cause.backtrace.dup]
-      client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
-
-      expect(client.capture_exception(error)).to be(true)
-      expect(client.capture_exception(error)).to be(false)
-      expect(client.capture_exception(error.cause)).to be(false)
-      expect(client.queued_messages).to eq(1)
-      entries = client.dequeue_last_message[:properties]['$exception_list']
-      expect(entries.map { |entry| entry['type'] }).to eq(['ActionView::Template::Error', 'RuntimeError'])
-      entries.each_with_index do |entry, index|
-        frames = entry['stacktrace']['frames']
-        expect(frames.size).to eq(original_backtraces[index].first(50).size)
-        template_frames = frames.select { |frame| frame['abs_path'] == path }
-        expect(template_frames).not_to be_empty
-        expect(template_frames.last).to include(
-          'function' => "block in #{function}",
-          'filename' => 'app/views/orders/show.html.erb',
-          'lineno' => 3,
-          'in_app' => true,
-          'context_line' => "<% raise 'template failed' %>",
-          'pre_context' => ['before', '<% [1].each do %>'],
-          'post_context' => ['<% end %>', 'after']
+  [true, false].each do |application_root|
+    it "preserves rendered template stack data and deduplication with application root #{application_root}" do
+      Dir.mktmpdir('posthog-template') do |directory|
+        allow(Rails).to receive(:root).and_return(application_root ? Pathname.new(directory) : nil)
+        expected_function = if application_root
+                              function
+                            else
+                              "_#{directory.delete_prefix('/').tr('^a-z_', '_')}_app_views_orders_show_html_erb"
+                            end
+        path = File.join(directory, 'app/views/orders/show.html.erb')
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "before\n<% [1].each do %>\n<% raise 'template failed' %>\n<% end %>\nafter\n")
+        template = ActionView::Template.new(
+          File.read(path), path, ActionView::Template.handler_for_extension(:erb), locals: []
         )
+        view = ActionView::Base.with_empty_template_cache.new(ActionView::LookupContext.new([]), {}, nil)
+        error = begin
+          template.render(view, {})
+        rescue ActionView::Template::Error => e
+          e
+        end
+        expect(error).to be_a(ActionView::Template::Error)
+        expect(error.cause).to be_a(RuntimeError)
+        original_backtraces = [error.backtrace.dup, error.cause.backtrace.dup]
+        client = PostHog::Client.new(api_key: API_KEY, test_mode: true)
+
+        expect(client.capture_exception(error)).to be(true)
+        expect(client.capture_exception(error)).to be(false)
+        expect(client.capture_exception(error.cause)).to be(false)
+        expect(client.queued_messages).to eq(1)
+        entries = client.dequeue_last_message[:properties]['$exception_list']
+        expect(entries.map { |entry| entry['type'] }).to eq(['ActionView::Template::Error', 'RuntimeError'])
+        entries.each_with_index do |entry, index|
+          frames = entry['stacktrace']['frames']
+          expect(frames.size).to eq(original_backtraces[index].first(50).size)
+          template_frames = frames.select { |frame| frame['abs_path'] == path }
+          expect(template_frames).not_to be_empty
+          expect(template_frames.last).to include(
+            'function' => "block in #{expected_function}",
+            'filename' => application_root ? 'app/views/orders/show.html.erb' : 'show.html.erb',
+            'lineno' => 3,
+            'in_app' => true,
+            'context_line' => "<% raise 'template failed' %>",
+            'pre_context' => ['before', '<% [1].each do %>'],
+            'post_context' => ['<% end %>', 'after']
+          )
+        end
+        expect([error.backtrace, error.cause.backtrace]).to eq(original_backtraces)
       end
-      expect([error.backtrace, error.cause.backtrace]).to eq(original_backtraces)
     end
   end
 end

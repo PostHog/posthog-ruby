@@ -119,7 +119,7 @@ module PostHog
 
       file = match[1]
       lineno = match[2].to_i
-      method_name = normalize_rails_template_method(match[5], file, project_root)
+      method_name = normalize_rails_template_method(match[5], file)
 
       frame = {
         'filename' => frame_filename(file, project_root),
@@ -135,14 +135,15 @@ module PostHog
       frame
     end
 
-    def self.normalize_rails_template_method(method_name, file, project_root)
+    def self.normalize_rails_template_method(method_name, file)
       return method_name unless defined?(::Rails) && method_name
 
       return method_name unless method_name.match?(/___?\d+__?\d+\z/)
 
       # Action View encodes the template identifier, then appends its hash and
-      # object ID, replacing minus signs with underscores.
-      relative_path = project_root ? file.delete_prefix("#{project_root}/") : file
+      # object ID, replacing minus signs with underscores. Its short identifier
+      # strips "/" when Rails.root is nil, unlike the project_root fallback.
+      relative_path = defined?(::Rails.root) ? file.delete_prefix("#{::Rails.root}/") : file
       [file, relative_path].uniq.each do |path|
         identifier = Regexp.escape("_#{path.tr('^a-z_', '_')}")
         normalized = method_name.sub(/(\A(?:block(?: \(\d+ levels\))? in )?#{identifier})___?\d+__?\d+\z/, '\1')
