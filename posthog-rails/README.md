@@ -19,6 +19,12 @@ Existing canonical attributes take precedence. Missing IDs stay absent. Spans ke
 
 See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-rails#trace-context) for setup, middleware order, and trust limits. The bridge does not replace the application's provider, exporter, or sampler. Optional Rails log forwarding uses the same request context.
 
+## Rails runner exceptions
+
+`auto_capture_exceptions` also captures terminating `rails runner` failures as fatal, unhandled exceptions with source `rails.runner`. Exception exclusions and `before_send` still apply. When Rails reports the failure, its existing error-reporter identity and serialized context are preserved, including for inline errors that Rails converts into a failing exit. Capture runs before the existing SDK shutdown drains its queue; normal completion and successful exits are not reported.
+
+Only initialized, enabled clients are used. Delivery is best-effort through the normal transport. Failures before runner hooks load, immediate process termination (`exit!`), and forced termination that bypasses Ruby exit hooks cannot be captured. No separate runner-code or command-line argument properties are added; exception messages and stack source context still follow the normal exception pipeline.
+
 ## Active Job context
 
 Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.

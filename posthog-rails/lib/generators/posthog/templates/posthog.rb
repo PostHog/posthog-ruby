@@ -10,8 +10,8 @@
 # These settings control how PostHog integrates with Rails features.
 
 PostHog::Rails.configure do |config|
-  # Automatically capture exceptions (default: false)
-  # Set to true to enable automatic exception tracking
+  # Automatically capture exceptions, including terminating rails runner failures (default: false)
+  # Successful runner exits are ignored; failures are captured before SDK shutdown
   # config.auto_capture_exceptions = true
 
   # Report exceptions that Rails rescues (e.g., with rescue_from) (default: false)
