@@ -60,19 +60,22 @@ module PostHog
       def self.take_runner_report(exception)
         report = Thread.current[:posthog_rails_runner_report]
         Thread.current[:posthog_rails_runner_report] = nil
-        return unless report
-        return report if report.first.equal?(exception)
+        return report if report && report.first.equal?(exception)
 
-        # Only Rails' inline command conversion may replace the reported object.
-        original = report.first
+        # Rails also converts inline errors when --skip-executor prevents a report.
+        # Only its command conversion may replace the terminal exception.
         return unless exception.is_a?(SystemExit) && exception.status == 1
-        return unless original.is_a?(NameError) || original.is_a?(SyntaxError)
-        return unless exception.cause.equal?(original)
-        return unless defined?(::Rails::Command::RunnerCommand)
-        return unless exception.backtrace_locations&.first&.path ==
-                      ::Rails::Command::RunnerCommand.instance_method(:perform).source_location.first
 
-        report
+        original = exception.cause
+        return unless original.is_a?(NameError) || original.is_a?(SyntaxError)
+        return unless defined?(::Rails::Command::RunnerCommand)
+
+        # Inline eval shares Rails' filename, so also check the caller beyond exit.
+        location = exception.backtrace_locations&.find { |frame| frame.base_label != 'exit' }
+        return unless location&.base_label == 'perform'
+        return unless location.path == ::Rails::Command::RunnerCommand.instance_method(:perform).source_location.first
+
+        report && report.first.equal?(original) ? report : [original, nil, {}]
       end
     end
   end

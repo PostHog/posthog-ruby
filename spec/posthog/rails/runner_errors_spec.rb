@@ -141,6 +141,59 @@ RSpec.describe 'Rails runner terminating exception capture' do
     end
   end
 
+  context 'when inline code skips the executor' do
+    before do
+      require 'rails'
+      skip 'Runner executor opt-out requires Rails 7.2+' if Gem::Version.new(Rails.version) < Gem::Version.new('7.2')
+    end
+
+    %w[NameError SyntaxError].each do |type|
+      it "keeps exclusions for #{type} without a reporter event" do
+        _stdout, stderr, status = run_application(
+          "raise #{type}, 'excluded inline failure'",
+          inline: true, runner_options: ['--skip-executor'],
+          setup: "PostHog::Rails.config.excluded_exceptions = ['#{type}']"
+        )
+
+        expect(status.exitstatus).to eq(1)
+        expect(stderr).to include('excluded inline failure')
+        expect(received_events).to eq([])
+      end
+
+      it "does not recapture #{type} already captured manually without a reporter event" do
+        code = "begin; raise #{type}, 'already captured inline'; rescue #{type} => error; " \
+               'PostHog.capture_exception(error); raise; end'
+        _stdout, stderr, status = run_application(code, inline: true, runner_options: ['--skip-executor'])
+
+        expect(status.exitstatus).to eq(1)
+        expect(stderr).to include('already captured inline')
+        events = received_events
+        expect(events.length).to eq(1)
+        expect(events.first.fetch('properties').fetch('$exception_list').first.fetch('type')).to eq(type)
+      end
+    end
+
+    [1, 23].each do |exit_status|
+      it "preserves an application exit #{exit_status} with a NameError cause without a reporter event" do
+        code = <<~RUBY
+          begin
+            raise NameError, 'application cause'
+          rescue NameError
+            exit #{exit_status}
+          end
+        RUBY
+        _stdout, stderr, status = run_application(code, inline: true, runner_options: ['--skip-executor'])
+
+        expect(status.exitstatus).to eq(exit_status)
+        expect(stderr).to eq('')
+        events = received_events
+        expect(events.length).to eq(1)
+        expect(events.first.fetch('properties').fetch('$exception_list').map { |error| error['type'] })
+          .to eq(%w[SystemExit NameError])
+      end
+    end
+  end
+
   %i[user_id distinct_id].each do |identity_key|
     it "preserves Rails reporter #{identity_key} and serialized diagnostic context" do
       code = <<~RUBY
