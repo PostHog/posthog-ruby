@@ -72,16 +72,19 @@ module PostHog
       # Use the same exit hook so the terminating event is queued before shutdown
       # drains the client, including on Rails versions without runner error reports.
       def self.capture_runner_exception(exception)
+        report = ErrorSubscriber.take_runner_report(exception)
         return unless exception
         return if exception.is_a?(SystemExit) && exception.success?
+
+        exception, distinct_id, properties = report if report
         return unless PostHog.initialized? && PostHog.client.enabled?
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config.should_capture_exception?(exception)
 
         PostHog.capture_exception(
           exception,
-          nil,
-          { '$exception_source' => 'rails.runner', '$exception_level' => 'fatal' },
+          distinct_id,
+          (properties || {}).merge('$exception_source' => 'rails.runner', '$exception_level' => 'fatal'),
           mechanism: { 'type' => 'at_exit', 'handled' => false, 'synthetic' => false }
         )
       rescue Exception # rubocop:disable Lint/RescueException -- Reporting must not replace the terminating exception.

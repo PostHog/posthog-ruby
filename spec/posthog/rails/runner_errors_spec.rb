@@ -27,7 +27,7 @@ RSpec.describe 'Rails runner terminating exception capture' do
     @receiver&.close
   end
 
-  def run_application(code, setup: '', initialize_client: true, runner: true, runner_options: [])
+  def run_application(code, setup: '', initialize_client: true, runner: true, runner_options: [], inline: false)
     Dir.mktmpdir('posthog-runner') do |root|
       Dir.mkdir(File.join(root, 'config'))
       File.write(File.join(root, 'config/application.rb'), <<~RUBY)
@@ -62,9 +62,10 @@ RSpec.describe 'Rails runner terminating exception capture' do
                   else
                     "require #{File.join(root, 'config/environment.rb').inspect}; load #{script.inspect}"
                   end
+      runner_argument = inline ? code : script
       Open3.capture3(
         { 'RAILS_ENV' => 'test' }, RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib', '-e', bootstrap,
-        *(runner ? ['--', 'runner', *runner_options, script] : [])
+        *(runner ? ['--', 'runner', *runner_options, runner_argument] : [])
       )
     end
   end
@@ -99,6 +100,153 @@ RSpec.describe 'Rails runner terminating exception capture' do
       expect(status).to be_success, stderr
       expect(received_events).to eq([])
     end
+  end
+
+  %w[NameError SyntaxError].each do |type|
+    it "keeps exclusions for inline #{type} converted by Rails" do
+      _stdout, stderr, status = run_application(
+        "raise #{type}, 'excluded inline failure'", inline: true,
+                                                    setup: "PostHog::Rails.config.excluded_exceptions = ['#{type}']"
+      )
+
+      expect(status.exitstatus).to eq(1)
+      expect(stderr).to include('excluded inline failure')
+      expect(received_events).to eq([])
+    end
+
+    it "does not recapture an inline #{type} already captured manually" do
+      code = "begin; raise #{type}, 'already captured inline'; rescue #{type} => error; " \
+             'PostHog.capture_exception(error); raise; end'
+      _stdout, stderr, status = run_application(code, inline: true)
+
+      expect(status.exitstatus).to eq(1)
+      expect(stderr).to include('already captured inline')
+      events = received_events
+      expect(events.length).to eq(1)
+      expect(events.first.fetch('properties').fetch('$exception_list').first.fetch('type')).to eq(type)
+    end
+
+    it "captures the original inline #{type} with terminal metadata" do
+      _stdout, stderr, status = run_application("raise #{type}, 'inline failure'", inline: true)
+
+      expect(status.exitstatus).to eq(1)
+      expect(stderr).to include('inline failure')
+      events = received_events
+      expect(events.length).to eq(1)
+      properties = events.first.fetch('properties')
+      expect(properties).to include('$exception_level' => 'fatal', '$exception_source' => 'rails.runner')
+      error = properties.fetch('$exception_list').first
+      expect(error).to include('type' => type, 'value' => 'inline failure')
+      expect(error.fetch('mechanism')).to include('type' => 'at_exit', 'handled' => false)
+    end
+  end
+
+  %i[user_id distinct_id].each do |identity_key|
+    it "preserves Rails reporter #{identity_key} and serialized diagnostic context" do
+      code = <<~RUBY
+        cycle = {}; cycle[:self] = cycle
+        Rails.error.set_context(#{identity_key}: 'runner-user', job: 'nightly', details: cycle)
+        raise 'context failure'
+      RUBY
+      _stdout, stderr, status = run_application(code)
+
+      expect(status.exitstatus).to eq(1), stderr
+      events = received_events
+      expect(events.length).to eq(1)
+      aggregate_failures do
+        expect(events.first['distinct_id']).to eq('runner-user')
+        expect(events.first.fetch('properties')).to include(
+          '$context_job' => 'nightly', '$context_details' => { 'self' => '[circular reference]' },
+          '$exception_level' => 'fatal', '$exception_source' => 'rails.runner'
+        )
+      end
+    end
+  end
+
+  it 'allows before_send to scrub preserved reporter context' do
+    setup = <<~RUBY
+      PostHog.init(api_key: 'phc_test', host: host, compress_request: false,
+                   before_send: ->(event) { event[:properties].delete('$context_job'); event })
+    RUBY
+    _stdout, stderr, status = run_application(
+      "Rails.error.set_context(user_id: 'runner-user', job: 'nightly'); raise 'context failure'", setup: setup
+    )
+
+    expect(status.exitstatus).to eq(1), stderr
+    events = received_events
+    expect(events.length).to eq(1)
+    expect(events.first['distinct_id']).to eq('runner-user')
+    expect(events.first.fetch('properties')).not_to have_key('$context_job')
+  end
+
+  it 'does not unwrap an application SystemExit with a NameError cause' do
+    code = <<~RUBY
+      begin
+        raise NameError, 'application cause'
+      rescue NameError
+        exit 23
+      end
+    RUBY
+    _stdout, stderr, status = run_application(code, inline: true)
+
+    expect(status.exitstatus).to eq(23)
+    expect(stderr).to eq('')
+    events = received_events
+    expect(events.length).to eq(1)
+    expect(events.first.fetch('properties').fetch('$exception_list').map { |error| error['type'] })
+      .to eq(%w[SystemExit NameError])
+  end
+
+  it 'uses a later exit-hook failure instead of stale runner identity and context' do
+    code = <<~RUBY
+      Rails.error.set_context(user_id: 'stale-user', job: 'stale-job')
+      at_exit { raise 'later failure' }
+      raise NameError, 'inline failure'
+    RUBY
+    _stdout, stderr, status = run_application(code, inline: true)
+
+    expect(status.exitstatus).to eq(1)
+    expect(stderr).to include('later failure')
+    events = received_events
+    expect(events.length).to eq(1)
+    expect(events.first['distinct_id']).not_to eq('stale-user')
+    properties = events.first.fetch('properties')
+    expect(properties).not_to have_key('$context_job')
+    expect(properties.fetch('$exception_list').first).to include('type' => 'RuntimeError', 'value' => 'later failure')
+  end
+
+  [1, 23].each do |exit_status|
+    it "does not substitute the inline error when a later exit hook exits #{exit_status}" do
+      code = "at_exit { exit #{exit_status} }; raise NameError, 'inline failure'"
+      _stdout, stderr, status = run_application(code, inline: true)
+
+      expect(status.exitstatus).to eq(exit_status)
+      expect(stderr).to include('inline failure')
+      events = received_events
+      expect(events.length).to eq(1)
+      expect(events.first.fetch('properties').fetch('$exception_list').first.fetch('type')).to eq('SystemExit')
+    end
+  end
+
+  it 'suppresses a later successful exit even after an inline failure was deferred' do
+    _stdout, stderr, status = run_application("at_exit { exit 0 }; raise NameError, 'inline failure'", inline: true)
+
+    expect(status).to be_success
+    expect(stderr).to include('inline failure')
+    expect(received_events).to eq([])
+  end
+
+  it 'preserves inline error output byte-for-byte compared with disabled capture' do
+    code = "puts 'inline began'; raise NameError, 'inline failure'"
+    original_stdout, original_stderr, original_status = run_application(
+      code, inline: true, setup: 'PostHog::Rails.config.auto_capture_exceptions = false'
+    )
+    stdout, stderr, status = run_application(code, inline: true)
+
+    expect(status.exitstatus).to eq(original_status.exitstatus)
+    expect(stdout).to eq(original_stdout)
+    expect(stderr).to eq(original_stderr)
+    expect(received_events.length).to eq(1)
   end
 
   it 'captures a runner failure without executor error reporting' do

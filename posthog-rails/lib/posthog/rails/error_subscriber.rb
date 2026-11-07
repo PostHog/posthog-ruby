@@ -18,11 +18,10 @@ module PostHog
       # @param source [String, nil]
       # @return [void]
       def report(error, handled:, severity:, context:, source: nil)
-        # Runner termination is captured at exit, before the SDK drains its queue.
-        # The executor also reports successful SystemExit, which is not a failure.
-        return if !handled && source == 'application.runner.railties'
         return unless PostHog::Rails.config&.auto_capture_exceptions
-        return unless PostHog::Rails.config&.should_capture_exception?(error)
+
+        runner_report = !handled && source == 'application.runner.railties'
+        return unless runner_report || PostHog::Rails.config&.should_capture_exception?(error)
 
         distinct_id = context[:user_id] || context[:distinct_id]
 
@@ -41,6 +40,12 @@ module PostHog
           end
         end
 
+        # Keep the reporter's object and serialized context until terminal capture.
+        if runner_report
+          Thread.current[:posthog_rails_runner_report] = [error, distinct_id, properties]
+          return
+        end
+
         PostHog.capture_exception(
           error,
           distinct_id,
@@ -50,6 +55,24 @@ module PostHog
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to report error via subscriber: #{e.message}")
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
+      end
+
+      def self.take_runner_report(exception)
+        report = Thread.current[:posthog_rails_runner_report]
+        Thread.current[:posthog_rails_runner_report] = nil
+        return unless report
+        return report if report.first.equal?(exception)
+
+        # Only Rails' inline command conversion may replace the reported object.
+        original = report.first
+        return unless exception.is_a?(SystemExit) && exception.status == 1
+        return unless original.is_a?(NameError) || original.is_a?(SyntaxError)
+        return unless exception.cause.equal?(original)
+        return unless defined?(::Rails::Command::RunnerCommand)
+        return unless exception.backtrace_locations&.first&.path ==
+                      ::Rails::Command::RunnerCommand.instance_method(:perform).source_location.first
+
+        report
       end
     end
   end

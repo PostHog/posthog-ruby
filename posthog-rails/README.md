@@ -21,7 +21,7 @@ See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-r
 
 ## Rails runner exceptions
 
-`auto_capture_exceptions` also captures terminating `rails runner` failures as fatal, unhandled exceptions with source `rails.runner`. Exception exclusions and `before_send` still apply. Capture runs before the existing SDK shutdown drains its queue; normal completion and successful exits are not reported.
+`auto_capture_exceptions` also captures terminating `rails runner` failures as fatal, unhandled exceptions with source `rails.runner`. Exception exclusions and `before_send` still apply. When Rails reports the failure, its existing error-reporter identity and serialized context are preserved, including for inline errors that Rails converts into a failing exit. Capture runs before the existing SDK shutdown drains its queue; normal completion and successful exits are not reported.
 
 Only initialized, enabled clients are used. Delivery is best-effort through the normal transport. Failures before runner hooks load, immediate process termination (`exit!`), and forced termination that bypasses Ruby exit hooks cannot be captured. No separate runner-code or command-line argument properties are added; exception messages and stack source context still follow the normal exception pipeline.
 
