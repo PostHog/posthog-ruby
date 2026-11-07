@@ -38,6 +38,10 @@ module PostHog
 
         ActiveSupport.on_load(:action_cable_connection) do
           prepend ActionCableConnectionExtensions unless self < ActionCableConnectionExtensions
+          subscriptions = ::ActionCable::Connection::Subscriptions
+          unless subscriptions < ActionCableSubscriptionsExtensions
+            subscriptions.prepend(ActionCableSubscriptionsExtensions)
+          end
         end
         ActiveSupport.on_load(:action_cable_channel) do
           prepend ActionCableChannelExtensions unless self < ActionCableChannelExtensions
@@ -48,6 +52,7 @@ module PostHog
           ActiveSupport.on_load(:action_cable) do
             ::ActionCable::Connection::Base.prepend(ActionCableConnectionExtensions)
             ::ActionCable::Channel::Base.prepend(ActionCableChannelExtensions)
+            ::ActionCable::Connection::Subscriptions.prepend(ActionCableSubscriptionsExtensions)
           end
         end
       end

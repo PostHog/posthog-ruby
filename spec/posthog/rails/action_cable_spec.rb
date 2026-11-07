@@ -155,6 +155,203 @@ RSpec.describe 'Action Cable exception capture' do
     end
   end
 
+  it 'combines application and effective Cable filters for nested channel params and action data' do
+    server.config.filter_parameters = [:credential, /secret/i, lambda { |key, value|
+      value.replace('[CABLE FILTERED]') if key == 'pin'
+    }]
+    payload = { 'password' => 'app-private', 'credential' => 'cable-private',
+                'nested' => [{ 'secret' => 'nested-private', 'pin' => '1234', 'visible' => 'ok' }] }
+    socket_channel = channel_class.new(connection, 'id', payload)
+    channel_class.failure = error
+    expect_original_error { socket_channel.perform_action(payload.merge('action' => 'speak')) }
+    properties = client.dequeue_last_message[:properties]
+    expected = { 'password' => '[FILTERED]', 'credential' => '[FILTERED]',
+                 'nested' => [{ 'secret' => '[FILTERED]', 'pin' => '[CABLE FILTERED]', 'visible' => 'ok' }] }
+    aggregate_failures do
+      expect(properties['$channel_params']).to eq(expected)
+      expect(properties['$action_data']).to eq(expected.merge('action' => 'speak'))
+    end
+    expect(payload['nested'].first['pin']).to eq('1234')
+  end
+
+  it 'uses Cable filters without a Rails application and tolerates config without filter_parameters' do
+    server.config.filter_parameters = [:credential]
+    allow(Rails).to receive(:application).and_return(nil)
+    channel_class.failure = error
+    expect_original_error { channel.perform_action('action' => 'speak', 'credential' => 'private') }
+    expect(client.dequeue_last_message[:properties]['$action_data']['credential']).to eq('[FILTERED]')
+
+    allow(connection).to receive(:config).and_return(Object.new)
+    app_filter = ->(key, value) { value.replace('[APP FILTERED]') if key == 'pin' }
+    allow(Rails).to receive(:application).and_return(
+      double(config: double(root: nil, filter_parameters: [app_filter]))
+    )
+    channel_class.failure = RuntimeError.new('next failure')
+    expect { channel.perform_action('action' => 'speak', 'pin' => '1234') }.to raise_error('next failure')
+    expect(client.dequeue_last_message[:properties]['$action_data']['pin']).to eq('[APP FILTERED]')
+  end
+
+  describe 'subscription command dispatch' do
+    let(:identifier) { { 'channel' => channel_class.name, 'room' => 'lobby' }.to_json }
+
+    def execute(command, data = {})
+      connection.subscriptions.execute_command('command' => command, 'identifier' => identifier,
+                                               'data' => data.to_json)
+    end
+
+    def install_connection_handler(&block)
+      connection_class.rescue_from(RuntimeError, &block)
+    end
+
+    %w[subscribe message unsubscribe].each do |command|
+      it "waits for the connection handler consuming #{command} failures" do
+        expect(PostHog::Rails.config.report_rescued_exceptions).to be(false)
+        seen = []
+        install_connection_handler do |exception|
+          seen << exception
+          PostHog.capture(event: 'handled cable error')
+        end
+        execute('subscribe') unless command == 'subscribe'
+        channel_class.failure = error
+        context_class.with_context(distinct_id: 'worker', session_id: 'worker-session') do
+          outer = context_class.current
+          execute(command, 'action' => 'speak')
+          expect(context_class.current).to equal(outer)
+        end
+        expect(seen).to eq([error])
+        expect(client.queued_messages).to eq(1)
+        event = client.dequeue_last_message
+        expect(event[:event]).to eq('handled cable error')
+        expect(event[:distinct_id]).to eq('browser-user')
+        expect(event[:properties]).to include('$session_id' => 'browser-session', '$request_path' => '/cable')
+      end
+    end
+
+    it 'does not capture consumed failures even when rescued exception reporting is enabled' do
+      PostHog::Rails.config.report_rescued_exceptions = true
+      seen = []
+      install_connection_handler { |exception| seen << exception }
+      execute('subscribe')
+      channel_class.failure = error
+      execute('message', 'action' => 'speak')
+      expect(seen).to eq([error])
+      expect(client.queued_messages).to eq(0)
+    end
+
+    it 'captures a dispatch failure with no matching connection handler once with channel context' do
+      execute('subscribe')
+      channel_class.failure = error
+      execute('message', 'action' => 'speak', 'password' => 'private')
+      expect(client.queued_messages).to eq(1)
+      event = client.dequeue_last_message
+      expect(event[:distinct_id]).to eq('browser-user')
+      expect(event[:properties]).to include('$channel_class' => 'PostHogCableChannel', '$action' => 'speak',
+                                            '$action_cable_operation' => 'action', '$session_id' => 'browser-session')
+      expect(event[:properties]['$exception_list'].first['mechanism']).to include('handled' => false)
+      expect(context_class.current).to be_nil
+    end
+
+    it 'keeps authenticated connection identity on a deferred capture' do
+      connection_class.class_eval { attr_accessor :current_user }
+      connection.current_user = Struct.new(:id).new('signed-in')
+      execute('subscribe')
+      channel_class.failure = error
+      execute('message', 'action' => 'speak')
+      event = client.dequeue_last_message
+      expect(event[:distinct_id]).to eq('signed-in')
+      expect(event[:properties]['$session_id']).to eq('browser-session')
+    end
+
+    it 'isolates pending captures across concurrent dispatched sockets' do
+      ready = Queue.new
+      proceed = Queue.new
+      install_connection_handler do |_exception|
+        ready << true
+        proceed.pop
+        raise 'handler escaped' if env['HTTP_X_POSTHOG_DISTINCT_ID'] == 'escaping'
+      end
+      sockets = %w[consumed escaping].map do |id|
+        socket = connection_class.new(server, env.merge('HTTP_X_POSTHOG_DISTINCT_ID' => id))
+        socket.subscriptions.execute_command('command' => 'subscribe', 'identifier' => identifier)
+        socket
+      end
+      channel_class.failure = error
+      results = sockets.map do |socket|
+        Thread.new do
+          context_class.with_context(distinct_id: 'worker') do
+            begin
+              socket.subscriptions.execute_command('command' => 'message', 'identifier' => identifier,
+                                                   'data' => { 'action' => 'speak' }.to_json)
+            rescue RuntimeError => e
+              expect(e.message).to eq('handler escaped')
+            end
+            expect(context_class.current.distinct_id).to eq('worker')
+          end
+        end
+      end
+      2.times { ready.pop }
+      2.times { proceed << true }
+      results.each(&:value)
+      expect(client.queued_messages).to eq(1)
+      event = client.dequeue_last_message
+      expect(event[:distinct_id]).to eq('escaping')
+      expect(event[:properties]['$action']).to eq('speak')
+      expect(context_class.current).to be_nil
+    end
+
+    it 'preserves errors escaping a connection handler and invokes the handler only once' do
+      execute('subscribe')
+      handler_error = ArgumentError.new('handler failed')
+      seen = []
+      install_connection_handler do |exception|
+        seen << exception
+        raise handler_error
+      end
+      channel_class.failure = error
+      expect { execute('message', 'action' => 'speak') }.to(
+        raise_error { |raised| expect(raised).to equal(handler_error) }
+      )
+      expect(seen).to eq([error])
+      expect(client.queued_messages).to eq(1)
+      event = client.dequeue_last_message
+      expect(event[:properties]['$exception_list'].first).to include('value' => 'handler failed')
+      expect(event[:properties]['$exception_list'].first['mechanism']).to include('handled' => false)
+      expect(context_class.current).to be_nil
+    end
+
+    it 'does not infer consumption from a registered connection handler on a direct channel call' do
+      seen = []
+      install_connection_handler { |exception| seen << exception }
+      channel_class.failure = error
+      expect_original_error { channel.perform_action('action' => 'speak') }
+      expect(seen).to be_empty
+      expect(client.queued_messages).to eq(1)
+    end
+
+    it 'does not capture channel-local rescue handlers or call a connection handler for them' do
+      PostHog::Rails.config.report_rescued_exceptions = true
+      channel_class.rescue_from(RuntimeError) { |_exception| :handled }
+      seen = []
+      install_connection_handler { |exception| seen << exception }
+      execute('subscribe')
+      channel_class.failure = error
+      execute('message', 'action' => 'speak')
+      expect(seen).to be_empty
+      expect(client.queued_messages).to eq(0)
+    end
+
+    it 'preserves normal dispatcher returns and does not retain a previous failure' do
+      execute('subscribe')
+      channel_class.failure = error
+      execute('message', 'action' => 'speak')
+      client.dequeue_last_message
+      channel_class.failure = nil
+      expect(execute('message', 'action' => 'speak')).to eq(:spoken)
+      expect(client.queued_messages).to eq(0)
+      expect(context_class.current).to be_nil
+    end
+  end
+
   it 'captures errors from real before/after channel callbacks' do
     %i[before_subscribe after_subscribe after_unsubscribe].each do |callback|
       channel_class.observer = ->(stage) { raise "#{callback} failed" if stage == callback }
@@ -291,11 +488,14 @@ RSpec.describe 'Action Cable exception capture' do
     expect(context_class.current).to be_nil
   end
 
-  it 'captures personless failures on test connections without env' do
+  it 'captures filtered personless failures on test connections without env or config' do
     socket = Struct.new(:identifiers, :logger).new([], Logger.new(File::NULL))
     channel_class.failure = error
-    expect_original_error { channel_class.new(socket, '').perform_action('action' => 'speak') }
+    expect_original_error do
+      channel_class.new(socket, '', 'password' => 'private').perform_action('action' => 'speak')
+    end
     event = client.dequeue_last_message
+    expect(event[:properties]['$channel_params']['password']).to eq('[FILTERED]')
     expect(event[:properties]['$process_person_profile']).to be(false)
     expect(event[:properties]).not_to have_key('$session_id')
   end

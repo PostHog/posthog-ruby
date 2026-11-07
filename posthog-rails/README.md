@@ -33,7 +33,9 @@ Each operation uses fresh connection-env context owned by the current Rails faca
 
 Exception identity prefers authenticated controller context from the environment. Without a controller, the connection's `current_user_method` and existing `user_id_method`/common ID rules apply. `capture_user_context = false` disables lookup; unavailable users fall back to headers. `current_user_resolver` retains its controller-only contract and is not called with a connection. Connection identifiers and cookies never infer identity.
 
-Properties include connection/channel classes, operation, and channel params/action data filtered by Rails `filter_parameters`. Raw environments, cookies, authorization headers, subscription identifiers, and URL query strings are not attached. Review filtering and `before_send` for application-specific sensitive data. Application-consumed exceptions (including channel `rescue_from`) are not captured by these boundaries. Return values and escaping exceptions remain unchanged.
+Properties include connection/channel classes, operation, and channel params/action data filtered by both application `filter_parameters` and the effective connection's `config.filter_parameters` (including Cable-specific rules). Nested values and Rails-supported Proc filters apply before serialization. Raw environments, cookies, authorization headers, subscription identifiers, and URL query strings are not attached. Review filtering and `before_send` for application-specific sensitive data.
+
+Channel failures dispatched through `Subscriptions#execute_command` wait for connection `rescue_from` handling before capture. Application-consumed exceptions, including channel-local and connection `rescue_from`, are not captured by these boundaries, even with `report_rescued_exceptions = true`. That option does not enable handled Action Cable events. Unhandled channel failures retain channel/action context, including when the dispatcher logs them without re-raising. Direct channel calls capture escaping errors without invoking connection handlers. Return values, handler invocation counts, and escaping exceptions remain unchanged.
 
 ## PostHog Logs (optional)
 

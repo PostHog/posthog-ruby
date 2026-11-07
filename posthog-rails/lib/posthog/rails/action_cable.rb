@@ -17,14 +17,26 @@ module PostHog
       end
 
       def call
-        env = connection_env
-        Internal::Context.with_context(context_data(env), fresh: true, owner: PostHog.client,
-                                                          enrich_current_span: false) do
+        with_context do
           yield
         rescue StandardError => e
-          capture_exception(e, env)
+          dispatch = ActionCableDispatch.current(@connection) if @channel
+          if dispatch
+            dispatch.defer(self, e)
+          else
+            capture_exception(e, connection_env)
+          end
           raise
         end
+      end
+
+      def with_context(&block)
+        Internal::Context.with_context(context_data(connection_env), fresh: true, owner: PostHog.client,
+                                                                     enrich_current_span: false, &block)
+      end
+
+      def report(exception)
+        with_context { capture_exception(exception, connection_env) }
       end
 
       private
@@ -78,6 +90,15 @@ module PostHog
         nil
       end
 
+      def filter_sensitive_params(params)
+        return ParameterFilter::EMPTY_HASH unless params.is_a?(Hash)
+
+        filters = Array(::Rails.application&.config&.filter_parameters)
+        config = @connection.config if @connection.respond_to?(:config)
+        filters += Array(config.filter_parameters) if config.respond_to?(:filter_parameters)
+        ParameterFilter.backend.new(filters).filter(params)
+      end
+
       def build_cable_properties
         properties = {
           '$exception_source' => 'rails.action_cable',
@@ -98,6 +119,52 @@ module PostHog
       end
     end
 
+    # A channel error reaches connection rescue handlers outside the channel boundary.
+    # Keep its capture pending only for the current command, not on the shared socket.
+    # @api private
+    class ActionCableDispatch
+      def self.current(connection)
+        dispatch = Thread.current[:posthog_cable_dispatch]
+        dispatch if dispatch&.connection.equal?(connection)
+      end
+
+      attr_reader :connection, :exception
+      attr_accessor :handled
+
+      def initialize(connection)
+        @connection = connection
+      end
+
+      def defer(capture, exception)
+        return if @capture
+
+        @capture = capture
+        @exception = exception
+      end
+
+      def call
+        previous = Thread.current[:posthog_cable_dispatch]
+        Thread.current[:posthog_cable_dispatch] = self
+        result = yield
+        @capture&.report(@exception) unless handled
+        result
+      rescue StandardError => e
+        @capture&.report(e)
+        raise
+      ensure
+        Thread.current[:posthog_cable_dispatch] = previous
+      end
+    end
+
+    # @api private
+    module ActionCableSubscriptionsExtensions
+      def execute_command(data)
+        ActionCableCapture.new(@connection, 'command').with_context do
+          ActionCableDispatch.new(@connection).call { super }
+        end
+      end
+    end
+
     # @api private
     module ActionCableContext
       private
@@ -110,6 +177,13 @@ module PostHog
     # @api private
     module ActionCableConnectionExtensions
       include ActionCableContext
+
+      def rescue_with_handler(exception)
+        result = super
+        dispatch = ActionCableDispatch.current(self)
+        dispatch.handled = true if result && dispatch&.exception.equal?(exception)
+        result
+      end
 
       private
 
@@ -140,6 +214,7 @@ module PostHog
     end
 
     private_constant :ActionCableCapture, :ActionCableContext,
-                     :ActionCableConnectionExtensions, :ActionCableChannelExtensions
+                     :ActionCableConnectionExtensions, :ActionCableChannelExtensions,
+                     :ActionCableDispatch, :ActionCableSubscriptionsExtensions
   end
 end
