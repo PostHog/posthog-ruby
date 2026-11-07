@@ -96,7 +96,7 @@ module PostHog
         filters = Array(::Rails.application&.config&.filter_parameters)
         config = @connection.config if @connection.respond_to?(:config)
         filters += Array(config.filter_parameters) if config.respond_to?(:filter_parameters)
-        ParameterFilter.backend.new(filters).filter(params)
+        ParameterFilter.backend.new(filters.uniq).filter(params)
       end
 
       def build_cable_properties

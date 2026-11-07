@@ -174,6 +174,22 @@ RSpec.describe 'Action Cable exception capture' do
     expect(payload['nested'].first['pin']).to eq('1234')
   end
 
+  it 'runs a shared application Proc filter only once when Cable inherits it' do
+    filter = ->(key, value) { value.reverse! if key == 'pin' }
+    allow(Rails).to receive(:application).and_return(
+      double(env_config: {}, config: double(root: nil, filter_parameters: [filter]))
+    )
+    server.config.filter_parameters = [filter]
+    channel_class.failure = error
+    socket_channel = channel_class.new(connection, 'id', 'pin' => '1234')
+    expect_original_error { socket_channel.perform_action('action' => 'speak', 'pin' => '5678') }
+    properties = client.dequeue_last_message[:properties]
+    aggregate_failures do
+      expect(properties['$channel_params']['pin']).to eq('4321')
+      expect(properties['$action_data']['pin']).to eq('8765')
+    end
+  end
+
   it 'uses Cable filters without a Rails application and tolerates config without filter_parameters' do
     server.config.filter_parameters = [:credential]
     allow(Rails).to receive(:application).and_return(nil)
