@@ -38,6 +38,20 @@ RSpec.describe PostHog::Rails::Configuration do
       # defaults still apply
       expect(config.should_capture_exception?(ActionController::RoutingError.new('x'))).to be false
     end
+
+    it 'excludes subclasses of an excluded class' do
+      config.excluded_exceptions = ['MyApp::IgnorableError']
+      stub_const('MyApp::IgnorableError', Class.new(StandardError))
+      expect(config.should_capture_exception?(Class.new(MyApp::IgnorableError).new)).to be false
+    end
+
+    it 'excludes an exception whose cause chain contains an excluded class' do
+      config.excluded_exceptions = ['MyApp::IgnorableError']
+      stub_const('MyApp::IgnorableError', Class.new(StandardError))
+      wrapper = StandardError.new('retrying')
+      wrapper.define_singleton_method(:cause) { MyApp::IgnorableError.new('over limit') }
+      expect(config.should_capture_exception?(wrapper)).to be false
+    end
   end
 
   describe 'user context defaults' do
