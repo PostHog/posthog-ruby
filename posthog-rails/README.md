@@ -9,6 +9,10 @@ SDK usage examples and code snippets live in the official documentation so they 
 - [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
 - [Ruby library docs](https://posthog.com/docs/libraries/ruby)
 
+## Exception stack frames
+
+Rails-generated template method names lose their unstable numeric suffixes when they match the template source path. File paths, line numbers, source context, and application-frame classification stay unchanged; no additional frames are silenced or removed.
+
 ## OpenTelemetry span context (optional)
 
 Request context adds missing `sessionId` and `posthogDistinctId` attributes to an active recording OpenTelemetry SDK span. Register the optional `PostHog::ContextSpanProcessor` on the application's existing provider for child spans. OpenTelemetry SDK 1.0.0 or later is supported and remains optional.
