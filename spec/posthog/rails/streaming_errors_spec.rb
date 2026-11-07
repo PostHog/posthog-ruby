@@ -177,7 +177,6 @@ RSpec.describe 'Rails streaming exception capture' do
     expect(event[:properties]['$exception_list'].first['mechanism']).to include('type' => 'middleware',
                                                                                 'handled' => false)
     expect(body).not_to respond_to(:log_error)
-    expect(ActionController::Live.private_instance_methods).to include(:log_error)
   end
 
   it 'does not pin the context from template body creation' do
@@ -245,7 +244,7 @@ RSpec.describe 'Rails streaming exception capture' do
     end)
   end
 
-  it 'preserves the return value of both original private logging methods' do
+  it 'preserves the return value of both original logging methods' do
     allow(logger).to receive(:fatal).and_return(:logged)
     controller = Class.new(ActionController::Base) { include ActionController::Live }.new
     expect(controller.send(:log_error, error)).to eq(:logged)
@@ -277,7 +276,6 @@ RSpec.describe 'Rails streaming exception capture' do
         abort 'duplicate Live wrapper' unless ActionController::Live.ancestors.count(integration::LiveReporter) == 1
         body = ActionView::StreamingTemplateRenderer::Body
         abort 'duplicate template wrapper' unless body.ancestors.count(integration::TemplateReporter) == 1
-        abort 'public Live logger' unless ActionController::Live.private_instance_methods.include?(:log_error)
         abort 'public template logger' unless body.private_instance_methods.include?(:log_error)
       RUBY
       stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib', '-e', script)
@@ -314,13 +312,16 @@ RSpec.describe 'Rails streaming exception capture' do
     expect(ActiveSupport).not_to have_received(:on_load)
   end
 
-  it 'preserves public Live reporter visibility used by older Rails' do
-    live = Module.new do
-      def log_error(_error)
-        :logged
+  %i[public private].each do |visibility|
+    it "preserves #{visibility} Live reporter visibility" do
+      live = Module.new do
+        def log_error(_error)
+          :logged
+        end
       end
+      live.send(visibility, :log_error)
+      ActiveSupport.run_load_hooks(:action_controller_live, live)
+      expect(live.send("#{visibility}_instance_methods")).to include(:log_error)
     end
-    ActiveSupport.run_load_hooks(:action_controller_live, live)
-    expect(live.public_instance_methods).to include(:log_error)
   end
 end
