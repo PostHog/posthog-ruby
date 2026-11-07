@@ -33,6 +33,10 @@ module PostHog
         )
       end
 
+      initializer 'posthog.streaming_errors' do
+        StreamingExceptions.install
+      end
+
       # After initialization, set up remaining integrations
       config.after_initialize do |_app|
         # Hook into ActiveJob only if enabled
