@@ -141,7 +141,7 @@ RSpec.describe PostHog::MCP::Client do
     expect(prepared[0][:inputSchema][:properties].keys).to eq(%i[context llm_model])
     expect(prepared[1][:name]).to eq('get_more_tools')
     expect(prepared[1][:inputSchema][:properties].keys).to eq(%i[context llm_model])
-    expect(prepared[1][:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+    expect(prepared[1][:inputSchema][:required]).to eq(['context'])
 
     without = client.prepare_tool_list(tools, capture_model: false, report_missing: true)
     expect(without[0][:inputSchema][:properties].keys).to eq([:context])
