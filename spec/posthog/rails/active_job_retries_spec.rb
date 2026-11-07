@@ -17,7 +17,7 @@ RSpec.describe 'Active Job retry reporting' do
       prepend PostHog::Rails::ActiveJobExtensions
 
       class_attribute :failure
-      retry_on RuntimeError, wait: 0, attempts: 3
+      retry_on StandardError, wait: 0, attempts: 3
 
       def perform(*)
         raise(self.class.failure || RuntimeError.new('retry failure'))
@@ -182,11 +182,64 @@ RSpec.describe 'Active Job retry reporting' do
     expect(next_event).to be_nil
   end
 
-  it 'does not broaden the existing job exclusion contract' do
+  [false, true].each do |nested|
+    %i[configured default].each do |exclusion|
+      it "schedules retries without reporting #{exclusion} exclusions with nested=#{nested}" do
+        enable_reporting
+        excluded_class = if exclusion == :configured
+                           PostHog::Rails.config.excluded_exceptions = ['ArgumentError']
+                           ArgumentError
+                         else
+                           stub_const('ActiveRecord::RecordNotFound', Class.new(StandardError))
+                         end
+        excluded = excluded_class.new('excluded failure')
+        job_class.failure = if nested
+                              begin
+                                raise RuntimeError.new('wrapper'), cause: excluded
+                              rescue RuntimeError => e
+                                e
+                              end
+                            else
+                              excluded
+                            end
+        ActiveJob::Base.execute(enqueue_job)
+        expect(job_class.queue_adapter.enqueued_jobs.size).to eq(2)
+        expect(next_event).to be_nil
+      end
+    end
+  end
+
+  [50, 51].each do |position|
+    it "checks exclusions only within the serialized chain at position #{position}" do
+      enable_reporting
+      PostHog::Rails.config.excluded_exceptions = ['ArgumentError']
+      failure = ArgumentError.new('excluded cause')
+      (position - 1).times do
+        cause = failure
+        failure = RuntimeError.new('wrapper')
+        failure.define_singleton_method(:cause) { cause }
+      end
+      job_class.failure = failure
+      ActiveJob::Base.execute(enqueue_job)
+      expect(job_class.queue_adapter.enqueued_jobs.size).to eq(2)
+      event = next_event
+      if position == 50
+        expect(event).to be_nil
+      else
+        expect(event[:properties]['$exception_list'].size).to eq(50)
+      end
+    end
+  end
+
+  it 'reports an unexcluded cycle once without traversing it again' do
     enable_reporting
-    PostHog::Rails.config.excluded_exceptions = ['RuntimeError']
+    failure = RuntimeError.new('cyclic failure')
+    failure.define_singleton_method(:cause) { failure }
+    job_class.failure = failure
     ActiveJob::Base.execute(enqueue_job)
-    expect(next_event[:event]).to eq('$exception')
+    expect(job_class.queue_adapter.enqueued_jobs.size).to eq(2)
+    expect(next_event[:properties]['$exception_list'].size).to eq(1)
+    expect(next_event).to be_nil
   end
 
   it 'uses the existing argument identity fallback' do
@@ -257,6 +310,12 @@ RSpec.describe 'Active Job retry reporting' do
     ensure
       disabled_client&.shutdown
     end
+  end
+
+  it 'preserves the standalone retry lifecycle with matched framework packages' do
+    output, status = Open3.capture2e(RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib',
+                                     'spec/fixtures/active_job_retry_lifecycle.rb')
+    expect(status.success?).to be(true), output
   end
 
   %w[before after].each do |load_order|

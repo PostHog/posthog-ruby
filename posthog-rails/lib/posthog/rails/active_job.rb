@@ -13,6 +13,7 @@ module PostHog
       def self.prepended(base)
         base.extend(ClassMethods)
         base.around_perform :with_posthog_job_context, prepend: true if base.respond_to?(:around_perform)
+        base.prepend(LegacyRetryReporting) if ::ActiveJob::VERSION::MAJOR < 6
         return if @retry_subscription
 
         @retry_subscription = ActiveSupport::Notifications.subscribe('enqueue_retry.active_job') do |*args|
@@ -21,6 +22,24 @@ module PostHog
           job.send(:capture_posthog_retry, payload[:error]) if job.is_a?(ActiveJobExtensions)
         end
       end
+
+      # Active Job 5.2 neither emits enqueue_retry nor passes the error to retry_job.
+      module LegacyRetryReporting
+        # @api private
+        def rescue_with_handler(exception, ...)
+          previous_exception = @posthog_retry_exception
+          @posthog_retry_exception = exception
+          super
+        ensure
+          @posthog_retry_exception = previous_exception
+        end
+
+        # @api private
+        def retry_job(...)
+          super.tap { capture_posthog_retry(@posthog_retry_exception) }
+        end
+      end
+      private_constant :LegacyRetryReporting
 
       module ClassMethods
         # DSL for defining how to extract distinct_id from job arguments.
@@ -154,6 +173,7 @@ module PostHog
         config = PostHog::Rails.config
         return unless config&.auto_instrument_active_job && config.report_active_job_retries && exception
         return unless PostHog.initialized? && PostHog.client.enabled?
+        return if excluded_posthog_retry?(exception, config)
 
         Internal::Context.with_context(
           @posthog_execution_context || posthog_job_context, fresh: true, enrich_current_span: false
@@ -162,6 +182,18 @@ module PostHog
         end
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to capture job retry: #{e.class}")
+      end
+
+      def excluded_posthog_retry?(exception, config)
+        seen = {}.compare_by_identity
+        current = exception
+        while current && seen.size < PostHog::ExceptionCapture::MAX_CHAINED_EXCEPTIONS && !seen.key?(current)
+          return true unless config.should_capture_exception?(current)
+
+          seen[current] = true
+          current = current.respond_to?(:cause) ? current.cause : nil
+        end
+        false
       end
 
       def capture_job_exception(exception, retry_failure: false)
