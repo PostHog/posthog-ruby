@@ -272,6 +272,14 @@ RSpec.describe 'automatic exception capture mechanisms' do
         expect(client.queued_messages).to eq(0)
       end
 
+      it 'still honors exclusions for the Sidekiq wrapper' do
+        PostHog::Rails.config.excluded_exceptions = ['Sidekiq::JobRetry::Handled']
+
+        report_error
+
+        expect(client.queued_messages).to eq(0)
+      end
+
       it 'preserves a retry wrapper that has no cause' do
         allow(wrapped_error).to receive(:cause).and_return(nil)
 
