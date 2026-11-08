@@ -24,6 +24,7 @@ group :development, :test do
   gem 'rake', '~> 13.4.2'
   gem 'rspec', '~> 3.13'
   gem 'rubocop', '~> 1.91.0'
+  gem 'sidekiq', ENV.fetch('SIDEKIQ_VERSION', '~> 7.3'), require: false
   gem 'timecop'
   gem 'tzinfo', '~> 2.0'
   gem 'webmock'

@@ -165,6 +165,8 @@ module PostHog
         # Add serialized job arguments (be careful with sensitive data)
         properties['$job_arguments'] = sanitize_job_arguments(arguments) if arguments.present?
 
+        return if defined?(PostHog::Rails::Sidekiq) && Sidekiq.defer_capture?(exception, distinct_id, properties)
+
         PostHog.capture_exception(
           exception,
           distinct_id,

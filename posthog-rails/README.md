@@ -35,6 +35,31 @@ Set `config.auto_instrument_active_job = true` to copy the current session and d
 
 The existing job distinct ID extractor takes precedence over the saved ID. Rescue, discard, and terminal retry handlers keep this effective context, including when they enqueue child jobs. Integer and finite floating-point distinct IDs are stored as strings in job snapshots; session IDs must be strings. Events, optional logs, and application OpenTelemetry spans use the shared job context. Register `PostHog::ContextSpanProcessor` for child spans as described in the trace context guide. An existing job span receives IDs only when its public `messaging.system` is `active_job` and `messaging.message.id` matches the current job ID. Other active spans stay unchanged. This transfers PostHog IDs; it does not transfer a distributed trace or configure a tracing provider.
 
+## Sidekiq retry reporting (optional)
+
+On Rails 7.1 or later with Sidekiq 7 or 8, explicitly load and install the integration in an initializer:
+
+```ruby
+require 'posthog/rails/sidekiq'
+
+Sidekiq.configure_server do |config|
+  PostHog::Rails::Sidekiq.install(config, error_reporting: :exhausted)
+end
+```
+
+Initialize the PostHog client with `PostHog.init` as usual. Installation is independent of Rails' `auto_capture_exceptions` option. There is no Sidekiq setting on `PostHog::Rails::Configuration`, and the optional integration is not loaded by the general Rails integration. Leaving it uninstalled keeps existing reporting unchanged.
+
+The required `error_reporting:` argument accepts:
+- `:all` reports each failed Sidekiq attempt once through Sidekiq's error handler.
+- `:exhausted` reports Sidekiq's terminal failure notifications through its death handler. This includes exhausted retries, early kills, jobs with `retry: false`, and terminal failures with `dead: false`.
+- `:dead` reports only terminal failures sent to Sidekiq's dead queue. It skips `retry: false`, `dead: false`, and discarded jobs. `retry: 0` can still send a failed job to the dead queue.
+
+Rails 7.1 provides the `job.sidekiq` error-reporter source needed to distinguish Sidekiq failures from unrelated Rails reports. These policies follow Sidekiq's callbacks, not a comparison of retry counts. In Sidekiq 8.1+, deliberate discards also emit a terminal failure notification and are included in `:exhausted`. Earlier versions do not notify death handlers for these discards.
+
+The installed Sidekiq integration owns automatic error reporting for its jobs. Rails wrapper reports and Active Job captures defer to the selected Sidekiq policy instead of sending separate events. Active Job identity, session, and filtered job properties are retained when available. Other Rails error subscribers and Sidekiq handlers remain active. Manual exception captures and explicit application Rails error reports are not filtered by this policy. Active Job's own retry scheduling still controls failures it consumes before they reach Sidekiq.
+
+The integration does not change retry scheduling, dead-queue storage, or shutdown handling. Native Sidekiq job arguments are not collected, and Sidekiq infrastructure errors without a job are not captured by these hooks. Sidekiq remains an optional application dependency. Unsupported Rails or Sidekiq versions log a warning and keep the existing reporting paths. Install at boot, not while jobs are running. Reinstalling on the same server configuration updates the policy without adding duplicate handlers.
+
 ## PostHog Logs (optional)
 
 `posthog-rails` can forward `Rails.logger` output to [PostHog Logs](https://posthog.com/docs/logs)

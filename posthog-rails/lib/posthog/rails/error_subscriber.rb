@@ -20,6 +20,7 @@ module PostHog
       def report(error, handled:, severity:, context:, source: nil)
         return unless PostHog::Rails.config&.auto_capture_exceptions
         return unless PostHog::Rails.config&.should_capture_exception?(error)
+        return if defined?(PostHog::Rails::Sidekiq) && Sidekiq.suppress_rails_report?(error, source)
 
         distinct_id = context[:user_id] || context[:distinct_id]
 

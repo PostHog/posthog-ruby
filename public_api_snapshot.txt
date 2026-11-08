@@ -414,4 +414,6 @@ instance_method PostHog::Rails::InitConfig#test_mode=(value)
 instance_method PostHog::Rails::InitConfig#to_client_options()
 module PostHog::Rails::Logs
 class PostHog::Rails::Railtie < Rails::Railtie
+module PostHog::Rails::Sidekiq
+class_method PostHog::Rails::Sidekiq.install(config, error_reporting:)
 constant PostHog::Rails::VERSION: String
