@@ -142,10 +142,11 @@ module PostHog
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
     #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
-    # @param track_opens_and_clicks [Boolean] Code form: whether the email carries PostHog's open and click tracking.
-    #   Defaults to +true+. With +false+, the email goes out without PostHog's open pixel or rewritten links, so
-    #   PostHog can't count its opens and clicks. Independent of +capture_engagement+, which decides whether
-    #   engagement events are captured on the recipient's person. Needs a PostHog version that takes this field.
+    # @param track_opens_and_clicks [Boolean] Code form: whether PostHog tracks opens and clicks of the email.
+    #   Defaults to +true+. With +false+, the email goes out without PostHog's open pixel, so PostHog can't count its
+    #   opens. PostHog doesn't track clicks on emails sent from code, so their links are never rewritten either way.
+    #   Independent of +capture_engagement+, which decides whether engagement events are captured on the recipient's
+    #   person. Needs a PostHog version that takes this field.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
