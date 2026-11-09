@@ -141,7 +141,8 @@ module PostHog
 
     def message_bytes(bodies)
       files = @attachments.sum { |attachment| encoded_bytes(attachment.bytes.bytesize) }
-      files + bodies.sum { |body| utf8_bytesize(body) } + HEADERS_AND_MIME_BOUNDARIES_BYTES
+      # PostHog counts each body like a file, so a send that passes here passes its check after the uploads.
+      files + bodies.sum { |body| encoded_bytes(utf8_bytesize(body)) } + HEADERS_AND_MIME_BOUNDARIES_BYTES
     end
 
     # The send carries each body as JSON, which transcodes it to UTF-8, so a UTF-16 body counts its UTF-8 bytes.

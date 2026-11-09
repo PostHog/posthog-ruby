@@ -459,18 +459,27 @@ module PostHog
           .to eq('msg_1')
       end
 
-      it 'counts a body by the UTF-8 bytes it is sent as, whatever its encoding' do
-        largest_that_fits = ("\0" * 29_182_875).b
-        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
+      it "counts each body like a file: its UTF-8 bytes' Base64 size with line breaks" do
+        stub_request(:post, uploads_url).to_return do |request|
+          answer_uploads(*JSON.parse(request.body)['files'].map { |file| present_slot(file['sha256']) })
+        end
         stub_request(:post, send_url).to_return(accept)
-        attachments = [{ filename: 'scan.pdf', content: largest_that_fits }]
+        # Each file leaves room for 57 characters of body, but not for 58.
+        room_for_57_ascii = [{ filename: 'scan.pdf', content: ("\0" * 29_182_818).b }] # 81 bytes left
+        room_for_57_two_byte = [{ filename: 'scan.pdf', content: ("\0" * 29_182_761).b }] # 159 bytes left
 
-        sent = send_code(html: 'abc'.encode(Encoding::UTF_16LE), attachments: attachments)
-        too_large = refused_attachment(html: 'abcd'.encode(Encoding::UTF_16LE), attachments: attachments)
+        sent = [
+          send_code(html: 'a' * 57, attachments: room_for_57_ascii), # counts 78
+          send_code(html: '', text: ('é' * 57).encode(Encoding::UTF_16LE), attachments: room_for_57_two_byte) # 156
+        ]
+        refused = [
+          refused_attachment(html: 'a' * 58, attachments: room_for_57_ascii), # counts 83
+          refused_attachment(html: '', text: 'é' * 58, attachments: room_for_57_two_byte) # counts 161
+        ]
 
-        expect(sent.id).to eq('msg_1')
-        expect(sent_bodies.first['html']).to eq('abc')
-        expect(too_large.code).to eq('message_too_large')
+        expect(refused.map(&:code)).to eq(%w[message_too_large message_too_large])
+        expect(sent.map(&:id)).to eq(%w[msg_1 msg_1])
+        expect(sent_bodies.map { |body| body['text'] }).to eq([nil, 'é' * 57])
       end
 
       it 'refuses a file it cannot send before any request, naming the field and never the content' do
