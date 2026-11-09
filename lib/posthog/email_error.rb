@@ -37,7 +37,12 @@ module PostHog
       @retry_after = retry_after
     end
 
-    SDK_ERROR_NAMES = { 'network_error' => 'service_unavailable', 'invalid_attachment' => 'validation_error' }.freeze
+    SDK_ERROR_NAMES = {
+      'network_error' => 'service_unavailable',
+      'invalid_attachment' => 'validation_error',
+      'too_many_attachments' => 'validation_error',
+      'message_too_large' => 'validation_error'
+    }.freeze
     private_constant :SDK_ERROR_NAMES
 
     # @api private

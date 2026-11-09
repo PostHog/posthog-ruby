@@ -199,7 +199,30 @@ module PostHog
     end
 
     describe 'copies and attachments' do
+      let(:uploads_url) { 'https://us.posthog.com/api/projects/@current/messaging/attachments/uploads/' }
+      let(:upload_url) { 'https://files.example.com/team/99882c55?X-Amz-Signature=abc' }
       let(:pdf) { "%PDF-1.7\n\xFF\x00\xE2".b }
+      let(:pdf_sha256) { '99882c5503918dac954710e17022f6243565344d43c0f30ac70d19c560f857c4' }
+      let(:png) { "\x89PNG".b }
+      let(:png_sha256) { '0f4636c78f65d3639ece5a064b5ae753e3408614a14fb18ab4d7540d2c248543' }
+      let(:five_pdfs_sha256) { 'dfb00ae2891aa7dac580fd90519992e7a8d6914de7a683c0ecc071f65868101e' }
+      let(:largest_that_fits_sha256) { '28f197eae8bd57e7c2a94d2062d2cef0a04b34e7fd3e0c743d88cda2217f069c' }
+      let(:upload_headers) do
+        { 'Content-Length' => '12', 'x-amz-checksum-sha256' => 'mYgsVQORjayVRxDhcCL2JDVlNE1DwPMKxw0ZxWD4V8Q=' }
+      end
+
+      def upload_slot(sha256, url: upload_url)
+        { sha256: sha256, status: 'upload', url: url, method: 'PUT', headers: upload_headers,
+          url_expires_at: '2026-11-09T12:15:00Z' }
+      end
+
+      def present_slot(sha256)
+        { sha256: sha256, status: 'present', expires_at: '2026-12-16T12:00:00Z' }
+      end
+
+      def answer_uploads(*slots)
+        { status: 200, body: JSON.generate(files: slots) }
+      end
 
       def refused_attachment(**overrides)
         send_code(**overrides)
@@ -216,24 +239,29 @@ module PostHog
                                              'bcc' => %w[audit@example.com archive@example.com])
       end
 
-      it 'sends the bytes of each file as Base64, with its type and content ID' do
+      it 'uploads each file PostHog asks for to its URL, without the secret key, then sends the files by hash' do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256), present_slot(png_sha256)))
+        stub_request(:put, upload_url).to_return(status: 200)
         stub_request(:post, send_url).to_return(accept)
 
         send_code(attachments: [
                     { filename: 'invoice.pdf', content: pdf, content_type: 'application/pdf' },
-                    { 'filename' => 'logo.png', 'content' => [137, 80, 78, 71], 'content_id' => 'logo' },
-                    { filename: 'notes.txt', content: 'aGVsbG8=' }
+                    { 'filename' => 'logo.png', 'content' => png, 'content_id' => 'logo' }
                   ])
 
+        expect(a_request(:post, uploads_url).with(
+                 headers: { 'Authorization' => 'Bearer phs_test' },
+                 body: { files: [{ sha256: pdf_sha256, size: 12 }, { sha256: png_sha256, size: 4 }] }.to_json
+               )).to have_been_made.once
+        expect(a_request(:put, upload_url).with(body: pdf, headers: upload_headers) do |request|
+          !request.headers.key?('Authorization')
+        end).to have_been_made.once
         expect(sent_bodies.first['attachments']).to eq([
-                                                         { 'filename' => 'invoice.pdf',
-                                                           'content' => 'JVBERi0xLjcK/wDi',
+                                                         { 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf',
                                                            'content_type' => 'application/pdf' },
-                                                         { 'filename' => 'logo.png', 'content' => 'iVBORw==',
-                                                           'content_id' => 'logo' },
-                                                         { 'filename' => 'notes.txt', 'content' => 'aGVsbG8=' }
+                                                         { 'sha256' => png_sha256, 'filename' => 'logo.png',
+                                                           'content_id' => 'logo' }
                                                        ])
-        expect(sent_bodies.first['attachments'][0]['content'].unpack1('m0')).to eq(pdf)
       end
 
       it 'leaves out empty lists, so a PostHog version without these fields still sends the email' do
@@ -244,24 +272,149 @@ module PostHog
         expect(sent_bodies.first.keys).not_to include('cc', 'bcc', 'attachments')
       end
 
-      it 'sends the same encoded files on every attempt' do
+      it 'uploads once and sends the same files on every attempt of the send' do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_return(status: 200)
         stub_request(:post, send_url).to_return(refuse(503, 'service_unavailable'), accept)
 
         send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
 
-        encoded_once = [{ 'filename' => 'invoice.pdf', 'content' => 'JVBERi0xLjcK/wDi' }]
-        expect(a_request(:post, send_url).with { |request| JSON.parse(request.body)['attachments'] == encoded_once })
-          .to have_been_made.twice
+        expect(a_request(:put, upload_url)).to have_been_made.once
+        expect(a_request(:post, send_url).with do |request|
+          JSON.parse(request.body)['attachments'] == [{ 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf' }]
+        end).to have_been_made.twice
       end
 
-      it 'takes Base64 with line breaks, as Base64.encode64 writes it' do
+      it 'takes the file as bytes, a list of byte values, or Base64 with or without line breaks' do
+        file = pdf * 5
+        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(five_pdfs_sha256)))
         stub_request(:post, send_url).to_return(accept)
-        file = (0..99).to_a.pack('C*')
 
-        send_code(attachments: [{ filename: 'data.bin', content: [file].pack('m') }])
+        [file, file.bytes, [file].pack('m0'), [file].pack('m')].each do |content|
+          send_code(attachments: [{ filename: 'invoice.pdf', content: content }])
+        end
 
         expect([file].pack('m')).to include("\n")
-        expect(sent_bodies.first['attachments'][0]['content']).to eq([file].pack('m0'))
+        expect(a_request(:post, uploads_url).with(body: { files: [{ sha256: five_pdfs_sha256, size: 60 }] }.to_json))
+          .to have_been_made.times(4)
+      end
+
+      it 'uploads a file attached twice once, and sends both references' do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_return(status: 200)
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(attachments: [{ filename: 'a.pdf', content: pdf }, { filename: 'b.pdf', content: pdf }])
+
+        expect(a_request(:post, uploads_url).with(body: { files: [{ sha256: pdf_sha256, size: 12 }] }.to_json))
+          .to have_been_made.once
+        expect(a_request(:put, upload_url)).to have_been_made.once
+        expect(sent_bodies.first['attachments'].map { |file| file['filename'] }).to eq(%w[a.pdf b.pdf])
+      end
+
+      it 'sends nothing when storage refuses an upload, and says what storage answered' do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_return(
+          status: 400,
+          body: '<?xml version="1.0"?><Error><Code>BadDigest</Code>' \
+                '<Message>The checksum did not match.</Message></Error>'
+        )
+
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect([error.code, error.status_code, error.field])
+          .to eq(['attachment_upload_failed', 400, 'attachments__0'])
+        expect(error.message).to eq('File storage refused the upload of invoice.pdf with HTTP 400 ' \
+                                    '(BadDigest: The checksum did not match.), so no email was sent.')
+        expect(a_request(:post, send_url)).not_to have_been_made
+      end
+
+      it 'names the file storage and the file when an upload never reaches it' do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_timeout
+
+        error = refused_attachment(max_retries: 0, attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect([error.code, error.name, error.field]).to eq(%w[network_error service_unavailable attachments__0])
+        expect(error.message).to eq('The upload of invoice.pdf to file storage failed, so no email was sent.')
+        expect(a_request(:post, send_url)).not_to have_been_made
+      end
+
+      it "retries an upload storage couldn't take, then sends" do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_return({ status: 503, body: '<Error><Code>SlowDown</Code></Error>' },
+                                                 { status: 200 })
+        stub_request(:post, send_url).to_return(accept)
+
+        expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
+        expect(a_request(:put, upload_url)).to have_been_made.twice
+        expect(delays.size).to eq(1)
+      end
+
+      it "sends nothing when PostHog refuses the uploads, and passes on PostHog's reason" do
+        stub_request(:post, uploads_url).to_return(
+          refuse(400, 'field_not_accepted', detail: "This project can't send files yet.", attr: 'files',
+                                            why: 'Not available yet.', fix: 'Send without files.')
+        )
+
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect([error.code, error.name, error.field, error.why, error.fix])
+          .to eq(['field_not_accepted', 'validation_error', 'files', 'Not available yet.', 'Send without files.'])
+        expect(a_request(:put, /files.example.com/)).not_to have_been_made
+        expect(a_request(:post, send_url)).not_to have_been_made
+      end
+
+      it "doesn't retry a project over its daily upload bytes" do
+        stub_request(:post, uploads_url).to_return(refuse(429, 'upload_quota_exceeded'))
+
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect(error.code).to eq('upload_quota_exceeded')
+        expect(a_request(:post, uploads_url)).to have_been_made.once
+      end
+
+      it "sends nothing when PostHog's answer doesn't say where each file goes" do
+        answers = [
+          answer_uploads,
+          answer_uploads(present_slot(png_sha256)),
+          answer_uploads(upload_slot(pdf_sha256).merge(method: 'POST')),
+          answer_uploads(upload_slot(pdf_sha256, url: 'file:///etc/passwd')),
+          answer_uploads(upload_slot(pdf_sha256).merge(headers: { 'Content-Length' => 12 }))
+        ]
+        stub_request(:post, uploads_url).to_return(*answers)
+
+        errors = answers.map { refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }]) }
+
+        expect(errors.map(&:code)).to all(eq('api_error'))
+        expect(a_request(:put, /./)).not_to have_been_made
+        expect(a_request(:post, send_url)).not_to have_been_made
+      end
+
+      it 'refuses more files or bytes than one email carries before any request' do
+        eleven = Array.new(11) { |index| { filename: "#{index}.txt", content: "file #{index}".b } }
+        largest_that_fits = ("\0" * 29_182_875).b
+
+        too_many = refused_attachment(attachments: eleven)
+        too_large = refused_attachment(attachments: [{ filename: 'scan.pdf', content: "#{largest_that_fits}\0".b }])
+        too_large_with_body = refused_attachment(html: 'abcd',
+                                                 attachments: [{ filename: 'scan.pdf', content: largest_that_fits }])
+
+        expect([too_many.code, too_many.name, too_many.field])
+          .to eq(%w[too_many_attachments validation_error attachments])
+        expect([too_large, too_large_with_body].map { |error| [error.code, error.name, error.field] })
+          .to all(eq(%w[message_too_large validation_error attachments]))
+        expect(too_large.fix).to include('40 MB per email after Base64 encoding, about 29 MB of files')
+        expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+      end
+
+      it 'uploads the largest file one email carries' do
+        largest_that_fits = ("\0" * 29_182_875).b
+        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
+        stub_request(:post, send_url).to_return(accept)
+
+        expect(send_code(html: '', attachments: [{ filename: 'scan.pdf', content: largest_that_fits }]).id)
+          .to eq('msg_1')
       end
 
       it 'refuses a file it cannot send before any request, naming the field and never the content' do
@@ -273,6 +426,7 @@ module PostHog
             ['attachments__0__headers', /not headers/],
           { attachments: [{ filename: 'a.pdf' }] } => ['attachments__0__content', /needs content/],
           { attachments: [{ filename: 'a.pdf', content: [256] }] } => ['attachments__0__content', /needs content/],
+          { attachments: [{ filename: 'a.pdf', content: ''.b }] } => ['attachments__0__content', /can't be empty/],
           { attachments: [{ filename: 'a.pdf', content: 'secret text, not Base64' }] } =>
             ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: 'a.pdf', content: "%PDF secret text \xE2\xE3".dup.force_encoding('UTF-8') }] } =>
