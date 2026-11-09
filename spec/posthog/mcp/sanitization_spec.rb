@@ -263,7 +263,23 @@ RSpec.describe PostHog::MCP::Sanitization do
         original.call(value)
       end
       described_class.sanitize_event('user_intent' => "Charging card 4111 1111 1111 1111. #{'x' * 1_000_000}")
-      expect(scanned).to eq([2 * PostHog::MCP::Truncation::MAX_USER_INTENT_LENGTH])
+      expect(scanned).to eq([4 * PostHog::MCP::Truncation::MAX_USER_INTENT_LENGTH])
+    end
+
+    # Lowercase and digits only until the last character, so only the whole
+    # word has the three character classes a credential needs.
+    alphabet = [*'a'..'z', *'0'..'9']
+    random = Random.new(5607)
+    long_word = "#{Array.new(4_999) { alphabet.sample(random: random) }.join}Q"
+    {
+      'a long word whose tail makes it a credential' => ["#{long_word} trailing words", '[redacted] trailing words'],
+      'emails that shrink the head past the cut' => ['abcdefghij@example.com ' * 400, '[redacted] ' * 400],
+      'tokens that shrink the head past the cut' => ['phc_123456789012345678901234567890 ' * 400, '[redacted] ' * 400]
+    }.each do |label, (intent, full_scan)|
+      it "keeps the same intent as a full scan for #{label}" do
+        expect(PostHog::MCP::Truncation.truncate_event(described_class.sanitize_event('user_intent' => intent))['user_intent'])
+          .to eq(PostHog::MCP::Truncation.truncate_string(full_scan, PostHog::MCP::Truncation::MAX_USER_INTENT_LENGTH))
+      end
     end
 
     it 'still redacts an intent that is binary data in full' do

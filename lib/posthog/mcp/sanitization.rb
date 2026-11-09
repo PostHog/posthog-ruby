@@ -230,15 +230,28 @@ module PostHog
         result
       end
 
-      # Truncation keeps only the head of the intent, so only a head is
-      # scanned: twice the kept length leaves room for redactions that shorten
-      # it. Binary detection still sees the whole value, as a head alone would
-      # fall under the size gate.
+      # The credential pass is linear and sees the whole intent: a private key
+      # block or a long word is judged on its full length. The personal-data
+      # passes are not, so they scan a head chosen to give the same kept text.
       def sanitize_intent(intent)
         return sanitize_captured_value(intent) unless intent.is_a?(String)
-        return BINARY_REDACTED_VALUE if binary_like?(intent)
 
-        redact_pii(sanitize_string(intent[0, 2 * Truncation::MAX_USER_INTENT_LENGTH]))
+        redact_pii_head(sanitize_string(intent), Truncation::MAX_USER_INTENT_LENGTH)
+      end
+
+      # Cutting the text changes at most the last ~1.5K characters a scan
+      # returns: a match reaches back at most an email's 345 characters, and a
+      # redaction grows a match at most from 3 characters to 10. So a head whose scan returns more
+      # than twice `keep` gives the same first `keep` characters as the full
+      # text. Otherwise the head grows to 40x `keep`, which no run of
+      # redactions can shrink below `keep`: each leaves 10 characters of at
+      # most 345.
+      def redact_pii_head(text, keep)
+        head = text[0, 4 * keep]
+        redacted = redact_pii(head)
+        return redacted if head.length == text.length || redacted.length > 2 * keep
+
+        redact_pii(text[0, 40 * keep])
       end
 
       def sanitize_exception_values(error)
