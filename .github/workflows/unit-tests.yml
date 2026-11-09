@@ -46,7 +46,6 @@ jobs:
     env:
       BUNDLE_GEMFILE: gemfiles/otel.gemfile
       RAILS_VERSION: '>= 5.2'
-      SIDEKIQ_VERSION: '~> 8.1'
       RAILS_ENV: test
       GH_ACTIONS_UNIT_TESTS: 1
     steps:
