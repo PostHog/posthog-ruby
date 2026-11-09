@@ -101,12 +101,14 @@ controller/job/mailer records use info, controller 4xx responses warn, and failu
 error. These records do not create spans or collect timings.
 
 Notification bodies are fixed descriptions with allowlisted event metadata.
-`rails.params` and `rails.job.arguments` contain JSON strings filtered with Rails'
-`filter_parameters`; custom filters receive copied original key/value types before
-JSON normalization. Unkeyed job arguments are redacted. Unsupported, cyclic, or
-oversized parameter trees are wholly redacted rather than partially truncated
-before filtering. Oversized JSON output is also replaced with a redaction marker.
-Without an application filter configuration these parameter fields are empty.
+`rails.params` serializes Rails' already-filtered controller notification parameters
+without applying filters again. `rails.job.arguments` applies the application's
+`filter_parameters` to copied original key/value types before JSON normalization.
+Unkeyed job arguments are redacted; jobs with `log_arguments = false` and Action
+Mailer delivery jobs omit arguments entirely. Unsupported, cyclic, or oversized
+parameter trees are wholly redacted rather than partially truncated. Oversized
+JSON output is also replaced with a redaction marker. Without an application
+filter configuration, keyed job argument fields are empty.
 SQL statements/binds, cookies/headers, and mail recipients/subject/content are not
 collected. Review configured parameter filters and use `logs_before_send` for
 additional scrubbing. Job completion records reuse saved/effective job identity

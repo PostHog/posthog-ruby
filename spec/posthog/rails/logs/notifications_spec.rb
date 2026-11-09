@@ -38,10 +38,10 @@ RSpec.describe 'Rails structured notification logs' do
     PostHog::Rails.config = previous_config
   end
 
-  def install(components = %i[action_controller active_record active_job action_mailer])
+  def install(components = %i[action_controller active_record active_job action_mailer], level: :debug)
     config.logs_enabled = true
     config.logs_notifications = components
-    config.logs_level = :debug
+    config.logs_level = level
     PostHog::Rails::Logs::Setup.remember_client_options(api_key: 'phc_test')
     allow(PostHog::Rails::Logs::Setup).to receive_messages(require_otel_gems: true, build_provider: provider)
     PostHog::Rails::Logs::Setup.install
@@ -57,160 +57,139 @@ RSpec.describe 'Rails structured notification logs' do
     ActiveSupport::Notifications.instrument(name, payload) { :original_result }
   end
 
-  def emit_parameter_notification(component, params)
-    install([component])
-    if component == :active_job
-      job_class = Class.new(ActiveJob::Base) do
-        def perform(*)
-          :original_result
-        end
+  def emit_job_parameters(params)
+    install([:active_job])
+    job_class = Class.new(ActiveJob::Base) do
+      def perform(*)
+        :original_result
       end
-      stub_const('CustomFilterLogsJob', job_class)
-      expect(job_class.new(params).perform_now).to eq(:original_result)
-      JSON.parse(records.fetch(0)[:attributes].fetch('rails.job.arguments')).first
-    else
-      controller = Class.new(ActionController::Base) do
-        class_attribute :notification_params
-
-        def index
-          render plain: 'ok'
-        end
-
-        def append_info_to_payload(payload)
-          super
-          payload[:params] = notification_params
-        end
-      end
-      stub_const('CustomFilterLogsController', controller)
-      controller.notification_params = params
-      expect(controller.action(:index).call(Rack::MockRequest.env_for('/')).first).to eq(200)
-      JSON.parse(records.fetch(0)[:attributes].fetch('rails.params'))
     end
+    stub_const('CustomFilterLogsJob', job_class)
+    expect(job_class.new(params).perform_now).to eq(:original_result)
+    JSON.parse(records.fetch(0)[:attributes].fetch('rails.job.arguments')).first
   end
 
-  %i[action_controller active_job].each do |component|
-    context "with #{component} custom parameter filters" do
-      def configure_parameter_filter(filter)
-        app = double('application', config: double('config', root: nil, filter_parameters: Array(filter)))
-        allow(Rails).to receive(:application).and_return(app)
-      end
+  context 'with Active Job custom parameter filters' do
+    def configure_parameter_filter(filter)
+      app = double('application', config: double('config', root: nil, filter_parameters: Array(filter)))
+      allow(Rails).to receive(:application).and_return(app)
+    end
 
-      it 'preserves symbol/string keys, symbol values and original-root semantics without mutating app data' do
-        filter = proc do |key, value, original|
-          mask = key == :secret || key == 'string_secret' ||
-                 (key == :dependent && original[:mode] == :private)
-          value.replace('[FILTERED]') if mask && value.is_a?(String)
-        end
-        configure_parameter_filter(filter)
-        params = { mode: :private, secret: 'PRIVATE_SYMBOL'.dup, 'string_secret' => 'PRIVATE_STRING'.dup,
-                   dependent: 'PRIVATE_ROOT'.dup, nested: [{ secret: 'PRIVATE_NESTED'.dup }], visible: 'ok' }
-        expected = { 'mode' => 'private', 'secret' => '[FILTERED]', 'string_secret' => '[FILTERED]',
-                     'dependent' => '[FILTERED]', 'nested' => [{ 'secret' => '[FILTERED]' }], 'visible' => 'ok' }
-        expect(emit_parameter_notification(component, params)).to eq(expected)
-        expect(params).to include(secret: 'PRIVATE_SYMBOL', 'string_secret' => 'PRIVATE_STRING',
-                                  dependent: 'PRIVATE_ROOT', nested: [{ secret: 'PRIVATE_NESTED' }])
-        expect(records.to_s).not_to include('PRIVATE_')
+    it 'preserves symbol/string keys, symbol values and original-root semantics without mutating app data' do
+      filter = proc do |key, value, original|
+        mask = key == :secret || key == 'string_secret' ||
+               (key == :dependent && original[:mode] == :private)
+        value.replace('[FILTERED]') if mask && value.is_a?(String)
       end
+      configure_parameter_filter(filter)
+      params = { mode: :private, secret: 'PRIVATE_SYMBOL'.dup, 'string_secret' => 'PRIVATE_STRING'.dup,
+                 dependent: 'PRIVATE_ROOT'.dup, nested: [{ secret: 'PRIVATE_NESTED'.dup }], visible: 'ok' }
+      expected = { 'mode' => 'private', 'secret' => '[FILTERED]', 'string_secret' => '[FILTERED]',
+                   'dependent' => '[FILTERED]', 'nested' => [{ 'secret' => '[FILTERED]' }], 'visible' => 'ok' }
+      expect(emit_job_parameters(params)).to eq(expected)
+      expect(params).to include(secret: 'PRIVATE_SYMBOL', 'string_secret' => 'PRIVATE_STRING',
+                                dependent: 'PRIVATE_ROOT', nested: [{ secret: 'PRIVATE_NESTED' }])
+      expect(records.to_s).not_to include('PRIVATE_')
+    end
 
-      it 'copies root strings before invoking mutating custom filters' do
-        filter = proc do |key, value, original|
-          original[:root_marker].replace('changed')
-          value.replace('[FILTERED]') if key == :secret && value.is_a?(String)
-        end
-        configure_parameter_filter(filter)
-        params = { secret: 'PRIVATE_COPY'.dup, root_marker: 'original'.dup }
-        emit_parameter_notification(component, params)
-        expect(params).to eq(secret: 'PRIVATE_COPY', root_marker: 'original')
-        expect(records.to_s).not_to include('PRIVATE_COPY')
+    it 'copies root strings before invoking mutating custom filters' do
+      filter = proc do |key, value, original|
+        original[:root_marker].replace('changed')
+        value.replace('[FILTERED]') if key == :secret && value.is_a?(String)
       end
+      configure_parameter_filter(filter)
+      params = { secret: 'PRIVATE_COPY'.dup, root_marker: 'original'.dup }
+      emit_job_parameters(params)
+      expect(params).to eq(secret: 'PRIVATE_COPY', root_marker: 'original')
+      expect(records.to_s).not_to include('PRIVATE_COPY')
+    end
 
-      it 'preserves shared references used by root-sensitive privacy filters' do
-        filter = proc do |key, value, original|
-          value.replace('[FILTERED]') if key == :secret && original[:first].equal?(original[:second])
-        end
-        configure_parameter_filter(filter)
-        shared = +'private mode'
-        params = { secret: +'PRIVATE_ALIAS', first: shared, second: shared }
-        expect(emit_parameter_notification(component, params)).to include('secret' => '[FILTERED]')
-        expect(records.to_s).not_to include('PRIVATE_ALIAS')
-        expect(params[:secret]).to eq('PRIVATE_ALIAS')
-        expect(params[:first]).to equal(params[:second])
+    it 'preserves shared references used by root-sensitive privacy filters' do
+      filter = proc do |key, value, original|
+        value.replace('[FILTERED]') if key == :secret && original[:first].equal?(original[:second])
       end
+      configure_parameter_filter(filter)
+      shared = +'private mode'
+      params = { secret: +'PRIVATE_ALIAS', first: shared, second: shared }
+      expect(emit_job_parameters(params)).to include('secret' => '[FILTERED]')
+      expect(records.to_s).not_to include('PRIVATE_ALIAS')
+      expect(params[:secret]).to eq('PRIVATE_ALIAS')
+      expect(params[:first]).to equal(params[:second])
+    end
 
-      it 'preserves frozen policy strings used by root-sensitive privacy filters' do
-        filter = proc do |key, value, original|
-          value.replace('[FILTERED]') if key == :secret && original[:policy].frozen?
-        end
-        configure_parameter_filter(filter)
-        params = { secret: +'PRIVATE_FROZEN', policy: 'private' }
-        expect(emit_parameter_notification(component, params)).to include('secret' => '[FILTERED]')
-        expect(records.to_s).not_to include('PRIVATE_FROZEN')
-        expect(params[:secret]).to eq('PRIVATE_FROZEN')
-        expect(params[:policy]).to be_frozen
+    it 'preserves frozen policy strings used by root-sensitive privacy filters' do
+      filter = proc do |key, value, original|
+        value.replace('[FILTERED]') if key == :secret && original[:policy].frozen?
       end
+      configure_parameter_filter(filter)
+      params = { secret: +'PRIVATE_FROZEN', policy: 'private' }
+      expect(emit_job_parameters(params)).to include('secret' => '[FILTERED]')
+      expect(records.to_s).not_to include('PRIVATE_FROZEN')
+      expect(params[:secret]).to eq('PRIVATE_FROZEN')
+      expect(params[:policy]).to be_frozen
+    end
 
-      it 'copies string defaults used by original-root filters' do
-        filter = proc do |key, value, original|
-          original.default.replace('changed')
-          value.replace('[FILTERED]') if key == :secret
-        end
-        configure_parameter_filter(filter)
-        params = Hash.new('original'.dup)
-        params[:secret] = 'PRIVATE_DEFAULT'.dup
-        expect(emit_parameter_notification(component, params)).to eq('secret' => '[FILTERED]')
-        expect(params.default).to eq('original')
-        expect(params[:secret]).to eq('PRIVATE_DEFAULT')
+    it 'copies string defaults used by original-root filters' do
+      filter = proc do |key, value, original|
+        original.default.replace('changed')
+        value.replace('[FILTERED]') if key == :secret
       end
+      configure_parameter_filter(filter)
+      params = Hash.new('original'.dup)
+      params[:secret] = 'PRIVATE_DEFAULT'.dup
+      expect(emit_job_parameters(params)).to eq('secret' => '[FILTERED]')
+      expect(params.default).to eq('original')
+      expect(params[:secret]).to eq('PRIVATE_DEFAULT')
+    end
 
-      it 'redacts unsupported or cyclic trees without inspecting application objects' do
-        configure_parameter_filter(proc { |_key, _value| })
-        object = Object.new
-        object.define_singleton_method(:to_s) { raise 'unsafe inspection' }
-        cycle = []
-        cycle << cycle
-        callable_default = Hash.new { raise 'unsafe default' }
-        [object, cycle, callable_default].each do |unsafe|
-          records.clear
-          params = { secret: 'PRIVATE_UNSAFE', context: unsafe }
-          expect(emit_parameter_notification(component, params)).to eq('[FILTERED]')
-          expect(records.to_s).not_to include('PRIVATE_UNSAFE')
-        end
+    it 'redacts unsupported or cyclic trees without inspecting application objects' do
+      configure_parameter_filter(proc { |_key, _value| })
+      object = Object.new
+      object.define_singleton_method(:to_s) { raise 'unsafe inspection' }
+      cycle = []
+      cycle << cycle
+      callable_default = Hash.new { raise 'unsafe default' }
+      [object, cycle, callable_default].each do |unsafe|
+        records.clear
+        params = { secret: 'PRIVATE_UNSAFE', context: unsafe }
+        expect(emit_job_parameters(params)).to eq('[FILTERED]')
+        expect(records.to_s).not_to include('PRIVATE_UNSAFE')
       end
+    end
 
-      it 'redacts an incomplete tree when traversal limits would remove privacy context' do
-        filter = proc do |key, value, original|
-          value.replace('[FILTERED]') if key == 'secret' && original['private'] == true
-        end
-        configure_parameter_filter(filter)
-        params = { 'secret' => 'PRIVATE_BUDGET', 'context' => Array.new(20) { (1..100).to_a }, 'private' => true }
-        expect(emit_parameter_notification(component, params)).to eq('[FILTERED]')
-        expect(records.to_s).not_to include('PRIVATE_BUDGET')
+    it 'redacts an incomplete tree when traversal limits would remove privacy context' do
+      filter = proc do |key, value, original|
+        value.replace('[FILTERED]') if key == 'secret' && original['private'] == true
       end
+      configure_parameter_filter(filter)
+      params = { 'secret' => 'PRIVATE_BUDGET', 'context' => Array.new(20) { (1..100).to_a }, 'private' => true }
+      expect(emit_job_parameters(params)).to eq('[FILTERED]')
+      expect(records.to_s).not_to include('PRIVATE_BUDGET')
+    end
 
-      it 'does not truncate values before root-sensitive privacy filters run' do
-        filter = proc do |key, value, original|
-          value.replace('[FILTERED]') if key == 'secret' && original['context'].end_with?('PRIVATE_SUFFIX')
-        end
-        configure_parameter_filter([:context, filter])
-        context = "#{'a' * 10_000}PRIVATE_SUFFIX"
-        emit_parameter_notification(component, { 'secret' => 'PRIVATE_TRUNCATION', 'context' => context })
-        expect(records.to_s).not_to include('PRIVATE_TRUNCATION')
-        expect(records.to_s).not_to include('a' * 100)
-        expect(context).to end_with('PRIVATE_SUFFIX')
+    it 'does not truncate values before root-sensitive privacy filters run' do
+      filter = proc do |key, value, original|
+        value.replace('[FILTERED]') if key == 'secret' && original['context'].end_with?('PRIVATE_SUFFIX')
       end
+      configure_parameter_filter([:context, filter])
+      context = "#{'a' * 10_000}PRIVATE_SUFFIX"
+      emit_job_parameters({ 'secret' => 'PRIVATE_TRUNCATION', 'context' => context })
+      expect(records.to_s).not_to include('PRIVATE_TRUNCATION')
+      expect(records.to_s).not_to include('a' * 100)
+      expect(context).to end_with('PRIVATE_SUFFIX')
+    end
 
-      it 'redacts an oversized collection instead of changing the root seen by privacy filters' do
-        filter = proc do |key, value, original|
-          value.replace('[FILTERED]') if key == 'secret' && original['private'] && value.is_a?(String)
-        end
-        configure_parameter_filter(filter)
-        params = { 'secret' => 'PRIVATE_COLLECTION' }
-        99.times { |index| params["visible_#{index}"] = index }
-        params['private'] = true
-        emit_parameter_notification(component, params)
-        expect(records.to_s).not_to include('PRIVATE_COLLECTION')
-        expect(params['secret']).to eq('PRIVATE_COLLECTION')
+    it 'redacts an oversized collection instead of changing the root seen by privacy filters' do
+      filter = proc do |key, value, original|
+        value.replace('[FILTERED]') if key == 'secret' && original['private'] && value.is_a?(String)
       end
+      configure_parameter_filter(filter)
+      params = { 'secret' => 'PRIVATE_COLLECTION' }
+      99.times { |index| params["visible_#{index}"] = index }
+      params['private'] = true
+      emit_job_parameters(params)
+      expect(records.to_s).not_to include('PRIVATE_COLLECTION')
+      expect(params['secret']).to eq('PRIVATE_COLLECTION')
     end
   end
 
@@ -225,6 +204,141 @@ RSpec.describe 'Rails structured notification logs' do
     arguments = Array.new(101) { { visible: 'not a partial argument list' } }
     expect(job_class.new(*arguments).perform_now).to eq(:original_result)
     expect(JSON.parse(records.fetch(0)[:attributes].fetch('rails.job.arguments'))).to eq('[FILTERED]')
+  end
+
+  it 'bounds already-filtered controller payloads without inspecting unsafe values' do
+    install([:action_controller])
+    cycle = []
+    cycle << cycle
+    unsafe = Object.new
+    unsafe.define_singleton_method(:to_s) { raise 'unsafe inspection' }
+    [cycle, unsafe, 'a' * 10_001, { password: '[FILTERED]' }.merge((1..101).to_h { |i| [i.to_s, i] })].each do |value|
+      notify(params: { password: '[FILTERED]', context: value })
+      expect(JSON.parse(records.last[:attributes].fetch('rails.params'))).to eq('[FILTERED]')
+    end
+    expect(records.size).to eq(4)
+  end
+
+  it 'does not reapply custom filters to real controller notification parameters' do
+    install([:action_controller])
+    filter = proc { |key, value| value.reverse! if key == 'secret' }
+    app = double('application', config: double('config', root: nil, filter_parameters: [filter]))
+    allow(Rails).to receive(:application).and_return(app)
+    controller = Class.new(ActionController::Base) do
+      def index
+        render plain: 'ok'
+      end
+    end
+    stub_const('OnceFilteredLogsController', controller)
+    env = Rack::MockRequest.env_for('/?secret=PRIVATE_ORIGINAL&visible=yes')
+    env['action_dispatch.parameter_filter'] = [filter]
+    expect(controller.action(:index).call(env).first).to eq(200)
+    expect(JSON.parse(records.fetch(0)[:attributes].fetch('rails.params'))).to include(
+      'secret' => 'LANIGIRO_ETAVIRP', 'visible' => 'yes'
+    )
+    expect(records.to_s).not_to include('PRIVATE_ORIGINAL')
+  end
+
+  [{}, { wait: 1 }].each do |options|
+    it "logs rescued enqueue failures at error severity with options #{options}" do
+      install([:active_job], level: :error)
+      adapter = Object.new
+      def adapter.enqueue(*)
+        raise ActiveJob::EnqueueError, 'PRIVATE_ADAPTER_ERROR'
+      end
+
+      def adapter.enqueue_at(*)
+        raise ActiveJob::EnqueueError, 'PRIVATE_ADAPTER_ERROR'
+      end
+      job_class = Class.new(ActiveJob::Base) do
+        def perform
+          :ok
+        end
+      end
+      stub_const('FailedEnqueueLogsJob', job_class)
+      job_class.queue_adapter = adapter
+      job = job_class.new
+      expect(job.enqueue(options)).to be(false)
+      expect(job.enqueue_error).to be_a(ActiveJob::EnqueueError)
+      expect(records.size).to eq(1)
+      expect(records.first[:severity_number]).to eq(17)
+      expect(records.first[:attributes]).to include('error.type' => 'ActiveJob::EnqueueError')
+      expect(records.to_s).not_to include('PRIVATE_ADAPTER_ERROR')
+      expect(job.perform_now).to eq(:ok)
+      expect(records.size).to eq(1)
+    end
+  end
+
+  it 'skips job parameter filters and serialization below the forwarding threshold' do
+    install([:active_job], level: :error)
+    calls = 0
+    filter = proc { |_key, _value| calls += 1 }
+    app = double('application', config: double('config', filter_parameters: [filter]))
+    allow(Rails).to receive(:application).and_return(app)
+    job_class = Class.new(ActiveJob::Base) do
+      def perform(*)
+        :ok
+      end
+    end
+    stub_const('SuppressedLogsJob', job_class)
+    allow(JSON).to receive(:generate).and_call_original
+    expect(job_class.new(visible: 'yes').perform_now).to eq(:ok)
+    expect(records).to be_empty
+    expect(calls).to eq(0)
+    expect(JSON).not_to have_received(:generate)
+  end
+
+  it 'skips controller parameter traversal and serialization below the forwarding threshold' do
+    install([:action_controller], level: :error)
+    params = { visible: 'yes' }
+    allow(params).to receive(:clone).and_call_original
+    allow(JSON).to receive(:generate).and_call_original
+    notify(params: params, status: 200)
+    expect(records).to be_empty
+    expect(params).not_to have_received(:clone)
+    expect(JSON).not_to have_received(:generate)
+  end
+
+  it 'honors the job argument logging opt-out while retaining lifecycle metadata' do
+    install([:active_job])
+    app = double('application', config: double('config', filter_parameters: []))
+    allow(Rails).to receive(:application).and_return(app)
+    job_class = Class.new(ActiveJob::Base) do
+      self.log_arguments = false
+      def perform(*)
+        :ok
+      end
+    end
+    stub_const('PrivateArgumentsLogsJob', job_class)
+    job = job_class.new(visible: 'PRIVATE_OPTED_OUT')
+    expect(job.perform_now).to eq(:ok)
+    expect(records.fetch(0)[:attributes]).to include(
+      'rails.job.id' => job.job_id, 'event.name' => 'perform.active_job'
+    )
+    expect(records.first[:attributes]).not_to have_key('rails.job.arguments')
+    expect(records.to_s).not_to include('PRIVATE_OPTED_OUT')
+  end
+
+  it 'omits mail delivery job argument wrappers including inherited delivery jobs' do
+    install([:active_job])
+    app = double('application', config: double('config', filter_parameters: %i[email token]))
+    allow(Rails).to receive(:application).and_return(app)
+    delivery_job = Class.new(ActiveJob::Base) do
+      def perform(*)
+        :ok
+      end
+    end
+    stub_const('ActionMailer::MailDeliveryJob', delivery_job)
+    stub_const('CustomDeliveryLogsJob', Class.new(delivery_job))
+    [delivery_job, CustomDeliveryLogsJob].each do |job_class|
+      job = job_class.new('PasswordMailer', 'reset_password', 'deliver_now',
+                          args: %w[PRIVATE_EMAIL PRIVATE_RESET_TOKEN])
+      expect(job.perform_now).to eq(:ok)
+      expect(records.last[:attributes]).to include('rails.job.id' => job.job_id,
+                                                   'event.name' => 'perform.active_job')
+      expect(records.last[:attributes]).not_to have_key('rails.job.arguments')
+    end
+    expect(records.to_s).not_to include('PRIVATE_')
   end
 
   it 'defaults to no notification subscriptions and retains generic forwarding' do
@@ -248,6 +362,7 @@ RSpec.describe 'Rails structured notification logs' do
     env = Rack::MockRequest.env_for('/?password=secret&visible=yes',
                                     'HTTP_X_POSTHOG_DISTINCT_ID' => 'request-user',
                                     'HTTP_X_POSTHOG_SESSION_ID' => 'request-session')
+    env['action_dispatch.parameter_filter'] = [:password]
     middleware = PostHog::Rails::RequestContext.new(controller.action(:index))
     expect(middleware.call(env).first).to eq(200)
     record = records.fetch(0)
@@ -429,27 +544,30 @@ RSpec.describe 'Rails structured notification logs' do
   end
 
   it 'guards recursion while application parameter filters run' do
+    job = ActiveJob::Base.new(visible: 'original')
     calls = 0
     filter = proc do |_key, _value|
       calls += 1
-      notify(params: { visible: 'nested' }) if calls < 3
+      notify('perform.active_job', job: job) if calls < 3
     end
     app = double('application', config: double('config', filter_parameters: [filter]))
     allow(Rails).to receive(:application).and_return(app)
-    install([:action_controller])
-    notify(params: { visible: 'original' })
+    install([:active_job])
+    notify('perform.active_job', job: job)
     expect(records.size).to eq(1)
     expect(calls).to eq(1)
   end
 
   it 'replaces oversized filtered payloads with valid bounded JSON and fails closed on filtering errors' do
-    install([:action_controller])
+    install([:active_job])
     app = double('application', config: double('config', filter_parameters: [:password]))
     allow(Rails).to receive(:application).and_return(app)
-    notify(params: { first: 'a' * 9000, second: 'b' * 9000, password: 'secret' })
-    expect(JSON.parse(records.last[:attributes].fetch('rails.params'))).to eq('[FILTERED]')
+    job = ActiveJob::Base.new(first: 'a' * 9000, second: 'b' * 9000, password: 'secret')
+    notify('perform.active_job', job: job)
+    expect(JSON.parse(records.last[:attributes].fetch('rails.job.arguments'))).to eq(['[FILTERED]'])
     allow(app.config).to receive(:filter_parameters).and_raise('secret')
-    expect { notify(params: { password: 'secret' }) }.not_to raise_error
+    job.arguments = [{ password: 'secret' }]
+    expect { notify('perform.active_job', job: job) }.not_to raise_error
     expect(records.size).to eq(1)
   end
 

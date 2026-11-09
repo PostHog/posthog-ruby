@@ -65,7 +65,8 @@ RSpec.describe 'PostHog Logs real OTLP export' do
       OpenTelemetry::Trace.with_span(span) do
         ActiveSupport::Notifications.instrument('process_action.action_controller',
                                                 controller: 'HomeController', action: 'index', status: 200,
-                                                params: parameter_payload) { :ok }
+                                                params: { password: '[FILTERED]', secret: '[FILTERED]',
+                                                          visible: 'ok' }) { :ok }
         ActiveSupport::Notifications.instrument('sql.active_record', sql: "SELECT 'secret'", cached: false) { :ok }
         ActiveSupport::Notifications.instrument('perform.active_job', job: job) { :ok }
         ActiveSupport::Notifications.instrument('deliver.action_mailer', mailer: 'ReceiptMailer', to: ['secret']) { :ok }

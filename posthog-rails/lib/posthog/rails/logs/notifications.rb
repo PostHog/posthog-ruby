@@ -86,11 +86,17 @@ module PostHog
             return if Thread.current[Appender::REENTRANCY_KEY]
 
             payload = event.payload
-            attributes = build_attributes(component, event)
             error = payload[:exception_object] || payload[:error]
+            if component == :active_job && %w[enqueue.active_job enqueue_at.active_job].include?(event.name) &&
+               payload[:job].respond_to?(:enqueue_error)
+              error ||= payload[:job].enqueue_error
+            end
             error_type = error ? error.class.name : Array(payload[:exception]).first
-            attributes['error.type'] = error_type if error_type.is_a?(String)
             severity = severity_for(component, payload, error_type)
+            return unless @appender.accepts_severity?(severity)
+
+            attributes = build_attributes(component, event)
+            attributes['error.type'] = error_type if error_type.is_a?(String)
             emit_in_context(component, payload) do
               @appender.add(severity, BODIES.fetch(component), attributes: attributes)
             end
@@ -128,7 +134,7 @@ module PostHog
                                          method: 'http.request.method', status: 'http.response.status_code')
               if payload[:params].is_a?(Hash)
                 attributes['rails.params'] =
-                  bounded_json(filtered_params(payload[:params]))
+                  bounded_json(controller_params(payload[:params]))
               end
               attributes
             when :active_record
@@ -154,6 +160,9 @@ module PostHog
               job_class: 'rails.job.class', id: 'rails.job.id', queue: 'rails.job.queue',
               executions: 'rails.job.executions', priority: 'rails.job.priority', wait: 'rails.job.retry_wait'
             )
+            return attributes if job.class.respond_to?(:log_arguments?) && !job.class.log_arguments?
+            return attributes if defined?(::ActionMailer::MailDeliveryJob) && job.is_a?(::ActionMailer::MailDeliveryJob)
+
             # Unkeyed arguments have no filterable name. Do not guess which are safe.
             budget = [1000, 10_000]
             arguments = job.arguments
@@ -173,6 +182,13 @@ module PostHog
               value = payload[key]
               attributes[name] = safe_value(value) unless value.nil?
             end
+          end
+
+          # Rails controller notifications already contain request.filtered_parameters.
+          def controller_params(params)
+            copy_filter_value(params, 0, [1000, 10_000])
+          rescue UnsafeParameters
+            '[FILTERED]'
           end
 
           def filtered_params(params, budget = [1000, 10_000])
