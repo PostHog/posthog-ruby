@@ -9,6 +9,11 @@ module PostHog
     # The `:posthog` Action Mailer delivery method. It sends each mail as one PostHog email, through the client that
     # `PostHog.init` made, and sets the mail's `message_id` to PostHog's message ID.
     #
+    # A mail's `X-PostHog-Capture-Engagement` header, `true` or `false`, decides whether PostHog captures the email's
+    # engagement events (sent, delivered, opened, clicked, bounced) as events on the recipient's person. It defaults to
+    # `true`. Turning it off doesn't change the email: PostHog still adds its open pixel to count opens. It never
+    # rewrites the email's links, so it counts no clicks.
+    #
     # @example config/environments/production.rb
     #   config.action_mailer.delivery_method = :posthog
     #   config.action_mailer.posthog_settings = { default_template_key: 'transactional' }
