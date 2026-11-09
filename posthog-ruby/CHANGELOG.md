@@ -1,5 +1,29 @@
 # posthog-ruby
 
+## 3.32.1
+
+### Patch Changes
+
+- 38a14da: Remove unstable numeric suffixes from Rails-generated template method names in exception frames when the name matches the template source path. Preserve filenames, line numbers, source context, frame classification, cause chains, and duplicate capture prevention.
+
+## 3.32.0
+
+### Minor Changes
+
+- d309582: A `tools/call` that names a tool the server never registered now sends `$mcp_unknown_tool` instead of a failed `$mcp_tool_call`; the client gets the same error as before. A call that echoes a conversation handle keeps it on the event.
+
+## 3.31.0
+
+### Minor Changes
+
+- 3be40e8: `PostHog::MCP` tool definitions now match what directory reviews expect. The `get_more_tools` virtual tool declares `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint` as `false`, because a call records data. The injected `context` argument has a shorter description that asks for a few words by role. The injected `llm_model` argument is optional. This changes your published tool definitions; if your server is listed in the ChatGPT or Claude directories, those platforms may re-review the updated tools.
+
+## 3.30.3
+
+### Patch Changes
+
+- eb7216a: `PostHog::MCP` now sends `$mcp_initialize` only for a client's `initialize` request. A session's first `tools/call`, listing or resource read without an `initialize` (stateless HTTP or a lone call) no longer emits one, so fewer `$mcp_initialize` events will arrive.
+
 ## 3.30.2
 
 ### Patch Changes
