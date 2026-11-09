@@ -14,7 +14,6 @@ module PostHog
     HEADERS_AND_MIME_BOUNDARIES_BYTES = 64 * 1024
     LIMIT = '10 files and 40 MB per email after Base64 encoding, about 29 MB of files'
     FIELDS = %w[filename content content_type content_id].freeze
-    BASE64_PATTERN = %r{\A(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\z}
 
     # One file to attach: its bytes, their SHA-256, and what the send says about it.
     Attachment = Struct.new(:bytes, :sha256, :reference, :field, keyword_init: true)
@@ -78,9 +77,8 @@ module PostHog
         raise invalid('An attachment needs content: the bytes File.binread returns, a list of byte values, or the ' \
                       'file encoded as Base64.', field)
       end
-      return content.unpack1('m0') if content.ascii_only? && BASE64_PATTERN.match?(content)
-      return content.unpack1('m') if encode64_layout?(content)
-
+      encode64_layout?(content) ? content.unpack1('m') : content.unpack1('m0')
+    rescue ArgumentError
       raise invalid("An attachment's content is text that isn't Base64. Pass the file's bytes, read with " \
                     'File.binread, or the file encoded as Base64.', field)
     end

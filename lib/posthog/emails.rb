@@ -183,14 +183,15 @@ module PostHog
         cc: cc, bcc: bcc, attachments: attachments, capture_engagement: capture_engagement
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
-      payload, files = content(template_id, template_key, fields)
-      payload = payload.merge(to: to)
+      payload = content(template_id, template_key, fields).merge(to: to)
+      files = EmailAttachments.from(fields.fetch(:attachments, []), fields.values_at(:html, :text).compact)
+      payload[:attachments] = files.references unless files.empty?
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
 
       result = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
-        upload(files, secret_key, max_retries || @max_retries) unless files.nil? || files.empty?
+        upload(files, secret_key, max_retries || @max_retries) unless files.empty?
         uri = URI(@app_host + SEND_PATH)
         with_retries(max_retries || @max_retries) do
           parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body))
@@ -309,7 +310,7 @@ module PostHog
       template_data = fields.fetch(:template_data, {})
       raise ArgumentError, 'template_data must be a Hash.' unless template_data.is_a?(Hash)
 
-      [{ template_id: template_id.downcase, message_data: isoify_dates(template_data) }, nil]
+      { template_id: template_id.downcase, message_data: isoify_dates(template_data) }
     end
 
     def code_content(template_key, fields)
@@ -335,12 +336,8 @@ module PostHog
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
       %i[cc bcc].each { |name| put_unless_empty(code, name, addresses(name, fields[name])) if fields.key?(name) }
-      if fields.key?(:attachments)
-        files = EmailAttachments.from(fields[:attachments], fields.values_at(:html, :text).compact)
-        put_unless_empty(code, :attachments, files.references)
-      end
       code[:capture_engagement] = fields.fetch(:capture_engagement, true)
-      [code, files]
+      code
     end
 
     def refuse_fields(fields, allowed:, form:, other_form:, why:)
