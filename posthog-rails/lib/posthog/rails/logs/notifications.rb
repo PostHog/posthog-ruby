@@ -12,8 +12,6 @@ module PostHog
       # Optional completion records, sharing the ordinary logger's sink and controls.
       # @api private
       module Notifications
-        extend ParameterFilter
-
         class UnsafeParameters < StandardError; end
         private_constant :UnsafeParameters
 
@@ -154,9 +152,11 @@ module PostHog
             job = payload[:job]
             return {} unless job
 
+            wait = payload[:wait]
+            wait = wait.to_f if wait.is_a?(ActiveSupport::Duration)
             attributes = pick(
               { job_class: job.class.name, id: job.job_id, queue: job.queue_name,
-                executions: job.executions, priority: job.priority, wait: payload[:wait] },
+                executions: job.executions, priority: job.priority, wait: wait },
               job_class: 'rails.job.class', id: 'rails.job.id', queue: 'rails.job.queue',
               executions: 'rails.job.executions', priority: 'rails.job.priority', wait: 'rails.job.retry_wait'
             )
@@ -195,6 +195,9 @@ module PostHog
           def filtered_params(params, budget = [1000, 10_000])
             return {} unless ::Rails.application
 
+            filters = ::Rails.application.config.filter_parameters
+            return '[FILTERED]' if filters.empty?
+
             if ::Rails.version.to_f >= 6.0
               require 'active_support/parameter_filter'
             else
@@ -202,7 +205,7 @@ module PostHog
             end
             # Rails Proc filters can depend on key/value types and the complete original root.
             # Never pass a normalized or partially truncated parameter tree to those callbacks.
-            filtered = filter_sensitive_params(copy_filter_value(params, 0, budget))
+            filtered = ParameterFilter.backend.new(filters).filter(copy_filter_value(params, 0, budget))
             copy_filter_value(filtered, 0, [1000, 10_000])
           rescue UnsafeParameters
             '[FILTERED]'
@@ -248,6 +251,8 @@ module PostHog
           def bounded_json(value)
             json = JSON.generate(value)
             json.bytesize <= 10_000 ? json : JSON.generate('[FILTERED: payload too large]')
+          rescue JSON::GeneratorError
+            JSON.generate('[FILTERED]')
           end
 
           # Bound traversal and omit arbitrary object inspection from notification payloads.

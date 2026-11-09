@@ -98,7 +98,10 @@ forwarding threshold, rate cap, hook, correlation, and shutdown pipeline. Set
 `logs_forward_rails_logger` to `false` to collect notifications without also
 forwarding generic logger lines. SQL records use debug severity; successful
 controller/job/mailer records use info, controller 4xx responses warn, and failures
-error. These records do not create spans or collect timings.
+error. Error-bearing retry notifications also use error severity: they describe a
+failed attempt, not necessarily terminal job failure. `rails.job.retry_wait` is
+reported in seconds, including waits supplied as `ActiveSupport::Duration`.
+These records do not create spans or collect timings.
 
 Notification bodies are fixed descriptions with allowlisted event metadata.
 `rails.params` serializes Rails' already-filtered controller notification parameters
@@ -106,9 +109,10 @@ without applying filters again. `rails.job.arguments` applies the application's
 `filter_parameters` to copied original key/value types before JSON normalization.
 Unkeyed job arguments are redacted; jobs with `log_arguments = false` and Action
 Mailer delivery jobs omit arguments entirely. Unsupported, cyclic, or oversized
-parameter trees are wholly redacted rather than partially truncated. Oversized
-JSON output is also replaced with a redaction marker. Without an application
-filter configuration, keyed job argument fields are empty.
+parameter trees are wholly redacted rather than partially truncated. Unencodable
+or oversized JSON payloads are replaced with a redaction marker without dropping
+the lifecycle record. An empty `filter_parameters` list redacts keyed job payloads
+rather than exporting them unfiltered.
 SQL statements/binds, cookies/headers, and mail recipients/subject/content are not
 collected. Review configured parameter filters and use `logs_before_send` for
 additional scrubbing. Job completion records reuse saved/effective job identity

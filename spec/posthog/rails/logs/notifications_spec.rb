@@ -364,6 +364,82 @@ RSpec.describe 'Rails structured notification logs' do
     end
   end
 
+  it 'redacts keyed job arguments when filters are empty' do
+    install([:active_job])
+    app = double('application', config: double('config', filter_parameters: []))
+    allow(Rails).to receive(:application).and_return(app)
+    job_class = Class.new(ActiveJob::Base) do
+      def perform(*)
+        :ok
+      end
+    end
+    stub_const('EmptyFiltersLogsJob', job_class)
+    job = job_class.new({ password: 'PRIVATE_PW', email: 'PRIVATE_EMAIL' }, 'PRIVATE_UNKEYED')
+    expect(job.perform_now).to eq(:ok)
+    expect(records.fetch(0)[:attributes]).to include('rails.job.id' => job.job_id)
+    expect(JSON.parse(records.first[:attributes].fetch('rails.job.arguments'))).to eq(%w[[FILTERED] [FILTERED]])
+    expect(records.to_s).not_to include('PRIVATE_')
+  end
+
+  { nan: Float::NAN, binary: "\xFF".b }.each do |type, value|
+    it "preserves failing job records with unencodable #{type} arguments" do
+      install([:active_job], level: :error)
+      app = double('application', config: double('config', filter_parameters: [:password]))
+      allow(Rails).to receive(:application).and_return(app)
+      job_class = Class.new(ActiveJob::Base) do
+        def perform(*)
+          raise ArgumentError, 'PRIVATE_FAILURE'
+        end
+      end
+      stub_const('UnencodableArgumentsLogsJob', job_class)
+      job = job_class.new(password: 'PRIVATE_PASSWORD', value: value)
+      expect { job.perform_now }.to raise_error(ArgumentError, 'PRIVATE_FAILURE')
+      expect(records.size).to eq(1)
+      record = records.first
+      expect(record[:severity_number]).to eq(17)
+      expect(record[:attributes]).to include('rails.job.id' => job.job_id, 'error.type' => 'ArgumentError')
+      expect(JSON.parse(record[:attributes].fetch('rails.job.arguments'))).to eq('[FILTERED]')
+      expect(records.to_s).not_to include('PRIVATE_')
+    end
+  end
+
+  it 'preserves controller error records with unencodable parameters' do
+    install([:action_controller], level: :error)
+    notify(params: { value: Float::NAN }, status: 500)
+    expect(records.size).to eq(1)
+    expect(records.first[:severity_number]).to eq(17)
+    expect(JSON.parse(records.first[:attributes].fetch('rails.params'))).to eq('[FILTERED]')
+  end
+
+  it 'exports duration retry waits as numeric seconds' do
+    install([:active_job])
+    job_class = Class.new(ActiveJob::Base)
+    stub_const('DurationRetryLogsJob', job_class)
+    job_class.queue_adapter = :test
+    job = job_class.new
+    expect(job.retry_job(wait: 5.minutes)).to be_a(job_class)
+    retry_record = records.find { |record| record[:attributes]['event.name'] == 'enqueue_retry.active_job' }
+    expect(retry_record[:attributes]).to include('rails.job.retry_wait' => 300.0, 'rails.job.id' => job.job_id)
+  end
+
+  it 'keeps automatic retry attempts at error severity while further attempts remain' do
+    install([:active_job])
+    job_class = Class.new(ActiveJob::Base) do
+      retry_on ArgumentError, attempts: 3, wait: 1, jitter: 0
+      def perform
+        raise ArgumentError, 'PRIVATE_RETRY'
+      end
+    end
+    stub_const('AutomaticRetryLogsJob', job_class)
+    job_class.queue_adapter = :test
+    expect { job_class.new.perform_now }.not_to raise_error
+    expect(job_class.queue_adapter.enqueued_jobs.size).to eq(1)
+    retry_record = records.find { |record| record[:attributes]['event.name'] == 'enqueue_retry.active_job' }
+    expect(retry_record[:severity_number]).to eq(17)
+    expect(retry_record[:attributes]).to include('error.type' => 'ArgumentError', 'rails.job.retry_wait' => 1.0)
+    expect(records.to_s).not_to include('PRIVATE_RETRY')
+  end
+
   it 'defaults to no notification subscriptions and retains generic forwarding' do
     expect(config.logs_notifications).to eq([])
     appender = install([])
