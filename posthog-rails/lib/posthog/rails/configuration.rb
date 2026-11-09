@@ -40,15 +40,6 @@ module PostHog
       #   posthog_distinct_id, distinct_id, id, pk, uuid in order.
       attr_accessor :user_id_method
 
-      # @return [Array<String>] Exception-only header name allowlist (case-insensitive). Defaults to [].
-      attr_accessor :exception_request_headers
-
-      # @return [Array<String>] Exception-only cookie name allowlist (case-sensitive). Defaults to [].
-      attr_accessor :exception_request_cookies
-
-      # @return [Boolean] Collect filtered JSON/form bodies on request exceptions. Defaults to false.
-      attr_accessor :exception_request_body
-
       # @return [Boolean] Master switch for forwarding logs to PostHog Logs over OTLP. Defaults to false.
       attr_accessor :logs_enabled
 
@@ -83,9 +74,6 @@ module PostHog
         @current_user_method = :current_user
         @current_user_resolver = nil
         @user_id_method = nil
-        @exception_request_headers = []
-        @exception_request_cookies = []
-        @exception_request_body = false
         @logs_enabled = false
         @logs_forward_rails_logger = true
         @logs_level = nil

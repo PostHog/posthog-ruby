@@ -145,7 +145,6 @@ module PostHog
 
       def capture_job_exception(exception)
         return unless PostHog::Rails.config&.auto_instrument_active_job
-        return unless PostHog.client&.enabled?
 
         # Build distinct_id from job arguments if possible
         distinct_id = if @posthog_execution_context
@@ -166,8 +165,6 @@ module PostHog
         # Add serialized job arguments (be careful with sensitive data)
         properties['$job_arguments'] = sanitize_job_arguments(arguments) if arguments.present?
 
-        properties.merge!(execution_context_properties)
-
         PostHog.capture_exception(
           exception,
           distinct_id,
@@ -176,7 +173,7 @@ module PostHog
         )
       rescue StandardError => e
         # Don't let PostHog errors break job processing
-        PostHog::Logging.logger.error("Failed to capture job exception: #{e.class}")
+        PostHog::Logging.logger.error("Failed to capture job exception: #{e.message}")
       end
 
       def extract_distinct_id_from_job
@@ -197,9 +194,7 @@ module PostHog
 
       def sanitize_job_arguments(args)
         # Convert arguments to a safe format
-        serialized = args.first(100).map do |arg|
-          next safe_serialize(arg) if arg.respond_to?(:to_global_id)
-
+        args.map do |arg|
           case arg
           when String
             # Truncate long strings to prevent huge payloads
@@ -208,14 +203,13 @@ module PostHog
             arg
           when Hash
             # Use Rails' filter_parameters to filter sensitive data
-            filtered_metadata(arg)
+            filter_sensitive_params(arg)
           when defined?(ActiveRecord::Base) && ActiveRecord::Base
             { class: arg.class.name, id: arg.id }
           else
             arg.class.name
           end
         end
-        safe_serialize(serialized)
       rescue StandardError
         ['<serialization error>']
       end
