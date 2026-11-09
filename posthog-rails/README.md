@@ -9,6 +9,10 @@ SDK usage examples and code snippets live in the official documentation so they 
 - [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
 - [Ruby library docs](https://posthog.com/docs/libraries/ruby)
 
+## Exception stack frames
+
+Rails-generated template method names lose their unstable numeric suffixes when they match the template source path. File paths, line numbers, source context, and application-frame classification stay unchanged; no additional frames are silenced or removed.
+
 ## OpenTelemetry span context (optional)
 
 Request context adds missing `sessionId` and `posthogDistinctId` attributes to an active recording OpenTelemetry SDK span. Register the optional `PostHog::ContextSpanProcessor` on the application's existing provider for child spans. OpenTelemetry SDK 1.0.0 or later is supported and remains optional.
@@ -28,6 +32,12 @@ Manual reports do not require `auto_capture_exceptions` and do not apply automat
 Explicit identity wins over the configured current user, then request identity. Explicit properties win over inferred request properties. The helper respects `capture_user_context`, current-user resolution settings, and `use_tracing_headers`. Request parameters use Rails `filter_parameters`; automatically derived URLs omit queries and fragments. Explicit properties and exception messages are not parameter-filtered. Unavailable or malformed enrichment is omitted without dropping the original report or replacing application exceptions. Request context is not retained after the request.
 
 Manual reports use already-parsed Rails parameter/body caches, with query/path parameters as fallback. The helper does not proactively parse uncached bodies; richer body collection is outside this helper. Rails may independently parse or log bodies before an action runs; the helper does not suppress framework-owned diagnostics. A response status is included only when already known, including after a controller has performed its response; the default pre-response status is not inferred.
+
+## Streaming exceptions
+
+With `auto_capture_exceptions` enabled (default `false`), errors reported by ActionController::Live and ActionView streaming templates are captured through the existing exception pipeline, respecting excluded exceptions and duplicate prevention. Rails logging and streaming completion behavior are unchanged.
+
+Live reporters rebuild context from their controller's own filtered request data and headers only while reporting, restoring any ambient context afterward without annotating ambient spans. Authenticated controller identity still takes precedence over header identity. Streaming template bodies use only the context active when Rails reports the error; they do not retain the context from body creation. Errors enumerated after request middleware exits may therefore lack request identity and metadata. Identity is not automatically transferred across arbitrary application-created threads or fibers.
 
 ## Active Job context
 
