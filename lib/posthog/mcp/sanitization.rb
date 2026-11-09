@@ -45,7 +45,6 @@ module PostHog
       US_SSN_PATTERN = /\b\d{3}[ .-]\d{2}[ .-]\d{4}\b/
       CREDIT_CARD_CANDIDATE_PATTERN = %r{\b\d(?:[ ./-]?\d){12,}\b}
       SEPARATED_DIGIT_GROUP_PATTERN = /(\D*)(\d+)/
-      TRAILING_NON_DIGITS_PATTERN = /\D*\z/
       PHONE_NANP_PATTERN = %r{(?<![\w+])(?:\+?1[ ./-]?)?(?:\(\d{3}\)[ ./-]?|\d{3}[ ./-])\d{3}[ ./-]\d{4}(?!\w)}
       PHONE_INTL_PATTERN = %r{(?<!\w)\+\d{1,3}(?:[ ./()-]{0,2}\d){7,13}(?!\w)}
 
@@ -166,7 +165,7 @@ module PostHog
             first += 1
           end
         end
-        output << text[TRAILING_NON_DIGITS_PATTERN]
+        output
       end
 
       # Redact structured personal identifiers (emails, IPs, cards, US SSNs,
