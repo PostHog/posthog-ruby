@@ -258,11 +258,12 @@ RSpec.describe 'controller exception reporting' do
       end
     end
 
-    def dispatch_body(body = '', action: :create, query: 'safe=query')
+    def dispatch_body(body = '', action: :create, query: 'safe=query', headers: {})
       controller_class.report_arguments = arguments
       controller_class.report_keywords = keywords
       env = Rack::MockRequest.env_for("/reports?#{query}", method: 'POST', input: body,
                                                            'CONTENT_TYPE' => 'application/json')
+      env.update(headers)
       env['action_dispatch.logger'] = controller_class.logger
       env['action_dispatch.request.path_parameters'] = { id: 'route-id' }
       app = PostHog::Rails::RequestContext.new(
@@ -315,6 +316,42 @@ RSpec.describe 'controller exception reporting' do
         expect(client.dequeue_last_message[:properties]['$request_params']).to include(
           'token' => '[FILTERED]', 'item' => 'body', 'safe' => 'query', 'id' => 'route-id'
         )
+      end
+    end
+
+    ['action_dispatch.request.parameters', 'action_dispatch.request.request_parameters', nil].each do |cache_key|
+      it "honors request-specific parameter filters with #{cache_key || 'an uncached body'}" do
+        application = double('application', config: double('config', filter_parameters: [:password]))
+        allow(Rails).to receive(:application).and_return(application)
+        original_prepare = controller_class.prepare_report
+        original_parameters = nil
+        controller_class.prepare_report = lambda do |controller|
+          original_prepare.call(controller)
+          controller.request.delete_header('action_dispatch.request.parameters') unless
+            cache_key == 'action_dispatch.request.parameters'
+          controller.request.delete_header('action_dispatch.request.request_parameters') unless cache_key
+          original_parameters = controller.request.get_header(cache_key).deep_dup if cache_key
+        end
+        response, env = dispatch_body(
+          '{"person":{"ssn":"PRIVATE_BODY"},"item":"body"}',
+          query: 'ssn=PRIVATE_QUERY&password=PRIVATE_PASSWORD&safe=query',
+          headers: { 'action_dispatch.parameter_filter' => %i[password ssn] }
+        )
+
+        expect(response.first).to eq(200)
+        expect(controller_class.report_result).to be(true)
+        expect(parser_calls).to be_empty
+        expect(controller_class.input_positions.uniq.length).to eq(1)
+        expect(env[cache_key]).to eq(original_parameters) if cache_key
+        properties = client.dequeue_last_message[:properties]
+        expect(properties['$request_params']).to include(
+          'ssn' => '[FILTERED]', 'password' => '[FILTERED]', 'safe' => 'query'
+        )
+        if cache_key
+          expect(properties['$request_params']).to include('person' => { 'ssn' => '[FILTERED]' }, 'item' => 'body')
+        end
+        expect(properties['$request_params'].to_s).not_to include('PRIVATE_')
+        expect(env).not_to have_key('action_dispatch.request.request_parameters') unless cache_key
       end
     end
 

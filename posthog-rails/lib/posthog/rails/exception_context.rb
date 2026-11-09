@@ -48,7 +48,7 @@ module PostHog
         # Add request parameters (be careful with sensitive data)
         params = request_parameters
         if params.present?
-          filtered_params = filter_sensitive_params(params)
+          filtered_params = filter_request_parameters(params)
           # Safe serialize to handle any complex objects in params
           properties['$request_params'] = safe_serialize(filtered_params) unless filtered_params.empty?
         end
@@ -89,6 +89,15 @@ module PostHog
         raise unless @manual
 
         {}
+      end
+
+      def filter_request_parameters(params)
+        if @manual && @request.respond_to?(:parameter_filter) &&
+           @request.has_header?('action_dispatch.parameter_filter')
+          @request.parameter_filter.filter(params)
+        else
+          filter_sensitive_params(params)
+        end
       end
 
       def extract_current_user(controller)
