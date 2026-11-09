@@ -141,7 +141,15 @@ module PostHog
 
     def message_bytes(bodies)
       files = @attachments.sum { |attachment| encoded_bytes(attachment.bytes.bytesize) }
-      files + bodies.sum(&:bytesize) + HEADERS_AND_MIME_BOUNDARIES_BYTES
+      files + bodies.sum { |body| utf8_bytesize(body) } + HEADERS_AND_MIME_BOUNDARIES_BYTES
+    end
+
+    # The send carries each body as JSON, which transcodes it to UTF-8, so a UTF-16 body counts its UTF-8 bytes.
+    def utf8_bytesize(body)
+      body.encoding == Encoding::BINARY ? body.bytesize : body.encode(Encoding::UTF_8).bytesize
+    rescue EncodingError
+      # Text that can't become UTF-8 fails when the send builds its JSON; count its bytes as they are until then.
+      body.bytesize
     end
 
     def encoded_bytes(size)

@@ -459,6 +459,20 @@ module PostHog
           .to eq('msg_1')
       end
 
+      it 'counts a body by the UTF-8 bytes it is sent as, whatever its encoding' do
+        largest_that_fits = ("\0" * 29_182_875).b
+        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
+        stub_request(:post, send_url).to_return(accept)
+        attachments = [{ filename: 'scan.pdf', content: largest_that_fits }]
+
+        sent = send_code(html: 'abc'.encode(Encoding::UTF_16LE), attachments: attachments)
+        too_large = refused_attachment(html: 'abcd'.encode(Encoding::UTF_16LE), attachments: attachments)
+
+        expect(sent.id).to eq('msg_1')
+        expect(sent_bodies.first['html']).to eq('abc')
+        expect(too_large.code).to eq('message_too_large')
+      end
+
       it 'refuses a file it cannot send before any request, naming the field and never the content' do
         cases = {
           { attachments: { filename: 'a.pdf', content: pdf } } => ['attachments', /list of files/],
