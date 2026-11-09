@@ -162,6 +162,7 @@ module PostHog
             )
             return attributes if job.class.respond_to?(:log_arguments?) && !job.class.log_arguments?
             return attributes if defined?(::ActionMailer::MailDeliveryJob) && job.is_a?(::ActionMailer::MailDeliveryJob)
+            return attributes if defined?(::ActionMailer::DeliveryJob) && job.is_a?(::ActionMailer::DeliveryJob)
 
             # Unkeyed arguments have no filterable name. Do not guess which are safe.
             budget = [1000, 10_000]

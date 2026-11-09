@@ -341,6 +341,29 @@ RSpec.describe 'Rails structured notification logs' do
     expect(records.to_s).not_to include('PRIVATE_')
   end
 
+  %w[ActionMailer::DeliveryJob ActionMailer::Parameterized::DeliveryJob].each do |class_name|
+    it "omits legacy mail payloads from #{class_name}" do
+      install([:active_job])
+      app = double('application', config: double('config', filter_parameters: []))
+      allow(Rails).to receive(:application).and_return(app)
+      delivery_job = Class.new(ActiveJob::Base) do
+        def perform(*)
+          :ok
+        end
+      end
+      stub_const('ActionMailer::DeliveryJob', delivery_job)
+      stub_const('ActionMailer::Parameterized::DeliveryJob', Class.new(delivery_job))
+      job = class_name.constantize.new(
+        'ReceiptMailer', 'receipt', 'deliver_now',
+        recipient: 'PRIVATE_RECIPIENT', subject: 'PRIVATE_SUBJECT', body: 'PRIVATE_CONTENT'
+      )
+      expect(job.perform_now).to eq(:ok)
+      expect(records.fetch(0)[:attributes]).to include('rails.job.id' => job.job_id)
+      expect(records.first[:attributes]).not_to have_key('rails.job.arguments')
+      expect(records.to_s).not_to include('PRIVATE_')
+    end
+  end
+
   it 'defaults to no notification subscriptions and retains generic forwarding' do
     expect(config.logs_notifications).to eq([])
     appender = install([])
