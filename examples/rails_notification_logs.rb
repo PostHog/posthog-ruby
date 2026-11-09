@@ -60,6 +60,8 @@ module NotificationLogsExample
   end
 
   class ExampleController < ActionController::Base
+    protect_from_forgery with: :exception
+
     def index
       ExampleJob.perform_later({ visible: 'example', password: 'PRIVATE_JOB_PASSWORD' }, 'PRIVATE_UNKEYED')
       PostHog.capture(event: 'rails_notification_logs_request', properties: { validation_run_id: RUN_ID })
