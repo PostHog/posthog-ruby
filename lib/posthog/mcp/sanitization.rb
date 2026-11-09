@@ -203,11 +203,20 @@ module PostHog
         result = event.dup
         result['response'] = sanitize_response(result['response']) unless result['response'].nil?
         result['parameters'] = sanitize_captured_value(result['parameters']) unless result['parameters'].nil?
-        unless result['user_intent'].nil?
-          result['user_intent'] = redact_pii(sanitize_captured_value(result['user_intent']))
-        end
+        result['user_intent'] = sanitize_intent(result['user_intent']) unless result['user_intent'].nil?
         result['error'] = sanitize_exception_values(result['error']) unless result['error'].nil?
         result
+      end
+
+      # Truncation keeps only the head of the intent, so only a head is
+      # scanned: twice the kept length leaves room for redactions that shorten
+      # it. Binary detection still sees the whole value, as a head alone would
+      # fall under the size gate.
+      def sanitize_intent(intent)
+        return sanitize_captured_value(intent) unless intent.is_a?(String)
+        return BINARY_REDACTED_VALUE if binary_like?(intent)
+
+        redact_pii(sanitize_string(intent[0, 2 * Truncation::MAX_USER_INTENT_LENGTH]))
       end
 
       def sanitize_exception_values(error)

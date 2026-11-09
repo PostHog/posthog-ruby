@@ -256,6 +256,20 @@ RSpec.describe PostHog::MCP::Sanitization do
   end
 
   describe '.sanitize_event' do
+    it 'scans only the head of the intent that truncation can keep' do
+      scanned = []
+      allow(described_class).to receive(:redact_pii).and_wrap_original do |original, value|
+        scanned << value.length
+        original.call(value)
+      end
+      described_class.sanitize_event('user_intent' => "Charging card 4111 1111 1111 1111. #{'x' * 1_000_000}")
+      expect(scanned).to eq([2 * PostHog::MCP::Truncation::MAX_USER_INTENT_LENGTH])
+    end
+
+    it 'still redacts an intent that is binary data in full' do
+      expect(described_class.sanitize_event('user_intent' => 'A' * 20_000)['user_intent']).to eq(binary)
+    end
+
     it 'redacts PII in the intent only, and tokens in exception values' do
       event = {
         'user_intent' => 'Rotating token phc_123456789012345678901234567890 for user carol@example.org.',
