@@ -27,7 +27,11 @@ See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-r
 
 Controllers and API controllers gain a private `capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)` helper. Existing controller helpers with that name are not replaced. It returns the core capture result (`true`, `false`, or `nil`) and is not a controller action.
 
+The existing `PostHog.capture_exception` API remains available. This helper keeps configured-user resolution, controller/action and filtered parameters local to an explicit exception-reporting call rather than adding them to every event through `RequestContext`.
+
 Manual reports do not require `auto_capture_exceptions` and do not apply automatic exception exclusions. They retain the core manual handled-exception defaults and duplicate prevention. Missing or disabled clients no-op without initializing a client.
+
+These remain plain manual captures: the default mechanism is `generic` with `handled: true`, and the helper does not add `$exception_source`. Adding Rails context does not introduce a new automatic capture boundary.
 
 Explicit identity wins over the configured current user, then request identity. Explicit properties win over inferred request properties. The helper respects `capture_user_context`, current-user resolution settings, and `use_tracing_headers`. Request parameters use Rails `filter_parameters`; automatically derived URLs omit queries and fragments. Explicit properties and exception messages are not parameter-filtered. Unavailable or malformed enrichment is omitted without dropping the original report or replacing application exceptions. Request context is not retained after the request.
 
