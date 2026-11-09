@@ -82,18 +82,30 @@ module PostHog
         raise invalid('An attachment needs content: the bytes File.binread returns, a list of byte values, or the ' \
                       'file encoded as Base64.', field)
       end
-      bytes = content.delete("\r\n").unpack1('m0')
-      raise ArgumentError if content.include?("\n") && !wrapped_base64?(content, bytes)
+      raise ArgumentError if content.include?("\n") && !wrapped_base64?(content)
 
-      bytes
+      content.delete("\r\n").unpack1('m0')
     rescue ArgumentError, EncodingError
       raise invalid("An attachment's content is text that isn't Base64. Pass the file's bytes, read with " \
                     'File.binread, or the file encoded as Base64.', field)
     end
 
-    def self.wrapped_base64?(content, bytes)
-      encoded = [bytes].pack('m0')
-      BASE64_LINE_WIDTHS.any? { |width| encoded.scan(/.{1,#{width}}/).join("\n") == content.delete("\r").chomp }
+    def self.wrapped_base64?(content)
+      text = content.delete("\r").chomp
+      width = text.index("\n")
+      return true if width.nil?
+
+      text.ascii_only? && BASE64_LINE_WIDTHS.include?(width) && lines_of_width?(text, width)
+    end
+
+    def self.lines_of_width?(text, width)
+      line_break = width
+      while (next_break = text.index("\n", line_break + 1))
+        return false unless next_break == line_break + width + 1
+
+        line_break = next_break
+      end
+      (text.length - line_break - 1).between?(1, width)
     end
 
     def self.invalid(message, field)
@@ -108,7 +120,7 @@ module PostHog
     end
 
     private_class_method :new, :attachment, :check_keys, :file_bytes, :raw_bytes, :base64_bytes,
-                         :wrapped_base64?, :invalid, :too_many_files
+                         :wrapped_base64?, :lines_of_width?, :invalid, :too_many_files
 
     def initialize(attachments, bodies)
       @attachments = attachments

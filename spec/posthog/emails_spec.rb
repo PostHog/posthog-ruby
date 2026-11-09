@@ -489,6 +489,20 @@ module PostHog
           .to eq('msg_1')
       end
 
+      it 'reads the largest file wrapped as Base64 without splitting it into lines' do
+        largest_that_fits = ("\0" * 29_182_875).b
+        wrapped = "#{[largest_that_fits].pack('m0').scan(/.{1,76}/).join("\n")}\n"
+        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
+        stub_request(:post, send_url).to_return(accept)
+        emails
+        GC.start
+
+        allocated_before = GC.stat(:total_allocated_objects)
+        send_code(html: '', attachments: [{ filename: 'scan.pdf', content: wrapped }])
+
+        expect(GC.stat(:total_allocated_objects) - allocated_before).to be < 100_000
+      end
+
       it "counts each body like a file: its UTF-8 bytes' Base64 size with line breaks" do
         stub_request(:post, uploads_url).to_return do |request|
           answer_uploads(*JSON.parse(request.body)['files'].map { |file| present_slot(file['sha256']) })
