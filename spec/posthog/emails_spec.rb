@@ -36,21 +36,23 @@ module PostHog
       bodies
     end
 
-    # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. WebMock
-    # is off meanwhile: its Net::HTTP wrapper reads the whole body before it hands over the response.
+    # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. A
+    # response can be a lambda that takes the socket's URL. WebMock is off meanwhile: its Net::HTTP wrapper reads the
+    # whole body before it hands over the response.
     def serve(*responses, tls: nil)
       server = TCPServer.new('127.0.0.1', 0)
       listener = tls ? OpenSSL::SSL::SSLServer.new(server, tls) : server
+      base_url = "#{tls ? 'https' : 'http'}://127.0.0.1:#{server.addr[1]}"
       responder = Thread.new do
         Thread.current.report_on_exception = false
         responses.each do |response|
           connection = listener.accept
           read_request(connection)
-          connection.write(response)
+          connection.write(response.respond_to?(:call) ? response.call(base_url) : response)
           connection.close
         end
       end
-      options.merge!(host: 'http://127.0.0.1:9', app_host: "#{tls ? 'https' : 'http'}://127.0.0.1:#{server.addr[1]}")
+      options.merge!(host: 'http://127.0.0.1:9', app_host: base_url)
       WebMock.disable!
       yield
       expect(responder.join(5)).to be_truthy
@@ -365,6 +367,22 @@ module PostHog
         expect(delays.first).to be >= 3
         expect([error.code, error.retry_after]).to eq(['attachment_upload_failed', 60.0])
         expect(a_request(:put, upload_url)).to have_been_made.times(3)
+      end
+
+      it "keeps storage's Retry-After when its answer to an upload was cut off" do
+        uploads = lambda do |base_url|
+          slot = upload_slot(pdf_sha256, url: "#{base_url}/team/#{pdf_sha256}")
+          http_response('200 OK', JSON.generate(files: [slot]))
+        end
+        cut_off = http_response('503 Service Unavailable', '<Error><Code>Slow',
+                                'Content-Length' => '60', 'Retry-After' => '60')
+
+        serve(uploads, cut_off) do
+          error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+          expect([error.code, error.field, error.retry_after]).to eq(['network_error', 'attachments__0', 60.0])
+          expect(error.message).to eq('The upload of invoice.pdf to file storage failed, so no email was sent.')
+        end
       end
 
       it "sends nothing when PostHog refuses the uploads, and passes on PostHog's reason" do

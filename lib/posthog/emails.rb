@@ -483,7 +483,7 @@ module PostHog
     rescue EmailError => e
       raise unless e.code == 'network_error'
 
-      raise EmailError.new(code: 'network_error', field: file.field,
+      raise EmailError.new(code: 'network_error', field: file.field, retry_after: e.retry_after,
                            message: "The upload of #{file.reference['filename']} to file storage failed, so no " \
                                     'email was sent.')
     end
