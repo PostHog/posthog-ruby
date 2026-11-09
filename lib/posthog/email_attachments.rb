@@ -14,6 +14,7 @@ module PostHog
     HEADERS_AND_MIME_BOUNDARIES_BYTES = 64 * 1024
     LIMIT = '10 files and 40 MB per email after Base64 encoding, about 29 MB of files'
     FIELDS = %w[filename content content_type content_id].freeze
+    BASE64_LINE_WIDTHS = [60, 64, 76].freeze
 
     # One file to attach: its bytes, their SHA-256, and what the send says about it.
     Attachment = Struct.new(:bytes, :reference, :field, keyword_init: true) do
@@ -81,14 +82,18 @@ module PostHog
         raise invalid('An attachment needs content: the bytes File.binread returns, a list of byte values, or the ' \
                       'file encoded as Base64.', field)
       end
-      encode64_layout?(content) ? content.unpack1('m') : content.unpack1('m0')
-    rescue ArgumentError
+      bytes = content.delete("\r\n").unpack1('m0')
+      raise ArgumentError if content.include?("\n") && !wrapped_base64?(content, bytes)
+
+      bytes
+    rescue ArgumentError, EncodingError
       raise invalid("An attachment's content is text that isn't Base64. Pass the file's bytes, read with " \
                     'File.binread, or the file encoded as Base64.', field)
     end
 
-    def self.encode64_layout?(content)
-      content.ascii_only? && content.include?("\n") && [content.unpack1('m')].pack('m') == content
+    def self.wrapped_base64?(content, bytes)
+      encoded = [bytes].pack('m0')
+      BASE64_LINE_WIDTHS.any? { |width| encoded.scan(/.{1,#{width}}/).join("\n") == content.delete("\r").chomp }
     end
 
     def self.invalid(message, field)
@@ -103,7 +108,7 @@ module PostHog
     end
 
     private_class_method :new, :attachment, :check_keys, :file_bytes, :raw_bytes, :base64_bytes,
-                         :encode64_layout?, :invalid, :too_many_files
+                         :wrapped_base64?, :invalid, :too_many_files
 
     def initialize(attachments, bodies)
       @attachments = attachments
@@ -141,15 +146,12 @@ module PostHog
 
     def message_bytes(bodies)
       files = @attachments.sum { |attachment| encoded_bytes(attachment.bytes.bytesize) }
-      # PostHog counts each body like a file, so a send that passes here passes its check after the uploads.
       files + bodies.sum { |body| encoded_bytes(utf8_bytesize(body)) } + HEADERS_AND_MIME_BOUNDARIES_BYTES
     end
 
-    # The send carries each body as JSON, which transcodes it to UTF-8, so a UTF-16 body counts its UTF-8 bytes.
     def utf8_bytesize(body)
       body.encoding == Encoding::BINARY ? body.bytesize : body.encode(Encoding::UTF_8).bytesize
     rescue EncodingError
-      # Text that can't become UTF-8 fails when the send builds its JSON; count its bytes as they are until then.
       body.bytesize
     end
 

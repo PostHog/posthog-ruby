@@ -153,8 +153,8 @@ module PostHog
     #   sent before by the same project uploads nothing again. Each file is a Hash with:
     #   - +filename+ [String] the name the recipient sees, such as `invoice.pdf`;
     #   - +content+ [String, Array<Integer>] the file's bytes, as a binary String such as `File.binread(path)`
-    #     returns or as a list of byte values. Any other String is taken as the file encoded as Base64. PostHog
-    #     can't fetch a file from a path or URL;
+    #     returns or as a list of byte values. Any other String is taken as the file encoded as Base64, on one
+    #     line or wrapped at 60, 64 or 76 characters. PostHog can't fetch a file from a path or URL;
     #   - +content_type+ [String] the MIME type, optional. Without it, the type follows the file name;
     #   - +content_id+ [String] optional: shows the file inline where `html` has `<img src="cid:...">` with this ID.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
@@ -171,7 +171,8 @@ module PostHog
     # @raise [EmailError] PostHog did not queue the email, or the client could not tell whether it did.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
-    #   It is `attachment_upload_failed` when file storage refused an upload, and then no email was sent.
+    #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
+    #   {EmailError#field} `attachments` when PostHog has no upload route for this project. No email was sent.
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
@@ -335,7 +336,10 @@ module PostHog
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
-      %i[cc bcc].each { |name| put_unless_empty(code, name, addresses(name, fields[name])) if fields.key?(name) }
+      %i[cc bcc].each do |name|
+        list = fields.key?(name) ? addresses(name, fields[name]) : []
+        code[name] = list unless list.empty?
+      end
       code[:capture_engagement] = fields.fetch(:capture_engagement, true)
       code
     end
@@ -346,10 +350,6 @@ module PostHog
 
       message = "A send with #{form} doesn't take #{field}, so no email was sent."
       raise ArgumentError, "#{message} #{why} Remove #{field}, or send with #{other_form}."
-    end
-
-    def put_unless_empty(code, name, list)
-      code[name] = list unless list.empty?
     end
 
     def addresses(name, value)
@@ -455,6 +455,7 @@ module PostHog
 
     def parse_uploads_reply((status, payload, retry_after), files)
       fields = payload.is_a?(Hash) ? payload : {}
+      fields = { 'attr' => 'attachments' }.merge(fields.compact) if status == 404
       raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
 
       slots = fields['files']

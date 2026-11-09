@@ -287,18 +287,21 @@ module PostHog
         end).to have_been_made.twice
       end
 
-      it 'takes the file as bytes, a list of byte values, or Base64 with or without line breaks' do
+      it 'takes the file as bytes, a list of byte values, or Base64 in any line layout' do
         file = pdf * 5
+        mime_lines = [file].pack('m0').scan(/.{1,76}/)
+        pem_lines = [file].pack('m0').scan(/.{1,64}/)
         stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(five_pdfs_sha256)))
         stub_request(:post, send_url).to_return(accept)
 
-        [file, file.bytes, [file].pack('m0'), [file].pack('m')].each do |content|
+        [file, file.bytes, [file].pack('m0'), [file].pack('m'), "#{mime_lines.join("\n")}\n",
+         "#{mime_lines.join("\r\n")}\r\n", pem_lines.join("\n")].each do |content|
           send_code(attachments: [{ filename: 'invoice.pdf', content: content }])
         end
 
-        expect([file].pack('m')).to include("\n")
+        expect([mime_lines.size, pem_lines.size]).to eq([2, 2])
         expect(a_request(:post, uploads_url).with(body: { files: [{ sha256: five_pdfs_sha256, size: 60 }] }.to_json))
-          .to have_been_made.times(4)
+          .to have_been_made.times(7)
       end
 
       it 'uploads a file attached twice once, and sends both references' do
@@ -328,6 +331,33 @@ module PostHog
           .to eq(['attachment_upload_failed', 400, 'attachments__0'])
         expect(error.message).to eq('File storage refused the upload of invoice.pdf with HTTP 400 ' \
                                     '(BadDigest: The checksum did not match.), so no email was sent.')
+        expect(a_request(:post, send_url)).not_to have_been_made
+      end
+
+      it "names a refused upload by storage's failure, never by PostHog's categories" do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_return({ status: 403, body: '<Error><Code>AccessDenied</Code></Error>' },
+                                                 { status: 503, body: '<Error><Code>SlowDown</Code></Error>' })
+        attachments = [{ filename: 'invoice.pdf', content: pdf }]
+
+        expired = refused_attachment(max_retries: 0, attachments: attachments)
+        unavailable = refused_attachment(max_retries: 0, attachments: attachments)
+
+        expect([expired.name, expired.status_code]).to eq(['application_error', 403])
+        expect([unavailable.name, unavailable.status_code]).to eq(['service_unavailable', 503])
+      end
+
+      it "sends nothing on a PostHog without the upload route, and passes on PostHog's answer" do
+        stub_request(:post, uploads_url).to_return(
+          refuse(404, 'not_found', detail: 'Endpoint not found.', type: 'invalid_request', attr: nil)
+        )
+
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect([error.code, error.name, error.status_code, error.field])
+          .to eq(['not_found', 'not_found', 404, 'attachments'])
+        expect(error.message).to eq('Endpoint not found.')
+        expect(a_request(:put, /./)).not_to have_been_made
         expect(a_request(:post, send_url)).not_to have_been_made
       end
 
@@ -464,17 +494,20 @@ module PostHog
           answer_uploads(*JSON.parse(request.body)['files'].map { |file| present_slot(file['sha256']) })
         end
         stub_request(:post, send_url).to_return(accept)
-        # Each file leaves room for 57 characters of body, but not for 58.
-        room_for_57_ascii = [{ filename: 'scan.pdf', content: ("\0" * 29_182_818).b }] # 81 bytes left
-        room_for_57_two_byte = [{ filename: 'scan.pdf', content: ("\0" * 29_182_761).b }] # 159 bytes left
+        leaving_81_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_818).b }]
+        leaving_159_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_761).b }]
+        ascii_that_fits = 'a' * 57
+        ascii_one_too_many = 'a' * 58
+        two_byte_that_fits = 'é' * 57
+        two_byte_one_too_many = 'é' * 58
 
         sent = [
-          send_code(html: 'a' * 57, attachments: room_for_57_ascii), # counts 78
-          send_code(html: '', text: ('é' * 57).encode(Encoding::UTF_16LE), attachments: room_for_57_two_byte) # 156
+          send_code(html: ascii_that_fits, attachments: leaving_81_bytes),
+          send_code(html: '', text: two_byte_that_fits.encode(Encoding::UTF_16LE), attachments: leaving_159_bytes)
         ]
         refused = [
-          refused_attachment(html: 'a' * 58, attachments: room_for_57_ascii), # counts 83
-          refused_attachment(html: '', text: 'é' * 58, attachments: room_for_57_two_byte) # counts 161
+          refused_attachment(html: ascii_one_too_many, attachments: leaving_81_bytes),
+          refused_attachment(html: '', text: two_byte_one_too_many, attachments: leaving_159_bytes)
         ]
 
         expect(refused.map(&:code)).to eq(%w[message_too_large message_too_large])
