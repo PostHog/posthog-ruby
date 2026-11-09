@@ -1,5 +1,17 @@
 # posthog-rails
 
+## 3.21.0
+
+### Minor Changes
+
+- c08fd1b: Capture errors logged by ActionController::Live and ActionView streaming templates when automatic exception capture is enabled, preserving Rails logging and completion behavior and reusing existing filtering and duplicate prevention.
+
+### Patch Changes
+
+- 38a14da: Remove unstable numeric suffixes from Rails-generated template method names in exception frames when the name matches the template source path. Preserve filenames, line numbers, source context, frame classification, cause chains, and duplicate capture prevention.
+- Updated dependencies [38a14da]
+  - posthog-ruby@3.32.1
+
 ## 3.20.7
 
 ### Patch Changes

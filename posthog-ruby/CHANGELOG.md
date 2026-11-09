@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.32.1
+
+### Patch Changes
+
+- 38a14da: Remove unstable numeric suffixes from Rails-generated template method names in exception frames when the name matches the template source path. Preserve filenames, line numbers, source context, frame classification, cause chains, and duplicate capture prevention.
+
 ## 3.32.0
 
 ### Minor Changes
