@@ -270,6 +270,27 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(described_class.sanitize_event('user_intent' => 'A' * 20_000)['user_intent']).to eq(binary)
     end
 
+    it 'applies the breadth and depth limits to parameters before sanitizing them' do
+      allow(described_class).to receive(:sanitize_string).and_call_original
+      breadth = PostHog::MCP::Truncation::MAX_BREADTH
+      parameters = (1..10_000).to_h { |i| ["arg#{i}", "value #{i}"] }
+      parameters['arg1'] = { 'password' => Array.new(1_000) { |i| "secret #{i}" } }
+      sanitized = described_class.sanitize_event('parameters' => parameters)['parameters']
+      expect(sanitized.length).to eq(breadth + 1)
+      expect(sanitized['arg1']).to eq('password' => '[redacted]')
+      expect(sanitized['...']).to eq('[MaxProperties ~]')
+      expect(described_class).to have_received(:sanitize_string).exactly(breadth - 1).times
+    end
+
+    it 'limits parameters exactly as truncation would after a full sanitize' do
+      deep = (1..12).reduce('leaf phc_123456789012345678901234567890') { |inner, i| { "level#{i}" => inner } }
+      parameters = { 'deep' => deep, 'list' => Array.new(150) { |i| "item #{i}" },
+                     'token' => { 'nested' => 'x' }, 'text' => 'ok phc_123456789012345678901234567890' }
+      expected = PostHog::MCP::Truncation.normalize(described_class.sanitize_captured_value(parameters))
+      expect(PostHog::MCP::Truncation.normalize(described_class.sanitize_event('parameters' => parameters)['parameters']))
+        .to eq(expected)
+    end
+
     it 'redacts PII in the intent only, and tokens in exception values' do
       event = {
         'user_intent' => 'Rotating token phc_123456789012345678901234567890 for user carol@example.org.',

@@ -197,12 +197,34 @@ module PostHog
         end
       end
 
+      # {sanitize_captured_value} within truncation's depth and breadth limits,
+      # so the cost follows what is captured rather than what the caller sent.
+      # {Truncation.normalize} of the result equals it of a full sanitize.
+      def sanitize_limited_value(value, remaining_depth = Truncation::MAX_DEPTH)
+        case value
+        when Array
+          return '[Array]' if remaining_depth <= 0
+
+          limited = value.first(Truncation::MAX_BREADTH).map { |item| sanitize_limited_value(item, remaining_depth - 1) }
+          value.length > Truncation::MAX_BREADTH ? limited << '[MaxProperties ~]' : limited
+        when Hash
+          return '[Object]' if remaining_depth <= 0
+
+          limited = value.first(Truncation::MAX_BREADTH).to_h do |key, nested|
+            [key.to_s, redact_key?(key) ? REDACTED_VALUE : sanitize_limited_value(nested, remaining_depth - 1)]
+          end
+          limited['...'] = '[MaxProperties ~]' if value.length > Truncation::MAX_BREADTH
+          limited
+        else sanitize_captured_value(value)
+        end
+      end
+
       # Sanitize an event's response, parameters, intent and error. Returns a
       # new shallow copy; does not mutate the input.
       def sanitize_event(event)
         result = event.dup
         result['response'] = sanitize_response(result['response']) unless result['response'].nil?
-        result['parameters'] = sanitize_captured_value(result['parameters']) unless result['parameters'].nil?
+        result['parameters'] = sanitize_limited_value(result['parameters']) unless result['parameters'].nil?
         result['user_intent'] = sanitize_intent(result['user_intent']) unless result['user_intent'].nil?
         result['error'] = sanitize_exception_values(result['error']) unless result['error'].nil?
         result
@@ -350,32 +372,17 @@ module PostHog
       # dropping the SDK-injected arguments (they surface as dedicated properties).
       def build_captured_mcp_parameters(request)
         request = stringify_keys(request)
-        return { 'request' => sanitize_captured_value(request) } unless request.is_a?(Hash)
-
-        captured = {}
-        %w[id jsonrpc method].each do |key|
-          captured[key] = sanitize_captured_value(request[key]) if request.key?(key)
-        end
-        captured['params'] = build_captured_params(request['params']) if request.key?('params')
-        { 'request' => captured }
+        sanitize_limited_value('request' => request.is_a?(Hash) ? captured_request_fields(request) : request)
       end
 
-      def build_captured_params(params)
-        return sanitize_captured_value(params) unless params.is_a?(Hash)
-
-        params.to_h do |key, value|
-          [key, key == 'arguments' ? build_captured_arguments(value) : sanitize_captured_value(value)]
+      def captured_request_fields(request)
+        captured = request.slice('id', 'jsonrpc', 'method')
+        params = request['params']
+        if params.is_a?(Hash) && params['arguments'].is_a?(Hash)
+          params = params.merge('arguments' => params['arguments'].except(*INJECTED_ARGUMENT_NAMES))
         end
-      end
-
-      def build_captured_arguments(arguments)
-        return sanitize_captured_value(arguments) unless arguments.is_a?(Hash)
-
-        arguments.each_with_object({}) do |(key, value), captured|
-          next if INJECTED_ARGUMENT_NAMES.include?(key)
-
-          captured[key] = sanitize_captured_value(value)
-        end
+        captured['params'] = params if request.key?('params')
+        captured
       end
 
       # Last-resort credential detection for bare words.
