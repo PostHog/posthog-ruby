@@ -37,7 +37,7 @@ The existing job distinct ID extractor takes precedence over the saved ID. Rescu
 
 ## Sidekiq retry reporting (optional)
 
-On Rails 7.1 or later with Sidekiq 7 or 8, explicitly load and install the integration in an initializer:
+On Rails 7.1 or later with Sidekiq 7.0.3 or later, explicitly load and install the integration in an initializer:
 
 ```ruby
 require 'posthog/rails/sidekiq'
@@ -54,7 +54,7 @@ The required `error_reporting:` argument accepts:
 - `:exhausted` reports Sidekiq's terminal failure notifications through its death handler. This includes exhausted retries, early kills, jobs with `retry: false`, and terminal failures with `dead: false`.
 - `:dead` reports only terminal failures sent to Sidekiq's dead queue. It skips `retry: false`, `dead: false`, and discarded jobs. `retry: 0` can still send a failed job to the dead queue.
 
-Rails 7.1 provides the `job.sidekiq` error-reporter source needed to distinguish Sidekiq failures from unrelated Rails reports. These policies follow Sidekiq's callbacks, not a comparison of retry counts. In Sidekiq 8.1+, deliberate discards also emit a terminal failure notification and are included in `:exhausted`. Earlier versions do not notify death handlers for these discards.
+Sidekiq 7.0.3+ labels its Rails 7.1+ error reports with `job.sidekiq`, distinguishing Sidekiq failures from unrelated Rails reports. These policies follow Sidekiq's callbacks, not a comparison of retry counts. In Sidekiq 8.1+, deliberate discards also emit a terminal failure notification and are included in `:exhausted`. Earlier versions do not notify death handlers for these discards.
 
 The installed Sidekiq integration owns automatic error reporting for its jobs. Rails wrapper reports and Active Job captures defer to the selected Sidekiq policy instead of sending separate events. Active Job identity, session, and filtered job properties are retained when available. Other Rails error subscribers and Sidekiq handlers remain active. Manual exception captures and explicit application Rails error reports are not filtered by this policy. Active Job's own retry scheduling still controls failures it consumes before they reach Sidekiq.
 

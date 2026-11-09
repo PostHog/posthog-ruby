@@ -483,16 +483,36 @@ RSpec.describe 'Sidekiq retry reporting' do
     end
   end
 
-  [['7.0.8', '7.3.9'], ['7.2.3.1', '6.5.0']].each do |rails_version, sidekiq_version|
+  it 'installs the policy at the Sidekiq 7.0.3 minimum' do
+    stub_const('Sidekiq::VERSION', '7.0.3')
+    enable_policy(:dead)
+    job['retry'] = false
+
+    process_failure
+
+    expect(client.queued_messages).to eq(0)
+  end
+
+  [
+    ['7.0.8', '7.3.9'], ['7.2.3.1', '6.5.0'],
+    ['7.2.3.1', '7.0.0'], ['7.2.3.1', '7.0.1'], ['7.2.3.1', '7.0.2']
+  ].each do |rails_version, sidekiq_version|
     it "keeps existing reporting on unsupported Rails #{rails_version} / Sidekiq #{sidekiq_version}" do
       allow(Rails).to receive(:version).and_return(rails_version)
       stub_const('Sidekiq::VERSION', sidekiq_version)
-      expect(PostHog::Logging.logger).to receive(:warn).with(include('requires Rails 7.1+ and Sidekiq 7+'))
+      expect(PostHog::Logging.logger).to receive(:warn).with(include('requires Rails 7.1+ and Sidekiq 7.0.3+'))
+      config[:reloader] = ->(&block) { reporter.record(source: 'application.active_support', &block) }
 
-      enable_policy(:exhausted)
+      enable_policy(:dead)
 
       expect(config.error_handlers).to be_empty
       expect(config.death_handlers).to be_empty
+      job['retry'] = false
+
+      process_failure
+
+      expect(client.queued_messages).to eq(1)
+      expect(client.dequeue_last_message[:properties]['$exception_source']).to eq('application.active_support')
     end
   end
 

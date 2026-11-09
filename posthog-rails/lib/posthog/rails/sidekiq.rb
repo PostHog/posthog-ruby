@@ -21,9 +21,10 @@ module PostHog
           raise ArgumentError, 'error_reporting must be :all, :exhausted, or :dead'
         end
 
-        if Gem::Version.new(::Rails.version) < Gem::Version.new('7.1') || ::Sidekiq::VERSION.to_i < 7
+        if Gem::Version.new(::Rails.version) < Gem::Version.new('7.1') ||
+           Gem::Version.new(::Sidekiq::VERSION) < Gem::Version.new('7.0.3')
           PostHog::Logging.logger.warn(
-            'Sidekiq retry reporting requires Rails 7.1+ and Sidekiq 7+; leaving existing reporting unchanged.'
+            'Sidekiq retry reporting requires Rails 7.1+ and Sidekiq 7.0.3+; leaving existing reporting unchanged.'
           )
           return
         end
