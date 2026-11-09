@@ -140,8 +140,10 @@ module PostHog
     # @param from [String] Code form: a verified sender, such as `Acme <hello@example.com>`. Without it, the
     #   project's default sender.
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
-    # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
-    #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
+    # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's engagement events, such as
+    #   opens and clicks, on the recipient's person. Defaults to +true+. Turning it off doesn't change the email:
+    #   PostHog still adds its open pixel and rewrites links to count opens and clicks. A project whose admin turned
+    #   engagement capture off captures nothing.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
