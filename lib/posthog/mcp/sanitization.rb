@@ -44,7 +44,8 @@ module PostHog
       /x
       US_SSN_PATTERN = /\b\d{3}[ .-]\d{2}[ .-]\d{4}\b/
       CREDIT_CARD_CANDIDATE_PATTERN = %r{\b\d(?:[ ./-]?\d){12,}\b}
-      DIGIT_GROUP_PATTERN = /\d+/
+      SEPARATED_DIGIT_GROUP_PATTERN = /(\D*)(\d+)/
+      TRAILING_NON_DIGITS_PATTERN = /\D*\z/
       PHONE_NANP_PATTERN = %r{(?<![\w+])(?:\+?1[ ./-]?)?(?:\(\d{3}\)[ ./-]?|\d{3}[ ./-])\d{3}[ ./-]\d{4}(?!\w)}
       PHONE_INTL_PATTERN = %r{(?<!\w)\+\d{1,3}(?:[ ./()-]{0,2}\d){7,13}(?!\w)}
 
@@ -140,32 +141,32 @@ module PostHog
 
       # Within a card candidate, redact every run of whole separator-delimited
       # digit groups whose joined digits are 13-19 long and pass Luhn.
+      #
+      # Splits into `[separator, digits]` pairs rather than asking each match
+      # for its offset: `MatchData#begin` inside `scan` recounts characters from
+      # the start of the string, which made this pass quadratic.
       def redact_card_in_match(text)
-        groups = []
-        text.scan(DIGIT_GROUP_PATTERN) do
-          groups << [Regexp.last_match[0], Regexp.last_match.begin(0), Regexp.last_match.end(0)]
-        end
+        groups = text.scan(SEPARATED_DIGIT_GROUP_PATTERN)
         output = +''
-        cursor = 0
         first = 0
         while first < groups.length
           digits = +''
           matched_last = -1
           (first...groups.length).each do |last|
-            digits << groups[last][0]
+            digits << groups[last][1]
             break if digits.length > 19
 
             matched_last = last if digits.length >= 13 && passes_luhn?(digits)
           end
           if matched_last >= 0
-            output << text[cursor...groups[first][1]] << REDACTED_VALUE
-            cursor = groups[matched_last][2]
+            output << groups[first][0] << REDACTED_VALUE
             first = matched_last + 1
           else
+            output << groups[first][0] << groups[first][1]
             first += 1
           end
         end
-        output << text[cursor..]
+        output << text[TRAILING_NON_DIGITS_PATTERN]
       end
 
       # Redact structured personal identifiers (emails, IPs, cards, US SSNs,

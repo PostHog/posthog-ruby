@@ -239,6 +239,20 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
       expect(described_class.redact_pii(123)).to eq(123)
     end
+
+    it 'scans a long run of separated digits in linear time' do
+      # Ten-digit groups never reach Luhn, so the time is the scan alone.
+      cpu_seconds = lambda do |input|
+        Array.new(3) do
+          started = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+          described_class.redact_pii(input)
+          Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - started
+        end.min
+      end
+      small = cpu_seconds.call('1111111111-' * 9_091)
+      large = cpu_seconds.call('1111111111-' * 90_910)
+      expect(large / small).to be < 25
+    end
   end
 
   describe '.sanitize_event' do
