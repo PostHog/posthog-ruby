@@ -113,6 +113,19 @@ additional scrubbing. Job completion records reuse saved/effective job identity
 only when the existing `auto_instrument_active_job` integration is enabled; logging
 alone does not enable job context propagation or exception capture.
 
+To exercise real controller and inline job notifications against your project:
+
+```bash
+POSTHOG_API_KEY='<project_api_key>' POSTHOG_HOST='https://us.i.posthog.com' \
+  BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle exec ruby examples/rails_notification_logs.rb
+```
+
+Run from the repository root after installing the OpenTelemetry bundle. The example
+checks outgoing record counts and filtering, then prints a unique run ID to find
+its eight analytics events and eleven records in PostHog Logs. Controller responses
+exercise info, warn, and error severity; the hook drops the 418 controller record.
+SQL and mailer notifications are not exercised by this example.
+
 Known limitations of the broadcast approach:
 
 - `Rails.logger.silence` does not silence forwarding — silenced records still
