@@ -424,6 +424,14 @@ module PostHog
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
 
+      it 'counts the files before it reads any of them' do
+        files = Array.new(10) { |index| { filename: "#{index}.txt", content: "file #{index}".b } }
+
+        error = refused_attachment(attachments: files + [{ filename: 'scan.pdf', path: '/tmp/scan.pdf' }])
+
+        expect(error.code).to eq('too_many_attachments')
+      end
+
       it 'uploads the largest file one email carries' do
         largest_that_fits = ("\0" * 29_182_875).b
         stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))

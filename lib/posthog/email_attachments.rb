@@ -16,13 +16,18 @@ module PostHog
     FIELDS = %w[filename content content_type content_id].freeze
 
     # One file to attach: its bytes, their SHA-256, and what the send says about it.
-    Attachment = Struct.new(:bytes, :sha256, :reference, :field, keyword_init: true)
+    Attachment = Struct.new(:bytes, :reference, :field, keyword_init: true) do
+      def sha256
+        @sha256 ||= Digest::SHA256.hexdigest(bytes)
+      end
+    end
 
     # @param files [Object] What the caller passed as `attachments`.
     # @param bodies [Array<String>] The email's HTML and text bodies, which count towards its size.
     # @raise [EmailError] A file the client can't send, or more than one email can carry.
     def self.from(files, bodies)
       raise invalid('attachments must be a list of files.', 'attachments') unless files.is_a?(Array)
+      raise too_many_files if files.size > MAX_FILES
 
       new(files.each_with_index.map { |file, index| attachment(file, "attachments__#{index}") }, bodies)
     end
@@ -35,8 +40,7 @@ module PostHog
       file = file.transform_keys(&:to_s).compact
       check_keys(file, field)
       bytes = file_bytes(file['content'], "#{field}__content")
-      Attachment.new(bytes: bytes, sha256: Digest::SHA256.hexdigest(bytes), field: field,
-                     reference: file.slice('filename', 'content_type', 'content_id'))
+      Attachment.new(bytes: bytes, field: field, reference: file.slice('filename', 'content_type', 'content_id'))
     end
 
     def self.check_keys(file, field)
@@ -91,12 +95,19 @@ module PostHog
       EmailError.new(code: 'invalid_attachment', message: message, field: field)
     end
 
+    def self.too_many_files
+      EmailError.new(code: 'too_many_attachments', field: 'attachments',
+                     message: "An email carries at most #{MAX_FILES} files, so no email was sent.",
+                     why: "An email carries at most #{MAX_FILES} files.",
+                     fix: "Attach at most #{MAX_FILES} files, and link to any others from the email body.")
+    end
+
     private_class_method :new, :attachment, :check_keys, :file_bytes, :raw_bytes, :base64_bytes,
-                         :encode64_layout?, :invalid
+                         :encode64_layout?, :invalid, :too_many_files
 
     def initialize(attachments, bodies)
       @attachments = attachments
-      check_fits(bodies)
+      check_size(bodies)
     end
 
     def empty?
@@ -115,19 +126,17 @@ module PostHog
 
     private
 
-    def check_fits(bodies)
-      if @attachments.size > MAX_FILES
-        raise refusal('too_many_attachments', "An email carries at most #{MAX_FILES} files, so no email was sent.",
-                      why: "An email carries at most #{MAX_FILES} files.",
-                      fix: "Attach at most #{MAX_FILES} files, and link to any others from the email body.")
-      end
+    def check_size(bodies)
       return if message_bytes(bodies) <= MAX_MESSAGE_BYTES
 
-      raise refusal('message_too_large', 'The files are too large for one email, so no email was sent.',
-                    why: "PostHog's email provider takes emails up to 40 MB, and Base64 encoding makes each file " \
-                         'about a third larger.',
-                    fix: "Keep the email under #{LIMIT}: attach fewer or smaller files, or link to large files " \
-                         'from the email body.')
+      raise EmailError.new(
+        code: 'message_too_large', field: 'attachments',
+        message: 'The files are too large for one email, so no email was sent.',
+        why: "PostHog's email provider takes emails up to 40 MB, and Base64 encoding makes each file about a " \
+             'third larger.',
+        fix: "Keep the email under #{LIMIT}: attach fewer or smaller files, or link to large files from the email " \
+             'body.'
+      )
     end
 
     def message_bytes(bodies)
@@ -137,10 +146,6 @@ module PostHog
 
     def encoded_bytes(size)
       (((size + 2) / 3 * 4 * 78) + 75) / 76
-    end
-
-    def refusal(code, message, why:, fix:)
-      EmailError.new(code: code, message: message, field: 'attachments', why: why, fix: fix)
     end
   end
 end
