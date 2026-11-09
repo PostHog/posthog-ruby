@@ -477,8 +477,8 @@ module PostHog
       with_retries(max_retries) do
         request = Net::HTTP::Put.new(uri)
         request['Content-Type'] = 'application/octet-stream'
-        status, answer = exchange(request, uri, slot['headers'], file.bytes)
-        raise upload_failed(file, status, answer) unless status.between?(200, 299)
+        status, answer, retry_after = exchange(request, uri, slot['headers'], file.bytes)
+        raise upload_failed(file, status, answer, retry_after) unless status.between?(200, 299)
       end
     rescue EmailError => e
       raise unless e.code == 'network_error'
@@ -488,11 +488,11 @@ module PostHog
                                     'email was sent.')
     end
 
-    def upload_failed(file, status, answer)
+    def upload_failed(file, status, answer, retry_after)
       answer = answer.to_s.dup.force_encoding(Encoding::UTF_8).scrub
       storage_said = [answer[%r{<Code>([^<]*)</Code>}, 1], answer[%r{<Message>([^<]*)</Message>}, 1]].compact
       EmailError.new(
-        code: 'attachment_upload_failed', status_code: status, field: file.field,
+        code: 'attachment_upload_failed', status_code: status, field: file.field, retry_after: retry_after,
         message: "File storage refused the upload of #{file.reference['filename']} with HTTP #{status}" \
                  "#{" (#{storage_said.join(': ')})" unless storage_said.empty?}, so no email was sent."
       )

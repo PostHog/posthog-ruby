@@ -351,6 +351,22 @@ module PostHog
         expect(delays.size).to eq(1)
       end
 
+      it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
+        stub_request(:put, upload_url).to_return({ status: 503, headers: { 'Retry-After' => '3' } },
+                                                 { status: 200 },
+                                                 { status: 503, headers: { 'Retry-After' => '60' } })
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect(delays.size).to eq(1)
+        expect(delays.first).to be >= 3
+        expect([error.code, error.retry_after]).to eq(['attachment_upload_failed', 60.0])
+        expect(a_request(:put, upload_url)).to have_been_made.times(3)
+      end
+
       it "sends nothing when PostHog refuses the uploads, and passes on PostHog's reason" do
         stub_request(:post, uploads_url).to_return(
           refuse(400, 'field_not_accepted', detail: "This project can't send files yet.", attr: 'files',
@@ -361,7 +377,7 @@ module PostHog
 
         expect([error.code, error.name, error.field, error.why, error.fix])
           .to eq(['field_not_accepted', 'validation_error', 'files', 'Not available yet.', 'Send without files.'])
-        expect(a_request(:put, /files.example.com/)).not_to have_been_made
+        expect(a_request(:put, upload_url)).not_to have_been_made
         expect(a_request(:post, send_url)).not_to have_been_made
       end
 
