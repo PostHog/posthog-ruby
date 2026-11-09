@@ -158,8 +158,8 @@ module PostHog
     #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
     # @param category [String] {TRANSACTIONAL}, the same as leaving it out, or the key of one of the project's
     #   marketing message categories, such as `product-updates`. A marketing email skips recipients who opted out of
-    #   its category or of all marketing, and its `html` or `text` needs a `{{ unsubscribe_url }}` link. A template
-    #   form send takes the template's category, so pass none or the template's own.
+    #   its category or of all marketing, and needs a `{{ unsubscribe_url }}` link in its `html`, or in its `text` when
+    #   it has no `html`. A template form send takes the template's category, so pass none or the template's own.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
