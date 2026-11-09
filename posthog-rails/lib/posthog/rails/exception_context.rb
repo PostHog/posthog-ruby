@@ -92,9 +92,8 @@ module PostHog
       end
 
       def filter_request_parameters(params)
-        if @manual && @request.respond_to?(:parameter_filter) &&
-           @request.has_header?('action_dispatch.parameter_filter')
-          @request.parameter_filter.filter(params)
+        if @manual && @request.has_header?('action_dispatch.parameter_filter')
+          ParameterFilter.backend.new(@request.get_header('action_dispatch.parameter_filter')).filter(params)
         else
           filter_sensitive_params(params)
         end

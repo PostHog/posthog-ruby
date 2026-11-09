@@ -319,14 +319,17 @@ RSpec.describe 'controller exception reporting' do
       end
     end
 
-    ['action_dispatch.request.parameters', 'action_dispatch.request.request_parameters', nil].each do |cache_key|
-      it "honors request-specific parameter filters with #{cache_key || 'an uncached body'}" do
+    ['action_dispatch.request.parameters', 'action_dispatch.request.request_parameters', nil]
+      .product(%i[public private]).each do |cache_key, visibility|
+      it "honors #{visibility} request-specific parameter filters with #{cache_key || 'an uncached body'}" do
         application = double('application', config: double('config', filter_parameters: [:password]))
         allow(Rails).to receive(:application).and_return(application)
         original_prepare = controller_class.prepare_report
         original_parameters = nil
         controller_class.prepare_report = lambda do |controller|
           original_prepare.call(controller)
+          controller.request.singleton_class.send(visibility, :parameter_filter)
+          expect(controller.request.respond_to?(:parameter_filter)).to eq(visibility == :public)
           controller.request.delete_header('action_dispatch.request.parameters') unless
             cache_key == 'action_dispatch.request.parameters'
           controller.request.delete_header('action_dispatch.request.request_parameters') unless cache_key
