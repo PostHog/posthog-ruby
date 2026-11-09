@@ -22,6 +22,11 @@ module PostHog
         return unless PostHog::Rails.config&.should_capture_exception?(error)
         return if defined?(PostHog::Rails::Sidekiq) && Sidekiq.suppress_rails_report?(error, source)
 
+        if defined?(::Sidekiq::JobRetry::Handled) && error.is_a?(::Sidekiq::JobRetry::Handled)
+          error = error.cause || error
+          return unless PostHog::Rails.config&.should_capture_exception?(error)
+        end
+
         distinct_id = context[:user_id] || context[:distinct_id]
 
         properties = {

@@ -1,5 +1,15 @@
 # posthog-rails
 
+## 3.22.0
+
+### Minor Changes
+
+- 419a8fe: Capture exceptions escaping Action Cable connection, channel lifecycle, and action boundaries when auto_capture_exceptions is enabled. Correlate events with isolated connection request context and include filtered channel details without attaching raw connection environments or authentication cookies.
+
+### Patch Changes
+
+- 071569a: Report Sidekiq retry failures using the original exception, preventing duplicate Active Job error events while honoring exclusions for both the wrapper and the original error.
+
 ## 3.21.0
 
 ### Minor Changes

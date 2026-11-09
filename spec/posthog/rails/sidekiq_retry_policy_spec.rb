@@ -165,7 +165,7 @@ RSpec.describe 'Sidekiq retry reporting' do
     expect(run_work(work, other_config)).to be_a(RuntimeError)
 
     expect(client.queued_messages).to eq(1)
-    expect(client.dequeue_last_message[:properties]['$exception_list'].first['type']).to eq('Sidekiq::JobRetry::Handled')
+    expect(client.dequeue_last_message[:properties]['$exception_list'].first['type']).to eq('RuntimeError')
   end
 
   it 'releases reporting ownership for Sidekiq skip exceptions without capturing them' do

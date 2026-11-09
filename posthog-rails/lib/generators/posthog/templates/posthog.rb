@@ -11,7 +11,7 @@
 
 PostHog::Rails.configure do |config|
   # Automatically capture exceptions (default: false)
-  # Set to true to enable automatic exception tracking
+  # Includes Action Cable connect/disconnect, channel subscribe/unsubscribe, and channel actions.
   # config.auto_capture_exceptions = true
 
   # Report exceptions that Rails rescues (e.g., with rescue_from) (default: false)
