@@ -79,7 +79,7 @@ module PostHog
       private
 
       def capture_streaming_exception(exception, source, env = nil)
-        properties = env ? build_properties(ActionDispatch::Request.new(env), env) : {}
+        properties = env ? build_properties(env) : {}
         properties['$exception_source'] = source
         properties['$exception_level'] = 'error'
         PostHog.capture_exception(

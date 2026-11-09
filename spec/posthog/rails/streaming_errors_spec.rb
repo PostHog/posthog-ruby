@@ -56,7 +56,9 @@ RSpec.describe 'Rails streaming exception capture' do
     stub_const('StreamingErrorsController', controller)
     env = Rack::MockRequest.env_for('/stream?password=secret&visible=yes',
                                     'HTTP_X_POSTHOG_DISTINCT_ID' => 'header-user',
-                                    'HTTP_X_POSTHOG_SESSION_ID' => 'header-session')
+                                    'HTTP_X_POSTHOG_SESSION_ID' => 'header-session',
+                                    'HTTP_REFERER' => 'https://example.com/?token=secret',
+                                    'HTTP_COOKIE' => 'token=secret')
     response = PostHog::Rails::RequestContext.new(
       PostHog::Rails::CaptureExceptions.new(controller.action(:index))
     ).call(env)
@@ -79,10 +81,7 @@ RSpec.describe 'Rails streaming exception capture' do
     end
   end
 
-  it 'captures Live failures after middleware returns with filtered request context and authenticated identity' do
-    allow(Rails).to receive(:application).and_return(
-      double(config: double(root: nil, filter_parameters: [:password]))
-    )
+  it 'captures Live failures with basic request context and authenticated identity but no sensitive request data' do
     live_response(error, user_id: 'authenticated-user') do
       expect(PostHog.const_get(:Internal)::Context.current).to be_nil
       expect(client.queued_messages).to eq(0)
@@ -93,8 +92,10 @@ RSpec.describe 'Rails streaming exception capture' do
     expect(event[:distinct_id]).to eq('authenticated-user')
     expect(event[:properties]).to include(
       '$request_path' => '/stream', '$session_id' => 'header-session',
-      '$exception_source' => 'rails.live', '$exception_level' => 'error',
-      '$request_params' => { 'password' => '[FILTERED]', 'visible' => 'yes' }
+      '$exception_source' => 'rails.live', '$exception_level' => 'error'
+    )
+    expect(event[:properties].keys).not_to include(
+      '$request_params', '$referrer', '$request_body', '$request_headers', '$request_cookies', '$execution_context'
     )
     expect(event[:properties]['$exception_list'].first['mechanism']).to include('type' => 'middleware',
                                                                                 'handled' => false)
