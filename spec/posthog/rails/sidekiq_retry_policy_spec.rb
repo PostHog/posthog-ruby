@@ -146,6 +146,37 @@ RSpec.describe 'Sidekiq retry reporting' do
     end
   end
 
+  it 'keeps later global middleware visible to an existing uncached capsule' do
+    capsule = config.default_capsule
+    calls = []
+    middleware = Class.new do
+      define_method(:call) do |_worker, _job, _queue, &block|
+        calls << :called
+        block.call
+      end
+    end
+    enable_policy(:exhausted)
+    config.server_middleware { |chain| chain.add(middleware) }
+
+    owned = capsule.server_middleware.invoke(nil, job, 'default') do
+      PostHog::Rails::Sidekiq.in_job?
+    end
+
+    expect(calls).to eq([:called])
+    expect(owned).to be(true)
+    expect(PostHog::Rails::Sidekiq.in_job?).to be_falsey
+  end
+
+  it 'installs reporting ownership into an already-cached capsule chain' do
+    chain = config.default_capsule.server_middleware
+    enable_policy(:exhausted)
+
+    owned = chain.invoke(nil, job, 'default') { PostHog::Rails::Sidekiq.in_job? }
+
+    expect(owned).to be(true)
+    expect(PostHog::Rails::Sidekiq.in_job?).to be_falsey
+  end
+
   it 'does not change another server configuration that shares the original handler arrays' do
     other_config = Sidekiq::Config.new(error_handlers: config.error_handlers, death_handlers: config.death_handlers)
     other_config.error_handlers.clear

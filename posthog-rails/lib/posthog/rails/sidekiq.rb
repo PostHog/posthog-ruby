@@ -37,7 +37,8 @@ module PostHog
         installation = Installation.new(error_reporting)
         config.server_middleware { |chain| chain.prepend(ServerMiddleware, installation) }
         config.capsules.each_value do |capsule|
-          capsule.server_middleware { |chain| chain.prepend(ServerMiddleware, installation) }
+          # Leave uncached chains lazy so they inherit later global middleware additions.
+          capsule.instance_variable_get(:@server_chain)&.prepend(ServerMiddleware, installation)
         end
         config[:error_handlers] = config.error_handlers + [installation.method(:report_error)]
         config[:death_handlers] = config.death_handlers + [installation.method(:report_death)]
