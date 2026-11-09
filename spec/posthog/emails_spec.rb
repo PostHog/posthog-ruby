@@ -137,6 +137,14 @@ module PostHog
         expect(sent_bodies.first['message_data']).to eq('renews_at' => '2026-11-02T09:30:00.000Z')
       end
 
+      it "sends the category the caller names, which PostHog checks against the template's own" do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_template(category: Emails::TRANSACTIONAL)
+
+        expect(sent_bodies.first).to include('category' => 'transactional')
+      end
+
       it 'refuses code content, because the template sets its own' do
         expect { send_template(subject: 'Hi') }
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
@@ -181,6 +189,14 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'capture_engagement', 'to')
       end
 
+      it 'sends a marketing category by its key' do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(category: 'product-updates', html: '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>')
+
+        expect(sent_bodies.first).to include('category' => 'product-updates')
+      end
+
       it 'refuses template_data, because local templates are not supported' do
         expect { send_code(template_data: { name: 'Ada' }) }
           .to raise_error(ArgumentError, /template_key doesn't take template_data/)
@@ -208,6 +224,8 @@ module PostHog
         expect { send_template(template_id: 'welcome') }.to raise_error(ArgumentError, /template's UUID/)
         expect { send_template(to: ' ') }.to raise_error(ArgumentError, /to must be/)
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
+        expect { send_code(category: ' ') }.to raise_error(ArgumentError, /category must be/)
+        expect { send_code(category: :newsletter) }.to raise_error(ArgumentError, /category must be/)
         expect { send_template(idempotency_key: 'has space') }.to raise_error(ArgumentError, /idempotency_key/)
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
@@ -356,7 +374,8 @@ module PostHog
         [429, 'throttled', 2],
         [409, 'idempotency_key_in_flight', 2],
         [429, 'quota_limited', 1],
-        [422, 'recipient_suppressed', 1]
+        [422, 'recipient_suppressed', 1],
+        [422, 'recipient_opted_out', 1]
       ].each do |status, code, attempts|
         it "makes #{attempts} attempts for a #{status} #{code}" do
           stub_request(:post, send_url).to_return(refuse(status, code), accept)
@@ -508,6 +527,10 @@ module PostHog
         [409, 'idempotency_key_in_flight', 'concurrent_idempotent_requests'],
         [422, 'idempotency_key_reused', 'invalid_idempotent_request'],
         [422, 'recipient_suppressed', 'validation_error'],
+        [422, 'recipient_opted_out', 'validation_error'],
+        [400, 'unknown_category', 'validation_error'],
+        [400, 'category_mismatch', 'validation_error'],
+        [400, 'unsubscribe_link_required', 'validation_error'],
         [429, 'quota_limited', 'monthly_quota_exceeded'],
         [429, 'throttled', 'rate_limit_exceeded'],
         [500, 'server_error', 'application_error']

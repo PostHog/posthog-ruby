@@ -13,7 +13,7 @@ require 'posthog/logging'
 require 'posthog/utils'
 
 module PostHog
-  # Sends transactional email, from an email template made in PostHog or from content your code rendered,
+  # Sends transactional or marketing email, from an email template made in PostHog or from content your code rendered,
   # and reads the status of each email sent. Reach it through {Client#emails}.
   #
   # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the
@@ -43,6 +43,16 @@ module PostHog
   #     html: rendered_html,
   #     distinct_id: 'user_123'
   #   )
+  #
+  # @example A marketing email in one of the project's message categories
+  #   posthog.emails.send(
+  #     to: 'user@example.com',
+  #     template_key: 'monthly-digest',
+  #     subject: 'Your monthly digest',
+  #     html: rendered_html, # links to {{ unsubscribe_url }}
+  #     category: 'product-updates',
+  #     distinct_id: 'user_123'
+  #   )
   class Emails
     include PostHog::Logging
     include PostHog::Utils
@@ -66,9 +76,13 @@ module PostHog
     #   @return [String] `queued`, `sent`, `failed`, `delivered`, `bounced` or `complained`. Later SDK versions
     #     can see values this list does not have yet.
     # @!attribute [r] reason
-    #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed`, or the bounce type
+    #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed` or
+    #     `recipient_opted_out`, or the bounce type
     #     of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
+
+    # The built-in `category` of {#send}: a transactional email, the same as leaving `category` out.
+    TRANSACTIONAL = 'transactional'
 
     SEND_PATH = '/api/projects/@current/messaging/send/email/'
     STATUS_PATH = '/api/projects/@current/messaging/emails/%<message_id>s/'
@@ -142,6 +156,10 @@ module PostHog
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
     #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
+    # @param category [String] {TRANSACTIONAL}, the same as leaving it out, or the key of one of the project's
+    #   marketing message categories, such as `product-updates`. A marketing email skips recipients who opted out of
+    #   its category or of all marketing, and its `html` or `text` needs a `{{ unsubscribe_url }}` link. A template
+    #   form send takes the template's category, so pass none or the template's own.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -155,14 +173,16 @@ module PostHog
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
-      reply_to: nil, capture_engagement: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
+      reply_to: nil, capture_engagement: nil, category: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
         capture_engagement: capture_engagement
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
+      check_category(category)
       payload = content(template_id, template_key, fields).merge(to: to)
+      payload[:category] = category unless category.nil?
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
@@ -264,6 +284,12 @@ module PostHog
       return if max_retries.nil? || retry_count?(max_retries)
 
       raise ArgumentError, 'max_retries must be a nonnegative integer.'
+    end
+
+    def check_category(category)
+      return if category.nil? || nonempty_string?(category)
+
+      raise ArgumentError, "category must be a nonempty string, such as 'transactional' or a marketing category key."
     end
 
     def nonempty_string?(value)
