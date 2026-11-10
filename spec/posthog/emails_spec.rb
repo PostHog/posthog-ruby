@@ -137,17 +137,12 @@ module PostHog
         expect(sent_bodies.first['message_data']).to eq('renews_at' => '2026-11-02T09:30:00.000Z')
       end
 
-      it "sends the category the caller names, which PostHog checks against the template's own" do
-        stub_request(:post, send_url).to_return(accept)
-
-        send_template(category: Emails::TRANSACTIONAL)
-
-        expect(sent_bodies.first).to include('category' => 'transactional')
-      end
-
       it 'refuses code content, because the template sets its own' do
         expect { send_template(subject: 'Hi') }
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
+        expect { send_template(category: Emails::TRANSACTIONAL) }
+          .to raise_error(ArgumentError,
+                          /template_id doesn't take category.*its own sender, subject, content and category/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
     end
@@ -189,12 +184,21 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'capture_engagement', 'to')
       end
 
-      it 'sends a marketing category by its key' do
+      it 'sends the category it defines, and a description only when it has one' do
         stub_request(:post, send_url).to_return(accept)
 
-        send_code(category: 'product-updates', html: '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>')
+        send_code(category: Emails::MessageCategory.new(key: 'newsletter', type: 'marketing', name: 'Newsletter'))
+        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts',
+                                                        description: 'Order receipts'))
+        send_code(category: Emails::TRANSACTIONAL)
 
-        expect(sent_bodies.first).to include('category' => 'product-updates')
+        expect(sent_bodies.map { |body| body['category'] }).to eq(
+          [
+            { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' },
+            { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts', 'description' => 'Order receipts' },
+            'transactional'
+          ]
+        )
       end
 
       it 'refuses template_data, because local templates are not supported' do
@@ -224,8 +228,16 @@ module PostHog
         expect { send_template(template_id: 'welcome') }.to raise_error(ArgumentError, /template's UUID/)
         expect { send_template(to: ' ') }.to raise_error(ArgumentError, /to must be/)
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
-        expect { send_code(category: ' ') }.to raise_error(ArgumentError, /category must be/)
-        expect { send_code(category: :newsletter) }.to raise_error(ArgumentError, /category must be/)
+        newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
+        [
+          'newsletter', newsletter,
+          Emails::MessageCategory.new(**newsletter, key: :newsletter),
+          Emails::MessageCategory.new(**newsletter, type: 'promotional'),
+          Emails::MessageCategory.new(**newsletter, name: nil),
+          Emails::MessageCategory.new(**newsletter, description: 1)
+        ].each do |category|
+          expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
+        end
         expect { send_template(idempotency_key: 'has space') }.to raise_error(ArgumentError, /idempotency_key/)
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
@@ -528,9 +540,10 @@ module PostHog
         [422, 'idempotency_key_reused', 'invalid_idempotent_request'],
         [422, 'recipient_suppressed', 'validation_error'],
         [422, 'recipient_opted_out', 'validation_error'],
-        [400, 'unknown_category', 'validation_error'],
         [400, 'category_mismatch', 'validation_error'],
+        [400, 'too_many_categories', 'validation_error'],
         [400, 'unsubscribe_link_required', 'validation_error'],
+        [400, 'copies_not_allowed', 'validation_error'],
         [429, 'quota_limited', 'monthly_quota_exceeded'],
         [429, 'throttled', 'rate_limit_exceeded'],
         [500, 'server_error', 'application_error']
