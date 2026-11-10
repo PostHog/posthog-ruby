@@ -1,5 +1,11 @@
 # posthog-rails
 
+## 3.25.0
+
+### Minor Changes
+
+- ec26ab8: Add an explicitly loaded Sidekiq integration with reporting policies for every failed attempt, terminal failure notifications, or dead-queue failures. The integration owns automatic job error reporting to prevent duplicate Rails and Active Job events. Requires Rails 7.1+ and Sidekiq 7.0.3+; older versions warn and keep existing reporting.
+
 ## 3.24.0
 
 ### Minor Changes
