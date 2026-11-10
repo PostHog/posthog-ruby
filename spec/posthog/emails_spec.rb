@@ -38,19 +38,22 @@ module PostHog
 
     # Answers sends like PostHog's endpoint does for categories, and returns the categories it holds by key. A category
     # object upserts by key: a missing description keeps the stored one and "" clears it. A marketing send needs an
-    # unsubscribe link.
+    # unsubscribe link. Any category that is not left out, "transactional" or an object is refused.
     def serve_categories
       categories = {}
       stub_request(:post, send_url).to_return do |request|
         body = JSON.parse(request.body)
         category = body['category']
-        if category.is_a?(Hash)
+        case category
+        when nil, 'transactional' then accept
+        when Hash
           unsubscribable = "#{body['html']}#{body['text']}".include?('{{ unsubscribe_url }}')
           next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
 
           (categories[category['key']] ||= {}).merge!(category)
+          accept
+        else refuse(400, 'invalid_input')
         end
-        accept
       end
       categories
     end
@@ -214,7 +217,7 @@ module PostHog
 
         result = send_code(category: Emails::MessageCategory.new(**newsletter, description: ''), html: html)
         send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts'))
-        send_code(category: Emails::TRANSACTIONAL)
+        expect(send_code(category: Emails::TRANSACTIONAL).id).to eq('msg_1')
 
         expect(result.id).to eq('msg_1')
         expect(categories).to eq(
