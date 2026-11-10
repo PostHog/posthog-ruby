@@ -455,6 +455,31 @@ module PostHog
         expect(a_request(:post, send_url)).not_to have_been_made
       end
 
+      it 'sends no file without TLS when PostHog is reached over https' do
+        plain_url = 'http://files.example.com/team/99882c55?X-Amz-Signature=abc'
+        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256, url: plain_url)))
+
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect([error.code, error.field]).to eq(%w[api_error attachments])
+        expect([error.message, error.fix]).to all(include('https'))
+        expect(a_request(:put, /./)).not_to have_been_made
+        expect(a_request(:post, send_url)).not_to have_been_made
+      end
+
+      it 'uploads over http when PostHog itself is reached over http' do
+        options.merge!(host: 'http://127.0.0.1:9', app_host: 'http://posthog.test')
+        plain_url = 'http://storage.test:8333/team/99882c55?X-Amz-Signature=abc'
+        stub_request(:post, 'http://posthog.test/api/projects/@current/messaging/attachments/uploads/')
+          .to_return(answer_uploads(upload_slot(pdf_sha256, url: plain_url)))
+        stub_request(:put, plain_url).to_return(status: 200)
+        stub_request(:post, 'http://posthog.test/api/projects/@current/messaging/send/email/').to_return(accept)
+
+        send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect(a_request(:put, plain_url).with(body: pdf)).to have_been_made.once
+      end
+
       it 'refuses more files or bytes than one email carries before any request' do
         eleven = Array.new(11) { |index| { filename: "#{index}.txt", content: "file #{index}".b } }
         largest_that_fits = ("\0" * 29_182_875).b

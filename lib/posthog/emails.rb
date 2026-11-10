@@ -172,7 +172,9 @@ module PostHog
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
-    #   {EmailError#field} `attachments` when PostHog has no upload route for this project. No email was sent.
+    #   {EmailError#field} `attachments` when PostHog has no upload route for this project. With `app_host` on
+    #   https, an upload URL without https raises `api_error` on `attachments` before any file goes out. No email
+    #   was sent.
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
@@ -459,10 +461,26 @@ module PostHog
       raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
 
       slots = fields['files']
-      return slots if slots.is_a?(Array) && slots.size == files.size && files.zip(slots).all? { |pair| slot?(*pair) }
+      unless slots.is_a?(Array) && slots.size == files.size && files.zip(slots).all? { |pair| slot?(*pair) }
+        raise EmailError.new(code: 'api_error', message: "PostHog answered without the files' uploads.",
+                             status_code: status)
+      end
+      raise upload_without_tls(status) if slots.any? { |slot| without_tls?(slot) }
 
-      raise EmailError.new(code: 'api_error', message: "PostHog answered without the files' uploads.",
-                           status_code: status)
+      slots
+    end
+
+    def without_tls?(slot)
+      slot['status'] == 'upload' && URI(@app_host).scheme == 'https' && URI(slot['url']).scheme != 'https'
+    end
+
+    def upload_without_tls(status)
+      EmailError.new(code: 'api_error', field: 'attachments', status_code: status,
+                     message: 'PostHog gave an upload URL without https, so no file was uploaded and no email was ' \
+                              'sent.',
+                     why: 'Your app_host uses https, and the files would have gone to storage without TLS.',
+                     fix: "Serve your PostHog's file storage over https, or reach PostHog over http in local " \
+                          'development.')
     end
 
     def slot?(file, slot)
