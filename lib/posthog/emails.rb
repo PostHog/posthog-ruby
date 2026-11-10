@@ -150,7 +150,7 @@ module PostHog
     #   nothing, whatever the send says. Sent only when you set it, and needs a PostHog version that takes it.
     # @param capture_engagement [Boolean] Deprecated: use +tracking: { engagement: false }+ instead. Code form:
     #   whether PostHog captures the email's engagement events. It still works, but a send can't set both. Sent
-    #   (default +true+) only when +tracking+ is left out, or when you set it.
+    #   only when you set it.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -320,9 +320,7 @@ module PostHog
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(fields[:reply_to]) if fields.key?(:reply_to)
-      if !fields.key?(:tracking) || fields.key?(:capture_engagement)
-        code[:capture_engagement] = fields.fetch(:capture_engagement, true)
-      end
+      code[:capture_engagement] = fields[:capture_engagement] if fields.key?(:capture_engagement)
       code[:tracking] = tracking(fields[:tracking]) if fields.key?(:tracking)
       code
     end

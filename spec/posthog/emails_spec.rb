@@ -147,7 +147,7 @@ module PostHog
     end
 
     describe 'a send of content from your code' do
-      it 'posts the content under its key and captures engagement by default' do
+      it 'posts the content under its key and leaves unset fields out' do
         stub_request(:post, send_url).to_return(accept)
 
         send_code(text: 'Reset', from: 'Acme <hello@example.com>', reply_to: 'help@example.com',
@@ -160,7 +160,6 @@ module PostHog
                                     'text' => 'Reset',
                                     'from' => 'Acme <hello@example.com>',
                                     'reply_to' => ['help@example.com'],
-                                    'capture_engagement' => true,
                                     'to' => 'user@example.com',
                                     'distinct_id' => 'user_123'
                                   }])
@@ -182,7 +181,7 @@ module PostHog
         { opens: false, clicks: nil, engagement: false } => { 'opens' => false, 'engagement' => false },
         {} => {}
       }.each do |tracking, sent|
-        it "sends tracking: #{tracking.inspect} in place of capture_engagement" do
+        it "sends tracking: #{tracking.inspect} alone" do
           stub_request(:post, send_url).to_return(accept)
 
           send_code(tracking: tracking)
@@ -205,7 +204,7 @@ module PostHog
 
         emails.send(to: 'user@example.com', template_key: 'digest', subject: 'Digest', text: 'Hello')
 
-        expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'capture_engagement', 'to')
+        expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'to')
       end
 
       it 'refuses template_data, because local templates are not supported' do
