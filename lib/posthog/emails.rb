@@ -83,7 +83,9 @@ module PostHog
     #     of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
 
-    # The built-in `category` of {#send}: a transactional email with no category, the same as leaving `category` out.
+    # The built-in `category` of {#send}: a transactional email with no category. Unlike leaving `category` out, it
+    # doesn't follow the category of the template that `template_key` names, so PostHog refuses it for a template in a
+    # category.
     TRANSACTIONAL = 'transactional'
 
     # A message category that a send defines in code. PostHog creates the category the first time a send names its
@@ -176,12 +178,14 @@ module PostHog
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
     #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
-    # @param category [String, MessageCategory] Code form: {TRANSACTIONAL}, the same as leaving it out, or the
-    #   {MessageCategory} the email belongs to. A marketing email skips recipients who opted out of its category or of
-    #   all marketing, can't have copies, and needs a `{{ unsubscribe_url }}` link in its `html`, or in its `text` when
-    #   it has no `html`. PostHog refuses a send with `category_mismatch` when the type differs from the existing
-    #   category's, `too_many_categories` when the project can't take another category, `unsubscribe_link_required`,
-    #   `copies_not_allowed` or `recipient_opted_out`.
+    # @param category [String, MessageCategory] Code form: {TRANSACTIONAL} for a transactional email with no category,
+    #   or the {MessageCategory} the email belongs to. Left out, the email follows the category of the template that
+    #   `template_key` names, or is transactional with no category. A marketing email skips recipients who opted out of
+    #   its category or of all marketing, can't have copies, and needs a `{{ unsubscribe_url }}` link in its `html`, or
+    #   in its `text` when it has no `html`. PostHog refuses a send with `category_mismatch` when the type differs from
+    #   the existing category's, or when `template_key` names a template in another category, {TRANSACTIONAL} for a
+    #   template in a category included; `too_many_categories` when the project can't take another category;
+    #   `unsubscribe_link_required`; `copies_not_allowed`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already

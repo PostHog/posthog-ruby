@@ -36,27 +36,38 @@ module PostHog
       bodies
     end
 
-    # Answers sends like PostHog's endpoint does for categories, and returns the categories it holds by key. A category
-    # object upserts by key: a missing description keeps the stored one and "" clears it. A marketing send needs an
-    # unsubscribe link. Any category that is not left out, "transactional" or an object is refused.
-    def serve_categories
-      categories = {}
+    # Answers sends like PostHog's endpoint does for categories. Returns the categories it holds by key, and the key of
+    # the category each accepted send was filed under, nil for none. A category object upserts by key: a missing
+    # description keeps the stored one and "" clears it. A send whose template_key names one of `templates` follows
+    # that template's category (a template key maps to its category key, or nil for none): left out, it takes it, and
+    # anything but that same category is refused, "transactional" included. A marketing send needs an unsubscribe
+    # link. Any category that is not left out, "transactional" or an object is refused.
+    def serve_categories(categories = {}, templates: {})
+      filed = []
       stub_request(:post, send_url).to_return do |request|
         body = JSON.parse(request.body)
         category = body['category']
-        case category
-        when nil, 'transactional' then accept
-        when Hash
+        next refuse(400, 'invalid_input') unless [nil, 'transactional'].include?(category) || category.is_a?(Hash)
+
+        if templates.key?(body['template_key'])
+          stored = categories[templates[body['template_key']]]
+          named = category.is_a?(Hash) ? category.slice('key', 'type') : category
+          followed = stored&.slice('key', 'type') || 'transactional'
+          next refuse(400, 'category_mismatch') unless category.nil? || named == followed
+
+          category = stored
+        end
+        if category.is_a?(Hash)
           content = body['html'].to_s.empty? ? body['text'] : body['html']
           unsubscribable = content.to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
           next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
 
           (categories[category['key']] ||= {}).merge!(category)
-          accept
-        else refuse(400, 'invalid_input')
         end
+        filed << (category['key'] if category.is_a?(Hash))
+        accept
       end
-      categories
+      [categories, filed]
     end
 
     # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. WebMock
@@ -208,7 +219,7 @@ module PostHog
       end
 
       it 'defines the categories it names, and keeps a description unless the send sets one, even to ""' do
-        categories = serve_categories
+        categories, = serve_categories
         html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
         newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
 
@@ -225,6 +236,29 @@ module PostHog
           'newsletter' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter', 'description' => '' },
           'receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' }
         )
+      end
+
+      context 'with a template_key that names a template in a marketing category' do
+        let(:newsletter) { { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' } }
+        let(:digest_html) { '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>' }
+
+        it "files the email under the template's category when the send leaves category out" do
+          _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
+
+          send_code(template_key: 'november-digest', html: digest_html)
+
+          expect(filed).to eq(['newsletter'])
+        end
+
+        it 'refuses TRANSACTIONAL with category_mismatch' do
+          _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
+
+          expect { send_code(template_key: 'november-digest', html: digest_html, category: Emails::TRANSACTIONAL) }
+            .to raise_error(EmailError) do |error|
+              expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
+            end
+          expect(filed).to be_empty
+        end
       end
 
       it 'refuses template_data, because local templates are not supported' do
