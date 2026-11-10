@@ -19,6 +19,10 @@ module PostHog
       # @return [Boolean] Whether to automatically instrument ActiveJob. Defaults to false.
       attr_accessor :auto_instrument_active_job
 
+      # @return [Boolean] Whether to report each Active Job retry failure. Requires auto_instrument_active_job.
+      #   Defaults to false.
+      attr_accessor :report_active_job_retries
+
       # @return [Array<String>] Exception class names to ignore in addition to the defaults.
       attr_accessor :excluded_exceptions
 
@@ -73,6 +77,7 @@ module PostHog
         @auto_capture_exceptions = false
         @report_rescued_exceptions = false
         @auto_instrument_active_job = false
+        @report_active_job_retries = false
         @excluded_exceptions = []
         @use_tracing_headers = true
         @capture_user_context = true

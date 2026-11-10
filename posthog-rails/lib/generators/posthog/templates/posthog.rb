@@ -22,6 +22,10 @@ PostHog::Rails.configure do |config|
   # Set to true to enable automatic ActiveJob exception tracking
   # config.auto_instrument_active_job = true
 
+  # Report failures when Active Job schedules a retry (default: false)
+  # Requires auto_instrument_active_job; terminal unhandled failures are already reported.
+  # config.report_active_job_retries = true
+
   # Use PostHog tracing headers for request-scoped identity/session context (default: true)
   # Request metadata (current URL, method, path, user agent, and IP) is always captured during Rails requests
   # Set to false to ignore client-supplied X-PostHog-Distinct-Id and X-PostHog-Session-Id headers
