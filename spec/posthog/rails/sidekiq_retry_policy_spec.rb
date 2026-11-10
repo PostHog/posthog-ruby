@@ -421,6 +421,119 @@ RSpec.describe 'Sidekiq retry reporting' do
     expect(client.queued_messages).to eq(1)
   end
 
+  describe 'deferred Active Job trace correlation' do
+    before do
+      require 'opentelemetry-sdk'
+      @trace_provider = OpenTelemetry::SDK::Trace::TracerProvider.new
+    rescue LoadError
+      skip 'Install the gemfiles/otel.gemfile bundle to run OpenTelemetry integration'
+    end
+
+    after { @trace_provider&.shutdown }
+
+    %i[all exhausted dead].each do |policy|
+      it "retains the ended job span IDs in #{policy} mode" do
+        tracer = @trace_provider.tracer('sidekiq-policy-spec')
+        spans = []
+        middleware = Class.new do
+          define_method(:call) do |_worker, _job, _queue, &block|
+            tracer.in_span('worker') do |span|
+              spans << span
+              block.call
+            end
+          end
+        end
+        config.server_middleware { |chain| chain.add(middleware) }
+        PostHog::Rails.config.auto_instrument_active_job = true
+        traced_job = stub_failing_active_job('TracedPolicyJob')
+        allow_any_instance_of(RetryPolicyJob).to receive(:perform) { traced_job.perform_now }
+        enable_policy(policy)
+        job['retry'] = 0
+
+        process_failure
+
+        expect(client.queued_messages).to eq(1)
+        properties = client.dequeue_last_message[:properties]
+        expect(properties['$job_class']).to eq('TracedPolicyJob')
+        expect(spans.size).to eq(1)
+        span = spans.first
+        expect(span.recording?).to be(false)
+        expect(properties.values_at('$trace_id', '$span_id')).to eq(
+          [span.context.hex_trace_id, span.context.hex_span_id]
+        )
+      end
+    end
+  end
+
+  describe 'deferred correlation properties' do
+    let(:trace_api) { Module.new }
+    let(:span_context) do
+      double('span context', valid?: true, hex_trace_id: '0123456789abcdef0123456789abcdef',
+                             hex_span_id: '0123456789abcdef')
+    end
+    let(:span) { double('span', context: span_context, recording?: false) }
+
+    before do
+      stub_const('OpenTelemetry::Trace', trace_api)
+      allow(trace_api).to receive(:current_span).and_return(span)
+    end
+
+    def deferred_properties(context_properties: {}, caller_properties: {})
+      context_class = PostHog.const_get(:Internal)::Context
+      enable_policy(:exhausted)
+      job['retry'] = 0
+      allow_any_instance_of(RetryPolicyJob).to receive(:perform) do
+        context_class.with_context(properties: context_properties, enrich_current_span: false) do
+          error = RuntimeError.new('job failed')
+          PostHog::Rails::Sidekiq.defer_capture?(error, 'job-user', caller_properties)
+          raise error
+        end
+      end
+
+      process_failure
+
+      expect(client.queued_messages).to eq(1)
+      client.dequeue_last_message[:properties]
+    end
+
+    %i[absent invalid unreadable].each do |api_state|
+      it "still reports without derived IDs when the tracing API is #{api_state}" do
+        case api_state
+        when :absent
+          hide_const('OpenTelemetry')
+        when :invalid
+          allow(span_context).to receive(:hex_trace_id).and_return('0' * 32)
+        when :unreadable
+          allow(trace_api).to receive(:current_span).and_raise(StandardError, 'span lookup failed')
+        end
+
+        properties = deferred_properties
+
+        expect(properties).not_to have_key('$trace_id')
+        expect(properties).not_to have_key('$span_id')
+      end
+    end
+
+    [
+      ['context IDs', { '$trace_id' => 'context-trace', :$span_id => 'context-span' }, {},
+       { '$trace_id' => 'context-trace', :$span_id => 'context-span' }],
+      ['caller IDs ahead of the active span', {}, { '$trace_id' => 'caller-trace', :$span_id => 'caller-span' },
+       { '$trace_id' => 'caller-trace', :$span_id => 'caller-span' }],
+      ['caller overrides across key aliases', { :$trace_id => 'context-trace', '$span_id' => 'context-span' },
+       { '$trace_id' => 'caller-trace', :$span_id => 'caller-span' },
+       { '$trace_id' => 'caller-trace', :$span_id => 'caller-span' }],
+      ['explicit nil and empty IDs', { '$trace_id' => nil, :$span_id => '' }, {},
+       { '$trace_id' => nil, :$span_id => '' }]
+    ].each do |name, context_properties, caller_properties, expected|
+      it "preserves #{name}" do
+        properties = deferred_properties(context_properties: context_properties.freeze,
+                                         caller_properties: caller_properties.freeze)
+
+        expect(properties.select { |key, _| %w[$trace_id $span_id].include?(key.to_s) }).to eq(expected)
+      end
+    end
+  end
+
   it 'honors exclusions on the original job error' do
     enable_policy(:exhausted)
     PostHog::Rails.config.excluded_exceptions = ['RuntimeError']

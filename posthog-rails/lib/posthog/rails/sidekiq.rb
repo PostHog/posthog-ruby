@@ -57,6 +57,8 @@ module PostHog
         return false unless in_job?
 
         context = Internal::Context.current
+        # Sidekiq invokes its handlers after the job's tracing middleware unwinds.
+        properties = PostHog.client.send(:active_trace_properties).merge(properties)
         context_data = { distinct_id: context&.distinct_id, session_id: context&.session_id,
                          properties: context&.properties }
         error.instance_variable_set(DEFERRED_REPORT_IVAR, [distinct_id, properties, context_data]) unless error.frozen?
