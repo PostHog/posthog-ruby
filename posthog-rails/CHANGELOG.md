@@ -1,5 +1,13 @@
 # posthog-rails
 
+## 3.24.0
+
+### Minor Changes
+
+- ceb36ce: Add a private controller capture_exception helper with filtered request metadata, configured user identity, explicit argument precedence, and the existing exception capture pipeline. Manual reports work independently of automatic exception capture without initializing an unavailable client.
+- 60ad7a7: Add opt-in `report_active_job_retries` reporting for Active Job retry failures, reusing job identity, filtered arguments, and core exception deduplication. The option defaults to false and requires `auto_instrument_active_job`. Retry reports support Rails 5.2 and honor exception exclusions across the serialized cause chain without changing terminal reporting.
+- 6469130: Capture terminating Rails runner exceptions before SDK shutdown when automatic exception capture is enabled. Preserve exit status and error output, report deliberate nonzero exits as fatal runner failures, skip successful exits and signal termination, and respect exception exclusions and existing capture hooks without creating an uninitialized client. Retain the original Rails-reported error for inline conversions and preserve reporter identity and serialized context.
+
 ## 3.23.0
 
 ### Minor Changes
