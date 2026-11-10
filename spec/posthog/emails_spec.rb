@@ -233,8 +233,50 @@ module PostHog
         e
       end
 
+      let(:bucket) { {} }
+
+      def fake_posthog(app: 'https://us.posthog.com', storage: 'https://files.example.com/team')
+        routes = "#{app}/api/projects/@current/messaging"
+        stub_request(:post, "#{routes}/attachments/uploads/").to_return { |request| plan_uploads(request, storage) }
+        stub_request(:put, %r{/team/\h{64}\?}).to_return { |request| store(request) }
+        stub_request(:post, "#{routes}/send/email/").to_return { |request| accept_send(request) }
+      end
+
+      def plan_uploads(request, storage)
+        return refuse(401, 'authentication_failed') unless request.headers['Authorization'] == 'Bearer phs_test'
+
+        slots = JSON.parse(request.body)['files'].map do |file|
+          sha256 = file['sha256']
+          next present_slot(sha256) if bucket.key?(sha256)
+
+          upload_slot(sha256, url: "#{storage}/#{sha256}?X-Amz-Signature=fake")
+            .merge(headers: { 'x-amz-checksum-sha256' => [[sha256].pack('H*')].pack('m0') })
+        end
+        answer_uploads(*slots)
+      end
+
+      def store(request)
+        denied = { status: 403, body: '<Error><Code>AccessDenied</Code></Error>' }
+        return denied if request.headers.key?('Authorization')
+
+        bytes = request.body.b
+        sha256 = request.uri.path[/\h{64}\z/]
+        signed = request.headers['X-Amz-Checksum-Sha256'] == [Digest::SHA256.digest(bytes)].pack('m0')
+        return { status: 400, body: '<Error><Code>BadDigest</Code></Error>' } unless signed
+
+        bucket[sha256] = bytes
+        { status: 200 }
+      end
+
+      def accept_send(request)
+        return refuse(401, 'authentication_failed') unless request.headers['Authorization'] == 'Bearer phs_test'
+
+        files = JSON.parse(request.body).fetch('attachments', [])
+        files.all? { |file| bucket.key?(file['sha256']) } ? accept : refuse(400, 'attachment_not_uploaded')
+      end
+
       it 'sends cc and bcc as lists' do
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
 
         send_code(cc: 'finance@example.com', bcc: %w[audit@example.com archive@example.com])
 
@@ -242,23 +284,18 @@ module PostHog
                                              'bcc' => %w[audit@example.com archive@example.com])
       end
 
-      it 'uploads each file PostHog asks for to its URL, without the secret key, then sends the files by hash' do
-        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256), present_slot(png_sha256)))
-        stub_request(:put, upload_url).to_return(status: 200)
-        stub_request(:post, send_url).to_return(accept)
+      it 'uploads each file storage lacks, without the secret key, then sends the files by hash' do
+        fake_posthog
+        bucket[png_sha256] = png
 
-        send_code(attachments: [
-                    { filename: 'invoice.pdf', content: pdf, content_type: 'application/pdf' },
-                    { 'filename' => 'logo.png', 'content' => png, 'content_id' => 'logo' }
-                  ])
+        result = send_code(attachments: [
+                             { filename: 'invoice.pdf', content: pdf, content_type: 'application/pdf' },
+                             { 'filename' => 'logo.png', 'content' => png, 'content_id' => 'logo' }
+                           ])
 
-        expect(a_request(:post, uploads_url).with(
-                 headers: { 'Authorization' => 'Bearer phs_test' },
-                 body: { files: [{ sha256: pdf_sha256, size: 12 }, { sha256: png_sha256, size: 4 }] }.to_json
-               )).to have_been_made.once
-        expect(a_request(:put, upload_url).with(body: pdf, headers: upload_headers) do |request|
-          !request.headers.key?('Authorization')
-        end).to have_been_made.once
+        expect(result.id).to eq('msg_1')
+        expect(bucket).to eq(png_sha256 => png, pdf_sha256 => pdf)
+        expect(a_request(:put, /./)).to have_been_made.once
         expect(sent_bodies.first['attachments']).to eq([
                                                          { 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf',
                                                            'content_type' => 'application/pdf' },
@@ -268,7 +305,7 @@ module PostHog
       end
 
       it 'leaves out empty lists, so a PostHog version without these fields still sends the email' do
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
 
         send_code(cc: [], bcc: [], attachments: [])
 
@@ -276,13 +313,14 @@ module PostHog
       end
 
       it 'uploads once and sends the same files on every attempt of the send' do
-        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
-        stub_request(:put, upload_url).to_return(status: 200)
-        stub_request(:post, send_url).to_return(refuse(503, 'service_unavailable'), accept)
+        fake_posthog
+        stub_request(:post, send_url).to_return(refuse(503, 'service_unavailable'))
+                                     .then.to_return { |request| accept_send(request) }
 
-        send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
 
-        expect(a_request(:put, upload_url)).to have_been_made.once
+        expect(bucket).to eq(pdf_sha256 => pdf)
+        expect(a_request(:put, /./)).to have_been_made.once
         expect(a_request(:post, send_url).with do |request|
           JSON.parse(request.body)['attachments'] == [{ 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf' }]
         end).to have_been_made.twice
@@ -292,44 +330,40 @@ module PostHog
         file = pdf * 5
         mime_lines = [file].pack('m0').scan(/.{1,76}/)
         pem_lines = [file].pack('m0').scan(/.{1,64}/)
-        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(five_pdfs_sha256)))
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
 
-        [file, file.bytes, [file].pack('m0'), [file].pack('m'), "#{mime_lines.join("\n")}\n",
-         "#{mime_lines.join("\r\n")}\r\n", pem_lines.join("\n")].each do |content|
+        results = [file, file.bytes, [file].pack('m0'), [file].pack('m'), "#{mime_lines.join("\n")}\n",
+                   "#{mime_lines.join("\r\n")}\r\n", pem_lines.join("\n")].map do |content|
           send_code(attachments: [{ filename: 'invoice.pdf', content: content }])
         end
 
         expect([mime_lines.size, pem_lines.size]).to eq([2, 2])
-        expect(a_request(:post, uploads_url).with(body: { files: [{ sha256: five_pdfs_sha256, size: 60 }] }.to_json))
-          .to have_been_made.times(7)
+        expect(results.map(&:id)).to all(eq('msg_1'))
+        expect(bucket).to eq(five_pdfs_sha256 => file)
       end
 
       it "reads wrapped Base64 whatever the app's input record separator" do
         file = pdf * 5
         wrapped = "#{[file].pack('m0').scan(/.{1,76}/).join("\n")}\n"
-        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(five_pdfs_sha256)))
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
         separator = $INPUT_RECORD_SEPARATOR
         $INPUT_RECORD_SEPARATOR = nil
 
         result = send_code(attachments: [{ filename: 'invoice.pdf', content: wrapped }])
 
         expect(result.id).to eq('msg_1')
+        expect(bucket).to eq(five_pdfs_sha256 => file)
       ensure
         $INPUT_RECORD_SEPARATOR = separator
       end
 
       it 'uploads a file attached twice once, and sends both references' do
-        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
-        stub_request(:put, upload_url).to_return(status: 200)
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
 
         send_code(attachments: [{ filename: 'a.pdf', content: pdf }, { filename: 'b.pdf', content: pdf }])
 
-        expect(a_request(:post, uploads_url).with(body: { files: [{ sha256: pdf_sha256, size: 12 }] }.to_json))
-          .to have_been_made.once
-        expect(a_request(:put, upload_url)).to have_been_made.once
+        expect(bucket).to eq(pdf_sha256 => pdf)
+        expect(a_request(:put, /./)).to have_been_made.once
         expect(sent_bodies.first['attachments'].map { |file| file['filename'] }).to eq(%w[a.pdf b.pdf])
       end
 
@@ -395,30 +429,33 @@ module PostHog
       end
 
       it "retries an upload storage couldn't take, then sends" do
-        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
-        stub_request(:put, upload_url).to_return({ status: 503, body: '<Error><Code>SlowDown</Code></Error>' },
-                                                 { status: 500, body: '<Error><Code>InternalError</Code></Error>' },
-                                                 { status: 502 }, { status: 504 }, { status: 200 })
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
+        stub_request(:put, %r{/team/\h{64}\?})
+          .to_return({ status: 503, body: '<Error><Code>SlowDown</Code></Error>' },
+                     { status: 500, body: '<Error><Code>InternalError</Code></Error>' },
+                     { status: 502 }, { status: 504 })
+          .then.to_return { |request| store(request) }
 
         expect(send_code(max_retries: 4, attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
-        expect(a_request(:put, upload_url)).to have_been_made.times(5)
+        expect(bucket).to eq(pdf_sha256 => pdf)
+        expect(a_request(:put, /./)).to have_been_made.times(5)
       end
 
       it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do
-        stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
-        stub_request(:put, upload_url).to_return({ status: 503, headers: { 'Retry-After' => '3' } },
-                                                 { status: 200 },
-                                                 { status: 503, headers: { 'Retry-After' => '60' } })
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
+        stub_request(:put, %r{/team/\h{64}\?})
+          .to_return(status: 503, headers: { 'Retry-After' => '3' })
+          .then.to_return { |request| store(request) }
+          .then.to_return(status: 503, headers: { 'Retry-After' => '60' })
 
-        send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
-        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        sent = send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        error = refused_attachment(attachments: [{ filename: 'logo.png', content: png }])
 
-        expect(delays.size).to eq(1)
+        expect(sent.id).to eq('msg_1')
         expect(delays.first).to be >= 3
         expect([error.code, error.retry_after]).to eq(['attachment_upload_failed', 60.0])
-        expect(a_request(:put, upload_url)).to have_been_made.times(3)
+        expect(bucket).to eq(pdf_sha256 => pdf)
+        expect(a_request(:put, /./)).to have_been_made.times(3)
       end
 
       it "keeps storage's Retry-After when its answer to an upload was cut off" do
@@ -491,15 +528,11 @@ module PostHog
 
       it 'uploads over http when PostHog itself is reached over http' do
         options.merge!(host: 'http://127.0.0.1:9', app_host: 'http://posthog.test')
-        plain_url = 'http://storage.test:8333/team/99882c55?X-Amz-Signature=abc'
-        stub_request(:post, 'http://posthog.test/api/projects/@current/messaging/attachments/uploads/')
-          .to_return(answer_uploads(upload_slot(pdf_sha256, url: plain_url)))
-        stub_request(:put, plain_url).to_return(status: 200)
-        stub_request(:post, 'http://posthog.test/api/projects/@current/messaging/send/email/').to_return(accept)
+        fake_posthog(app: 'http://posthog.test', storage: 'http://storage.test:8333/team')
 
-        send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
-
-        expect(a_request(:put, plain_url).with(body: pdf)).to have_been_made.once
+        expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
+        expect(bucket).to eq(pdf_sha256 => pdf)
+        expect(a_request(:put, %r{\Ahttp://storage\.test:8333/})).to have_been_made.once
       end
 
       it 'refuses more files or bytes than one email carries before any request' do
@@ -530,34 +563,28 @@ module PostHog
 
       it 'uploads the largest file one email carries' do
         largest_that_fits = ("\0" * 29_182_875).b
-        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
 
         expect(send_code(subject: '', html: '', attachments: [{ filename: 'scan.pdf', content: largest_that_fits }]).id)
           .to eq('msg_1')
+        expect(bucket).to eq(largest_that_fits_sha256 => largest_that_fits)
       end
 
       it 'reads the largest file one email carries wrapped as Base64, and sends it' do
         largest_that_fits = ("\0" * 29_182_875).b
         wrapped = "#{[largest_that_fits].pack('m0').scan(/.{1,76}/).join("\n")}\n"
-        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
 
         result = send_code(subject: '', html: '', attachments: [{ filename: 'scan.pdf', content: wrapped }])
 
         expect(result.id).to eq('msg_1')
-        expect(a_request(:post, uploads_url).with(
-                 body: { files: [{ sha256: largest_that_fits_sha256, size: 29_182_875 }] }.to_json
-               )).to have_been_made.once
+        expect(bucket).to eq(largest_that_fits_sha256 => largest_that_fits)
         expect(sent_bodies.first['attachments']).to eq([{ 'sha256' => largest_that_fits_sha256,
                                                           'filename' => 'scan.pdf' }])
       end
 
       it "counts each body like a file: its UTF-8 bytes' Base64 size with line breaks" do
-        stub_request(:post, uploads_url).to_return do |request|
-          answer_uploads(*JSON.parse(request.body)['files'].map { |file| present_slot(file['sha256']) })
-        end
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
         leaving_81_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_818).b }]
         leaving_159_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_761).b }]
         ascii_that_fits = 'a' * 57
@@ -581,10 +608,7 @@ module PostHog
       end
 
       it 'counts the subject in 75-byte steps per 42 of its UTF-8 bytes, and an empty subject not at all' do
-        stub_request(:post, uploads_url).to_return do |request|
-          answer_uploads(*JSON.parse(request.body)['files'].map { |file| present_slot(file['sha256']) })
-        end
-        stub_request(:post, send_url).to_return(accept)
+        fake_posthog
         leaving_77_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_821).b }]
         leaving_3_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_875).b }]
         one_ascii_word = 'a' * 42
