@@ -531,19 +531,22 @@ module PostHog
         expect(outbox).to be_empty
       end
 
-      it 'sends no file without TLS when PostHog is reached over https' do
-        plain_url = "http://files.example.com/team/#{pdf_sha256}?size=12&X-Amz-Signature=fake"
-        faults[:uploads] << answer_uploads(upload_slot(pdf_sha256, url: plain_url))
+      it "sends no file to storage without https, naming the file and never the storage's URL" do
+        fake_posthog(storage: 'http://files.example.com/team')
+        bucket[png_sha256] = png
 
-        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        error = refused_attachment(attachments: [{ filename: 'logo.png', content: png },
+                                                 { filename: 'invoice.pdf', content: pdf }])
 
-        expect([error.code, error.field]).to eq(%w[api_error attachments])
-        expect([error.message, error.fix]).to all(include('https'))
-        expect(bucket).to be_empty
+        expect([error.code, error.field]).to eq(%w[api_error attachments__1])
+        expect(error.message).to include('invoice.pdf')
+        expect(error.fix).to include("Fix the file storage's URL")
+        expect([error.message, error.why, error.fix].join).not_to include('files.example.com')
+        expect(bucket).to eq(png_sha256 => png)
         expect(outbox).to be_empty
       end
 
-      it 'uploads over http when PostHog itself is reached over http' do
+      it 'uploads over http when app_host is an http URL, for local development' do
         options.merge!(host: 'http://127.0.0.1:9', app_host: 'http://posthog.test')
         fake_posthog(app: 'http://posthog.test', storage: 'http://storage.test:8333/team')
 
@@ -597,7 +600,6 @@ module PostHog
       end
 
       it "counts each body like a file: its UTF-8 bytes' Base64 size with line breaks" do
-        leaving_81_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_818).b }]
         leaving_159_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_761).b }]
         ascii_that_fits = 'a' * 57
         ascii_one_too_many = 'a' * 58
@@ -605,18 +607,35 @@ module PostHog
         two_byte_one_too_many = 'é' * 58
 
         sent = [
-          send_code(subject: '', html: ascii_that_fits, attachments: leaving_81_bytes),
+          send_code(subject: '', html: ascii_that_fits, text: ascii_that_fits, attachments: leaving_159_bytes),
           send_code(subject: '', html: '', text: two_byte_that_fits.encode(Encoding::UTF_16LE),
                     attachments: leaving_159_bytes)
         ]
         refused = [
-          refused_attachment(subject: '', html: ascii_one_too_many, attachments: leaving_81_bytes),
+          refused_attachment(subject: '', html: ascii_one_too_many, text: ascii_that_fits,
+                             attachments: leaving_159_bytes),
           refused_attachment(subject: '', html: '', text: two_byte_one_too_many, attachments: leaving_159_bytes)
         ]
 
         expect(refused.map(&:code)).to eq(%w[message_too_large message_too_large])
         expect(sent.map(&:id)).to eq(%w[msg_1 msg_1])
-        expect(outbox.map { |email| email['text'] }).to eq([nil, 'é' * 57])
+        expect(outbox.map { |email| email['text'] }).to eq(['a' * 57, 'é' * 57])
+      end
+
+      it 'counts the HTML twice when there is no text, because PostHog derives the text from it' do
+        leaving_81_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_818).b }]
+        leaving_159_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_761).b }]
+        html = 'a' * 57
+
+        sent = send_code(subject: '', html: html, attachments: leaving_159_bytes)
+        refused = [nil, ''].map do |text|
+          refused_attachment(subject: '', html: html, text: text, attachments: leaving_81_bytes)
+        end
+
+        expect(sent.id).to eq('msg_1')
+        expect(refused.map(&:code)).to all(eq('message_too_large'))
+        expect(usage[:quota_bytes]).to eq(29_182_761)
+        expect(outbox.size).to eq(1)
       end
 
       it 'counts the subject in 75-byte steps per 42 of its UTF-8 bytes, and an empty subject not at all' do
