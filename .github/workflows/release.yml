@@ -95,7 +95,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Set up pnpm and Node.js
-        uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           # TODO: pnpm/setup does not read .nvmrc yet. Keep this in sync with .nvmrc
           # until https://github.com/jasongin/nvs/pull/315 lands.
@@ -115,7 +115,7 @@ jobs:
         run: ./scripts/bump-version.sh
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
         with:
           ruby-version: ruby
           bundler: 4.0.13
@@ -298,7 +298,7 @@ jobs:
           node-version: 24
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
         with:
           ruby-version: ruby
           bundler: 4.0.13
