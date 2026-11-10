@@ -117,6 +117,11 @@ module PostHog
 
       private
 
+      # Completion notifications run after around_perform has restored the parent scope.
+      def posthog_logs_context
+        @posthog_execution_context || posthog_job_context
+      end
+
       def copy_posthog_ids(data)
         data = {} unless data.is_a?(Hash)
         %w[distinct_id session_id].each_with_object({}) do |key, result|
