@@ -187,7 +187,8 @@ module PostHog
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
-      files = EmailAttachments.from(fields.fetch(:attachments, []), fields.values_at(:html, :text).compact)
+      files = EmailAttachments.from(fields.fetch(:attachments, []), fields.values_at(:html, :text).compact,
+                                    fields[:subject])
       payload[:attachments] = files.references unless files.empty?
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
       body = JSON.generate(payload)

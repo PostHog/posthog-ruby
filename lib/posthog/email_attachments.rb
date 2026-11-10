@@ -12,6 +12,8 @@ module PostHog
     MAX_FILES = 10
     MAX_MESSAGE_BYTES = 40_000_000
     HEADERS_AND_MIME_BOUNDARIES_BYTES = 64 * 1024
+    SUBJECT_BYTES_PER_ENCODED_WORD = 42
+    ENCODED_WORD_BYTES = 75
     LIMIT = '10 files and 40 MB per email after Base64 encoding, about 29 MB of files'
     FIELDS = %w[filename content content_type content_id].freeze
     BASE64_LINE_WIDTHS = [60, 64, 76].freeze
@@ -25,12 +27,13 @@ module PostHog
 
     # @param files [Object] What the caller passed as `attachments`.
     # @param bodies [Array<String>] The email's HTML and text bodies, which count towards its size.
+    # @param subject [String, nil] The email's subject, which counts towards its size.
     # @raise [EmailError] A file the client can't send, or more than one email can carry.
-    def self.from(files, bodies)
+    def self.from(files, bodies, subject)
       raise invalid('attachments must be a list of files.', 'attachments') unless files.is_a?(Array)
       raise too_many_files if files.size > MAX_FILES
 
-      new(files.each_with_index.map { |file, index| attachment(file, "attachments__#{index}") }, bodies)
+      new(files.each_with_index.map { |file, index| attachment(file, "attachments__#{index}") }, bodies, subject)
     end
 
     def self.attachment(file, field)
@@ -122,9 +125,9 @@ module PostHog
     private_class_method :new, :attachment, :check_keys, :file_bytes, :raw_bytes, :base64_bytes,
                          :wrapped_base64?, :lines_of_width?, :invalid, :too_many_files
 
-    def initialize(attachments, bodies)
+    def initialize(attachments, bodies, subject)
       @attachments = attachments
-      check_size(bodies)
+      check_size(bodies, subject)
     end
 
     def empty?
@@ -143,8 +146,8 @@ module PostHog
 
     private
 
-    def check_size(bodies)
-      return if message_bytes(bodies) <= MAX_MESSAGE_BYTES
+    def check_size(bodies, subject)
+      return if message_bytes(bodies, subject) <= MAX_MESSAGE_BYTES
 
       raise EmailError.new(
         code: 'message_too_large', field: 'attachments',
@@ -156,9 +159,17 @@ module PostHog
       )
     end
 
-    def message_bytes(bodies)
+    def message_bytes(bodies, subject)
       files = @attachments.sum { |attachment| encoded_bytes(attachment.bytes.bytesize) }
-      files + bodies.sum { |body| encoded_bytes(utf8_bytesize(body)) } + HEADERS_AND_MIME_BOUNDARIES_BYTES
+      files + bodies.sum { |body| encoded_bytes(utf8_bytesize(body)) } + subject_bytes(subject) +
+        HEADERS_AND_MIME_BOUNDARIES_BYTES
+    end
+
+    def subject_bytes(subject)
+      return 0 unless subject.is_a?(String)
+
+      (utf8_bytesize(subject) + SUBJECT_BYTES_PER_ENCODED_WORD - 1) / SUBJECT_BYTES_PER_ENCODED_WORD *
+        ENCODED_WORD_BYTES
     end
 
     def utf8_bytesize(body)

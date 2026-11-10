@@ -489,8 +489,9 @@ module PostHog
         largest_that_fits = ("\0" * 29_182_875).b
 
         too_many = refused_attachment(attachments: eleven)
-        too_large = refused_attachment(attachments: [{ filename: 'scan.pdf', content: "#{largest_that_fits}\0".b }])
-        too_large_with_body = refused_attachment(html: 'abcd',
+        too_large = refused_attachment(subject: '',
+                                       attachments: [{ filename: 'scan.pdf', content: "#{largest_that_fits}\0".b }])
+        too_large_with_body = refused_attachment(subject: '', html: 'abcd',
                                                  attachments: [{ filename: 'scan.pdf', content: largest_that_fits }])
 
         expect([too_many.code, too_many.name, too_many.field])
@@ -514,7 +515,7 @@ module PostHog
         stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
         stub_request(:post, send_url).to_return(accept)
 
-        expect(send_code(html: '', attachments: [{ filename: 'scan.pdf', content: largest_that_fits }]).id)
+        expect(send_code(subject: '', html: '', attachments: [{ filename: 'scan.pdf', content: largest_that_fits }]).id)
           .to eq('msg_1')
       end
 
@@ -527,7 +528,7 @@ module PostHog
         GC.start
 
         allocated_before = GC.stat(:total_allocated_objects)
-        send_code(html: '', attachments: [{ filename: 'scan.pdf', content: wrapped }])
+        send_code(subject: '', html: '', attachments: [{ filename: 'scan.pdf', content: wrapped }])
 
         expect(GC.stat(:total_allocated_objects) - allocated_before).to be < 100_000
       end
@@ -545,17 +546,43 @@ module PostHog
         two_byte_one_too_many = 'é' * 58
 
         sent = [
-          send_code(html: ascii_that_fits, attachments: leaving_81_bytes),
-          send_code(html: '', text: two_byte_that_fits.encode(Encoding::UTF_16LE), attachments: leaving_159_bytes)
+          send_code(subject: '', html: ascii_that_fits, attachments: leaving_81_bytes),
+          send_code(subject: '', html: '', text: two_byte_that_fits.encode(Encoding::UTF_16LE),
+                    attachments: leaving_159_bytes)
         ]
         refused = [
-          refused_attachment(html: ascii_one_too_many, attachments: leaving_81_bytes),
-          refused_attachment(html: '', text: two_byte_one_too_many, attachments: leaving_159_bytes)
+          refused_attachment(subject: '', html: ascii_one_too_many, attachments: leaving_81_bytes),
+          refused_attachment(subject: '', html: '', text: two_byte_one_too_many, attachments: leaving_159_bytes)
         ]
 
         expect(refused.map(&:code)).to eq(%w[message_too_large message_too_large])
         expect(sent.map(&:id)).to eq(%w[msg_1 msg_1])
         expect(sent_bodies.map { |body| body['text'] }).to eq([nil, 'é' * 57])
+      end
+
+      it 'counts the subject in 75-byte steps per 42 of its UTF-8 bytes, and an empty subject not at all' do
+        stub_request(:post, uploads_url).to_return do |request|
+          answer_uploads(*JSON.parse(request.body)['files'].map { |file| present_slot(file['sha256']) })
+        end
+        stub_request(:post, send_url).to_return(accept)
+        leaving_77_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_821).b }]
+        leaving_3_bytes = [{ filename: 'scan.pdf', content: ("\0" * 29_182_875).b }]
+        one_ascii_word = 'a' * 42
+        two_ascii_words = 'a' * 43
+        one_two_byte_word = 'é' * 21
+        two_two_byte_words = 'é' * 22
+
+        sent = [one_ascii_word, one_two_byte_word].map do |subject|
+          send_code(subject: subject, html: '', attachments: leaving_77_bytes)
+        end
+        sent << send_code(subject: '', html: '', attachments: leaving_3_bytes)
+        refused = [two_ascii_words, two_two_byte_words].map do |subject|
+          refused_attachment(subject: subject, html: '', attachments: leaving_77_bytes)
+        end
+        refused << refused_attachment(subject: 'a', html: '', attachments: leaving_3_bytes)
+
+        expect(sent.map(&:id)).to eq(%w[msg_1 msg_1 msg_1])
+        expect(refused.map(&:code)).to all(eq('message_too_large'))
       end
 
       it 'refuses a file it cannot send before any request, naming the field and never the content' do
