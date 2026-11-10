@@ -441,6 +441,7 @@ module PostHog
       when nil then error.code == 'network_error'
       when 409 then error.code == 'idempotency_key_in_flight'
       when 429 then !%w[quota_limited upload_quota_exceeded].include?(error.code)
+      when 500, 502, 504 then error.code == 'attachment_upload_failed'
       else error.status_code == 503
       end
     end

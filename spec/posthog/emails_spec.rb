@@ -337,13 +337,16 @@ module PostHog
       it "names a refused upload by storage's failure, never by PostHog's categories" do
         stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
         stub_request(:put, upload_url).to_return({ status: 403, body: '<Error><Code>AccessDenied</Code></Error>' },
+                                                 { status: 401 },
                                                  { status: 503, body: '<Error><Code>SlowDown</Code></Error>' })
         attachments = [{ filename: 'invoice.pdf', content: pdf }]
 
         expired = refused_attachment(max_retries: 0, attachments: attachments)
+        unauthorized = refused_attachment(max_retries: 0, attachments: attachments)
         unavailable = refused_attachment(max_retries: 0, attachments: attachments)
 
         expect([expired.name, expired.status_code]).to eq(['application_error', 403])
+        expect([unauthorized.name, unauthorized.status_code]).to eq(['application_error', 401])
         expect([unavailable.name, unavailable.status_code]).to eq(['service_unavailable', 503])
       end
 
@@ -375,12 +378,13 @@ module PostHog
       it "retries an upload storage couldn't take, then sends" do
         stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
         stub_request(:put, upload_url).to_return({ status: 503, body: '<Error><Code>SlowDown</Code></Error>' },
-                                                 { status: 200 })
+                                                 { status: 500, body: '<Error><Code>InternalError</Code></Error>' },
+                                                 { status: 502 }, { status: 504 }, { status: 200 })
         stub_request(:post, send_url).to_return(accept)
 
-        expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
-        expect(a_request(:put, upload_url)).to have_been_made.twice
-        expect(delays.size).to eq(1)
+        expect(send_code(max_retries: 4, attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
+        expect(a_request(:put, upload_url)).to have_been_made.times(5)
+        expect(delays.size).to eq(4)
       end
 
       it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do

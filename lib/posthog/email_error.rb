@@ -47,8 +47,8 @@ module PostHog
 
     # @api private
     def self.name_for(status_code, code)
-      return 'missing_api_key' if code == 'missing_secret_key' || status_code == 401
       return status_code.to_i >= 500 ? 'service_unavailable' : 'application_error' if code == 'attachment_upload_failed'
+      return 'missing_api_key' if code == 'missing_secret_key' || status_code == 401
       return SDK_ERROR_NAMES.fetch(code, 'application_error') if status_code.nil?
 
       case status_code
