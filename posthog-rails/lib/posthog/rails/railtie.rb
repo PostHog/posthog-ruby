@@ -110,6 +110,7 @@ module PostHog
         report = ErrorSubscriber.take_runner_report(exception)
         return unless exception
         return if exception.is_a?(SystemExit) && exception.success?
+        return if exception.is_a?(SignalException)
 
         exception, distinct_id, properties = report if report
         return unless PostHog.initialized? && PostHog.client.enabled?
@@ -122,8 +123,8 @@ module PostHog
           (properties || {}).merge('$exception_source' => 'rails.runner', '$exception_level' => 'fatal'),
           mechanism: { 'type' => 'at_exit', 'handled' => false, 'synthetic' => false }
         )
-      rescue Exception # rubocop:disable Lint/RescueException -- Reporting must not replace the terminating exception.
-        PostHog::Logging.logger.warn('Failed to capture Rails runner exception')
+      rescue Exception => e # rubocop:disable Lint/RescueException -- Reporting must not replace the terminating exception.
+        PostHog::Logging.logger.warn("Failed to capture Rails runner exception: #{e.class}: #{e.message}")
       end
       private_class_method :capture_runner_exception
 

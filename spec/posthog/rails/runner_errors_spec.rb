@@ -102,6 +102,20 @@ RSpec.describe 'Rails runner terminating exception capture' do
     end
   end
 
+  %w[INT TERM].each do |signal|
+    it "does not report SIG#{signal} and still drains queued events" do
+      code = <<~RUBY
+        PostHog.capture(event: 'pending event', distinct_id: 'runner-test')
+        Process.kill('#{signal}', Process.pid)
+      RUBY
+      _stdout, _stderr, status = run_application(code)
+
+      expect(status).to be_signaled
+      expect(status.termsig).to eq(Signal.list.fetch(signal))
+      expect(received_events.map { |event| event['event'] }).to eq(['pending event'])
+    end
+  end
+
   %w[NameError SyntaxError].each do |type|
     it "keeps exclusions for inline #{type} converted by Rails" do
       _stdout, stderr, status = run_application(
@@ -413,17 +427,19 @@ RSpec.describe 'Rails runner terminating exception capture' do
     expect(received_events).to eq([])
   end
 
-  it 'preserves the original failure if reporting raises and still shuts down' do
+  it 'logs capture failure details, preserves the original failure and still shuts down' do
     setup = <<~RUBY
+      PostHog::Logging.logger = Logger.new($stdout)
       client = PostHog.client
       def client.capture_exception(*)
         raise 'reporting failed'
       end
       PostHog.capture(event: 'pending event', distinct_id: 'runner-test')
     RUBY
-    _stdout, stderr, status = run_application("raise 'original runner failure'", setup: setup)
+    stdout, stderr, status = run_application("raise 'original runner failure'", setup: setup)
 
     expect(status.exitstatus).to eq(1)
+    expect(stdout).to include('Failed to capture Rails runner exception: RuntimeError: reporting failed')
     expect(stderr).to include('original runner failure (RuntimeError)')
     expect(stderr).not_to include('reporting failed (RuntimeError)')
     expect(received_events.map { |event| event['event'] }).to eq(['pending event'])
