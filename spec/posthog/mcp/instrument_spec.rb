@@ -329,12 +329,12 @@ RSpec.describe PostHog::MCP do
       response = server.handle(rpc(1, 'tools/call', { name: 'boom', arguments: { context: 'break it' } }))
       expect(response[:error][:code]).to eq(-32_603)
       events = drain_events(client)
-      expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call', '$exception'])
-      call = events[1][:properties]
+      expect(events.map { |e| e[:event] }).to eq(['$mcp_tool_call', '$exception'])
+      call = events[0][:properties]
       expect(call).to include('$mcp_is_error' => true, '$mcp_error_type' => 'ArgumentError',
                               '$mcp_error_message' => 'explode with token [redacted]')
       expect(call).not_to have_key('$mcp_response')
-      sibling = events[2][:properties]
+      sibling = events[1][:properties]
       expect(sibling['$exception_list'].map { |e| e['type'] }).to eq(%w[MCP::Server::RequestHandlerError ArgumentError])
       expect(sibling).to include('$mcp_tool_name' => 'boom', '$exception_level' => 'error')
       expect(sibling).not_to have_key('$mcp_source')
@@ -344,8 +344,8 @@ RSpec.describe PostHog::MCP do
       described_class.instrument(server, client, enable_exception_autocapture: false, enable_conversation_id: false)
       server.handle(rpc(1, 'tools/call', { name: 'soft_fail', arguments: {} }))
       events = drain_events(client)
-      expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
-      expect(events[1][:properties]).to include('$mcp_is_error' => true, '$mcp_error_type' => 'Error',
+      expect(events.map { |e| e[:event] }).to eq(['$mcp_tool_call'])
+      expect(events[0][:properties]).to include('$mcp_is_error' => true, '$mcp_error_type' => 'Error',
                                                 '$mcp_error_message' => 'tool failed badly')
     end
 
@@ -363,12 +363,11 @@ RSpec.describe PostHog::MCP do
       server.handle(rpc(4, 'resources/read', { uri: 'file:///readme' }))
       events = drain_events(client)
       names = events.map { |e| e[:event] }
-      expect(names).to eq(['$mcp_initialize', '$mcp_prompts_list', '$mcp_prompt_get', '$mcp_resources_list',
-                           '$mcp_resource_read'])
-      expect(events[2][:properties]['$mcp_resource_name']).to eq('greet')
-      expect(events[2][:properties]).not_to have_key('$mcp_tool_name')
-      expect(events[4][:properties]['$mcp_resource_name']).to eq('file:///readme')
-      expect(events[4][:properties]['$mcp_response']['contents'][0]['text']).to eq('hello')
+      expect(names).to eq(['$mcp_prompts_list', '$mcp_prompt_get', '$mcp_resources_list', '$mcp_resource_read'])
+      expect(events[1][:properties]['$mcp_resource_name']).to eq('greet')
+      expect(events[1][:properties]).not_to have_key('$mcp_tool_name')
+      expect(events[3][:properties]['$mcp_resource_name']).to eq('file:///readme')
+      expect(events[3][:properties]['$mcp_response']['contents'][0]['text']).to eq('hello')
     end
 
     it 'redacts binary prompt messages and resource blobs on the way out' do
@@ -502,8 +501,8 @@ RSpec.describe PostHog::MCP do
       described_class.instrument(server, client, before_send: before_send)
       server.handle(rpc(1, 'tools/call', { name: 'boom', arguments: { context: 'secret intent' } }))
       events = drain_events(client)
-      expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
-      expect(events[1][:properties]).not_to have_key('$mcp_intent')
+      expect(events.map { |e| e[:event] }).to eq(['$mcp_tool_call'])
+      expect(events[0][:properties]).not_to have_key('$mcp_intent')
     end
 
     it 'drops telemetry when before_send raises without breaking the tool response' do
@@ -578,7 +577,7 @@ RSpec.describe PostHog::MCP do
       events = drain_events(client)
       # The hook runs after truncation, so without a second pass the batch would
       # drop these whole for exceeding the per-message limit.
-      expect(events.map { |e| e[:event] }).to eq(['$mcp_initialize', '$mcp_tool_call'])
+      expect(events.map { |e| e[:event] }).to eq(['$mcp_tool_call'])
       events.each do |event|
         expect(JSON.generate(event).bytesize).to be <= PostHog::Defaults::Message::MAX_BYTES
         expect(event[:properties]['bloat']).to start_with('😀')
@@ -623,7 +622,7 @@ RSpec.describe PostHog::MCP do
       structured = list[:result][:tools].find { |t| t[:name] == 'structured' }
       expect(structured[:inputSchema][:properties]).to have_key(:conversation_id)
       expect(structured[:outputSchema][:properties]).to have_key(:_mcp_instructions)
-      expect(structured[:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+      expect(structured[:inputSchema][:required]).to contain_exactly('context')
 
       first = server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: { message: 'hi', context: 'c' } }))
       prompt_back = JSON.parse(first[:result][:content][1][:text])
@@ -687,6 +686,21 @@ RSpec.describe PostHog::MCP do
       expect(calls[0][:properties]['$mcp_conversation_id']).to be_a(String)
     end
 
+    [
+      'parallel tool calls', 'system prompt', 'even if existing tools', 'Most important',
+      'even if you can work around it', 'send it even if'
+    ].each do |phrase|
+      it "advertises no injected description containing #{phrase.inspect}" do
+        described_class.instrument(server, client, report_missing: true, capture_model: true,
+                                                   enable_conversation_id: true)
+        tools = server.handle(rpc(1, 'tools/list'))[:result][:tools]
+        descriptions = tools.flat_map do |tool|
+          [tool[:description], *tool[:inputSchema][:properties].values.map { |property| property[:description] }]
+        end
+        expect(descriptions.compact.join("\n")).not_to match(/#{Regexp.escape(phrase)}/i)
+      end
+    end
+
     it 'advertises and intercepts get_more_tools as $mcp_missing_capability' do
       described_class.instrument(server, client, report_missing: true, capture_model: false)
       list = server.handle(rpc(1, 'tools/list'))
@@ -705,6 +719,13 @@ RSpec.describe PostHog::MCP do
                                               '$mcp_resource_name' => 'get_more_tools')
       expect(missing[:properties]).not_to have_key('$mcp_tool_name')
       expect(events.none? { |e| e[:event] == '$mcp_tool_call' }).to be(true)
+    end
+
+    it 'advertises get_more_tools with annotations that say it records data' do
+      described_class.instrument(server, client, report_missing: true)
+      virtual = server.handle(rpc(1, 'tools/list'))[:result][:tools].find { |t| t[:name] == 'get_more_tools' }
+      expect(virtual[:annotations]).to include(readOnlyHint: false, destructiveHint: false,
+                                               idempotentHint: false, openWorldHint: false)
     end
 
     it 'lets the gem validate get_more_tools arguments and still records the missing capability' do
@@ -739,7 +760,7 @@ RSpec.describe PostHog::MCP do
       virtual = list[:result][:tools].find { |t| t[:name] == 'get_more_tools' }
       expect(virtual[:inputSchema][:properties].keys).to contain_exactly(:context, :llm_model)
       expect(virtual[:inputSchema][:properties].keys).not_to include(:conversation_id)
-      expect(virtual[:inputSchema][:required]).to contain_exactly('context', 'llm_model')
+      expect(virtual[:inputSchema][:required]).to contain_exactly('context')
       result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools',
                                                     arguments: { context: 'need csv export',
                                                                  llm_model: ' claude-opus-4-8 ' } }))
@@ -747,6 +768,52 @@ RSpec.describe PostHog::MCP do
       missing = drain_events(client).find { |e| e[:event] == '$mcp_missing_capability' }
       expect(missing[:properties]).to include('$mcp_llm_model' => 'claude-opus-4-8',
                                               '$mcp_llm_model_source' => 'self_reported')
+    end
+
+    context 'when the call names a tool the server never registered' do
+      let(:unknown_call) { rpc(2, 'tools/call', { name: 'no_such_tool', arguments: { q: 'x' } }) }
+
+      it 'records $mcp_unknown_tool instead of a failed call and answers the client as before' do
+        baseline = MCP::Server.new(name: 'spec-server', version: '9.9.9', tools: tools).handle(unknown_call)
+        described_class.instrument(server, client)
+        expect(server.handle(unknown_call)).to eq(baseline)
+        events = drain_events(client)
+        unknown = events.select { |e| e[:event] == '$mcp_unknown_tool' }
+        expect(unknown.size).to eq(1)
+        expect(unknown[0][:properties]).to include('$mcp_tool_name' => 'no_such_tool')
+        expect(unknown[0][:properties]['$session_id']).to be_a(String)
+        expect(events.map { |e| e[:event] }).to eq(['$mcp_unknown_tool'])
+      end
+
+      it 'keeps the call in the conversation whose handle it echoes, without emitting $mcp_initialize' do
+        described_class.instrument(server, client, enable_conversation_id: true)
+        first = server.handle(rpc(1, 'tools/call', { name: 'echo', arguments: { message: 'hi', context: 'c' } }))
+        handle = JSON.parse(first[:result][:content][1][:text])['conversation_id']
+        drain_events(client)
+
+        arguments = { q: 'x', conversation_id: handle.upcase }
+        server.handle(rpc(2, 'tools/call', { name: 'no_such_tool', arguments: arguments }))
+        events = drain_events(client)
+        expect(events.map { |e| e[:event] }).to eq(['$mcp_unknown_tool'])
+        expect(events[0][:properties]).to include(
+          '$mcp_conversation_id' => handle,
+          '$session_id' => PostHog::MCP.derive_session_id_from_conversation(handle)
+        )
+      end
+
+      it 'does not stamp a conversation id on an unknown tool call that echoes none' do
+        described_class.instrument(server, client, enable_conversation_id: true)
+        server.handle(unknown_call)
+        expect(drain_events(client)[0][:properties]).not_to have_key('$mcp_conversation_id')
+      end
+
+      it 'still records a failed call for a registered tool given invalid arguments' do
+        described_class.instrument(server, client)
+        server.handle(rpc(2, 'tools/call', { name: 'echo', arguments: {} }))
+        events = drain_events(client)
+        expect(events.map { |e| e[:event] }).to include('$mcp_tool_call')
+        expect(events.none? { |e| e[:event] == '$mcp_unknown_tool' }).to be(true)
+      end
     end
 
     it 'captures llm_model from the injected argument or client metadata by default' do
@@ -845,6 +912,50 @@ RSpec.describe PostHog::MCP do
         expect(call[:properties]['$mcp_intent']).to eq("intent #{message.delete_prefix('m')}")
         expect(call[:properties]['$mcp_response']['content'][0]['text']).to eq("Echo: #{message}")
       end
+    end
+  end
+
+  describe '$mcp_initialize' do
+    before do
+      server.define_prompt(name: 'greet', description: 'g', arguments: []) do |_args, **|
+        MCP::Prompt::Result.new(description: 'x', messages: [])
+      end
+      server.define_resource(uri: 'file:///readme', name: 'readme', mime_type: 'text/plain') do
+        [{ uri: 'file:///readme', text: 'hello' }]
+      end
+      described_class.instrument(server, client)
+    end
+
+    def event_names
+      drain_events(client).map { |event| event[:event] }
+    end
+
+    [
+      ['tools/call', { name: 'echo', arguments: { message: 'hi' } }, '$mcp_tool_call'],
+      ['tools/list', nil, '$mcp_tools_list'],
+      ['prompts/list', nil, '$mcp_prompts_list'],
+      ['prompts/get', { name: 'greet', arguments: {} }, '$mcp_prompt_get'],
+      ['resources/list', nil, '$mcp_resources_list'],
+      ['resources/read', { uri: 'file:///readme' }, '$mcp_resource_read']
+    ].each do |method, params, event_name|
+      it "is not sent for a lone #{method} without an initialize" do
+        server.handle(rpc(1, method, params))
+        expect(event_names).to eq([event_name])
+      end
+
+      it "is sent once, by the initialize, before a #{method}" do
+        server.handle(initialize_request)
+        server.handle(rpc(2, method, params))
+        expect(event_names).to eq(['$mcp_initialize', event_name])
+      end
+    end
+
+    it 'is not sent when concurrent first calls open one session without an initialize' do
+      threads = Array.new(12) do |i|
+        Thread.new { server.handle(rpc(i, 'tools/call', { name: 'echo', arguments: { message: "m#{i}" } })) }
+      end
+      threads.each(&:join)
+      expect(event_names).to eq(['$mcp_tool_call'] * 12)
     end
   end
 end

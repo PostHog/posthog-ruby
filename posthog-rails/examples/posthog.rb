@@ -11,7 +11,7 @@
 
 PostHog::Rails.configure do |config|
   # Automatically capture exceptions (default: false)
-  # Set to true to enable automatic exception tracking
+  # Includes Action Cable connect/disconnect, channel subscribe/unsubscribe, and channel actions.
   # config.auto_capture_exceptions = true
 
   # Report exceptions that Rails rescues (e.g., with rescue_from) (default: false)
@@ -21,6 +21,10 @@ PostHog::Rails.configure do |config|
   # Automatically instrument ActiveJob background jobs (default: false)
   # Set to true to enable automatic ActiveJob exception tracking
   # config.auto_instrument_active_job = true
+
+  # Report failures when Active Job schedules a retry (default: false)
+  # Requires auto_instrument_active_job; terminal unhandled failures are already reported.
+  # config.report_active_job_retries = true
 
   # Use PostHog tracing headers for request-scoped identity/session context (default: true)
   # Request metadata (current URL, method, path, user agent, and IP) is always captured during Rails requests
@@ -70,6 +74,18 @@ PostHog::Rails.configure do |config|
 
   # Broadcast Rails.logger into PostHog Logs (default: true when logs enabled)
   # config.logs_forward_rails_logger = true
+
+  # Structured notification logs (default: []; requires logs_enabled).
+  # Select only installed components; this does not load optional Rails components.
+  # Set logs_forward_rails_logger = false to avoid also forwarding generic log lines.
+  # config.logs_notifications = [:action_controller, :active_record, :active_job, :action_mailer]
+  # SQL records are debug; other successful lifecycle events are info, failures error.
+  # Controller params and keyed job arguments respect Rails filter_parameters and
+  # are JSON strings in rails.params / rails.job.arguments (bounded to 10 KB).
+  # Custom filters see original key/value types; unsafe or oversized parameter
+  # trees are redacted as a whole, not truncated before filtering.
+  # Unkeyed job arguments are redacted. SQL text/binds, headers/cookies, mail
+  # recipients, subject and content are not collected by notification logging.
 
   # Minimum severity to forward; nil inherits Rails.logger's level (default: nil)
   # config.logs_level = :info
@@ -171,6 +187,15 @@ PostHog.init do |config|
   # Optional: Disable in development
   # config.test_mode = true if Rails.env.test? || Rails.env.development?
 end
+
+# ============================================================================
+# OPTIONAL SIDEKIQ INTEGRATION (Rails 7.1+, Sidekiq 7.0.3+)
+# ============================================================================
+# Install explicitly to report only terminal job failures. Other policies: :all, :dead.
+# require 'posthog/rails/sidekiq'
+# Sidekiq.configure_server do |config|
+#   PostHog::Rails::Sidekiq.install(config, error_reporting: :exhausted)
+# end
 
 # ============================================================================
 # DEFAULT EXCLUDED EXCEPTIONS

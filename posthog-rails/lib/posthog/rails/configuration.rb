@@ -21,6 +21,10 @@ module PostHog
       # @return [Boolean] Whether to automatically instrument ActiveJob. Defaults to false.
       attr_accessor :auto_instrument_active_job
 
+      # @return [Boolean] Whether to report each Active Job retry failure. Requires auto_instrument_active_job.
+      #   Defaults to false.
+      attr_accessor :report_active_job_retries
+
       # @return [Array<String>] Exception class names to ignore in addition to the defaults. Subclasses are
       #   ignored too, and so is any exception whose cause chain contains a listed class.
       attr_accessor :excluded_exceptions
@@ -50,6 +54,11 @@ module PostHog
       #   (only takes effect when {#logs_enabled} is true).
       attr_accessor :logs_forward_rails_logger
 
+      # @return [Array<Symbol>] Components whose notifications produce structured logs. Defaults to [].
+      #   Supports :action_controller, :active_record, :active_job, and :action_mailer.
+      #   Only takes effect when logs_enabled is true; components are not loaded automatically.
+      attr_accessor :logs_notifications
+
       # @return [Integer, Symbol, nil] Minimum severity to forward to PostHog Logs. When nil, inherits the
       #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
       attr_accessor :logs_level
@@ -71,6 +80,7 @@ module PostHog
         @auto_capture_exceptions = false
         @report_rescued_exceptions = false
         @auto_instrument_active_job = false
+        @report_active_job_retries = false
         @excluded_exceptions = []
         @use_tracing_headers = true
         @capture_user_context = true
@@ -79,6 +89,7 @@ module PostHog
         @user_id_method = nil
         @logs_enabled = false
         @logs_forward_rails_logger = true
+        @logs_notifications = []
         @logs_level = nil
         @logs_max_records_per_minute = DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
         @logs_before_send = nil

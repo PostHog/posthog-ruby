@@ -13,7 +13,33 @@ module PostHog
       def self.prepended(base)
         base.extend(ClassMethods)
         base.around_perform :with_posthog_job_context, prepend: true if base.respond_to?(:around_perform)
+        base.prepend(LegacyRetryReporting) if ::ActiveJob::VERSION::MAJOR < 6
+        return if @retry_subscription
+
+        @retry_subscription = ActiveSupport::Notifications.subscribe('enqueue_retry.active_job') do |*args|
+          payload = args.last
+          job = payload[:job]
+          job.send(:capture_posthog_retry, payload[:error]) if job.is_a?(ActiveJobExtensions)
+        end
       end
+
+      # Active Job 5.2 neither emits enqueue_retry nor passes the error to retry_job.
+      module LegacyRetryReporting
+        # @api private
+        def rescue_with_handler(exception, ...)
+          previous_exception = @posthog_retry_exception
+          @posthog_retry_exception = exception
+          super
+        ensure
+          @posthog_retry_exception = previous_exception
+        end
+
+        # @api private
+        def retry_job(...)
+          super.tap { capture_posthog_retry(@posthog_retry_exception) }
+        end
+      end
+      private_constant :LegacyRetryReporting
 
       module ClassMethods
         # DSL for defining how to extract distinct_id from job arguments.
@@ -91,6 +117,11 @@ module PostHog
 
       private
 
+      # Completion notifications run after around_perform has restored the parent scope.
+      def posthog_logs_context
+        @posthog_execution_context || posthog_job_context
+      end
+
       def copy_posthog_ids(data)
         data = {} unless data.is_a?(Hash)
         %w[distinct_id session_id].each_with_object({}) do |key, result|
@@ -143,7 +174,21 @@ module PostHog
         nil
       end
 
-      def capture_job_exception(exception)
+      def capture_posthog_retry(exception)
+        config = PostHog::Rails.config
+        return unless config&.auto_instrument_active_job && config.report_active_job_retries && exception
+        return unless PostHog.initialized? && PostHog.client.enabled?
+
+        Internal::Context.with_context(
+          @posthog_execution_context || posthog_job_context, fresh: true, enrich_current_span: false
+        ) do
+          capture_job_exception(exception, retry_failure: true)
+        end
+      rescue StandardError => e
+        PostHog::Logging.logger.error("Failed to capture job retry: #{e.class}")
+      end
+
+      def capture_job_exception(exception, retry_failure: false)
         return unless PostHog::Rails.config&.auto_instrument_active_job
         return unless PostHog::Rails.config&.should_capture_exception?(exception)
 
@@ -155,7 +200,7 @@ module PostHog
                       end
 
         properties = {
-          '$exception_source' => 'active_job',
+          '$exception_source' => retry_failure ? 'rails.active_job' : 'active_job',
           '$job_class' => self.class.name,
           '$job_id' => job_id,
           '$queue_name' => queue_name,
@@ -163,14 +208,18 @@ module PostHog
           '$job_executions' => executions
         }
 
+        properties['$exception_level'] = 'error' if retry_failure
+
         # Add serialized job arguments (be careful with sensitive data)
         properties['$job_arguments'] = sanitize_job_arguments(arguments) if arguments.present?
+
+        return if defined?(PostHog::Rails::Sidekiq) && Sidekiq.defer_capture?(exception, distinct_id, properties)
 
         PostHog.capture_exception(
           exception,
           distinct_id,
           properties,
-          mechanism: { 'type' => 'active_job', 'handled' => false }
+          mechanism: { 'type' => retry_failure ? 'task' : 'active_job', 'handled' => retry_failure }
         )
       rescue StandardError => e
         # Don't let PostHog errors break job processing

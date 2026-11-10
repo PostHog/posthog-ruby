@@ -210,6 +210,103 @@ RSpec.describe 'automatic exception capture mechanisms' do
       expect(client.queued_messages).to eq(1)
     end
 
+    context 'when Sidekiq reports a retry wrapper' do
+      subject(:report_error) do
+        described_class.new.report(
+          wrapped_error,
+          handled: false,
+          severity: :error,
+          context: { distinct_id: 'job-user', sidekiq_job_class: 'FailingJob' },
+          source: 'job.sidekiq'
+        )
+      end
+
+      let(:error) { StandardError.new('job failed') }
+      let(:wrapped_error) do
+        raise Sidekiq::JobRetry::Handled, cause: error
+      rescue Sidekiq::JobRetry::Handled => e
+        e
+      end
+
+      before do
+        stub_const('Sidekiq::JobRetry::Handled', Class.new(RuntimeError))
+      end
+
+      it 'captures an unreported job error with the Rails reporter context' do
+        report_error
+
+        expect(client.queued_messages).to eq(1)
+        event = client.dequeue_last_message
+        expect(event[:distinct_id]).to eq('job-user')
+        expect(event[:properties]).to include(
+          '$exception_source' => 'job.sidekiq',
+          '$context_sidekiq_job_class' => 'FailingJob'
+        )
+        expect(event[:properties]['$exception_list'].map { |entry| entry['type'] }).to eq(['StandardError'])
+        expect(event[:properties]['$exception_list'].first['mechanism']).to include(
+          'type' => 'rails_error_reporter', 'handled' => false
+        )
+      end
+
+      it 'still captures the original error when its first report was dropped' do
+        attempts = 0
+        retry_client = PostHog::Client.new(api_key: API_KEY, test_mode: true, before_send: lambda { |event|
+          attempts += 1
+          event if attempts > 1
+        })
+        allow(PostHog).to receive(:client).and_return(retry_client)
+        retry_client.capture_exception(error)
+        expect(retry_client.queued_messages).to eq(0)
+
+        report_error
+
+        expect(retry_client.queued_messages).to eq(1)
+        expect(retry_client.dequeue_last_message[:properties]['$exception_list'].first['type']).to eq('StandardError')
+      end
+
+      it 'applies exclusions to the original job error' do
+        PostHog::Rails.config.excluded_exceptions = ['StandardError']
+
+        report_error
+
+        expect(client.queued_messages).to eq(0)
+      end
+
+      it 'still honors exclusions for the Sidekiq wrapper' do
+        PostHog::Rails.config.excluded_exceptions = ['Sidekiq::JobRetry::Handled']
+
+        report_error
+
+        expect(client.queued_messages).to eq(0)
+      end
+
+      it 'preserves a retry wrapper that has no cause' do
+        allow(wrapped_error).to receive(:cause).and_return(nil)
+
+        report_error
+
+        expect(client.queued_messages).to eq(1)
+        expect(client.dequeue_last_message[:properties]['$exception_list'].first['type']).to eq(
+          'Sidekiq::JobRetry::Handled'
+        )
+      end
+
+      it 'does not suppress a different error raised while handling an already captured error' do
+        client.capture_exception(error)
+        expect(client.dequeue_last_message[:properties]['$exception_list'].first['type']).to eq('StandardError')
+        stub_const('ApplicationWrapperError', Class.new(StandardError))
+        application_error = ApplicationWrapperError.new('error handler failed')
+        allow(application_error).to receive(:cause).and_return(error)
+
+        described_class.new.report(application_error, handled: false, severity: :error, context: {})
+
+        expect(client.queued_messages).to eq(1)
+        expect(client.dequeue_last_message[:properties]['$exception_list'].first['type']).to eq(
+          'ApplicationWrapperError'
+        )
+      end
+    end
+
     it 'still captures unmarked ActiveSupport reports when ActiveJob instrumentation is enabled' do
       PostHog::Rails.config.auto_instrument_active_job = true
 
@@ -316,6 +413,22 @@ RSpec.describe 'automatic exception capture mechanisms' do
         hash_including('$exception_source' => 'active_job'),
         mechanism: { 'type' => 'active_job', 'handled' => false }
       )
+    end
+
+    it 'does not capture a job failure again when Sidekiq wraps it for the Rails reporter' do
+      stub_const('Sidekiq::JobRetry::Handled', Class.new(RuntimeError))
+      PostHog::Rails.config.auto_instrument_active_job = true
+
+      expect { job_class.new.perform_now }.to raise_error(StandardError, 'job failed') do |error|
+        raise Sidekiq::JobRetry::Handled, cause: error
+      rescue Sidekiq::JobRetry::Handled => e
+        PostHog::Rails::ErrorSubscriber.new.report(
+          e, handled: false, severity: :error, context: {}, source: 'job.sidekiq'
+        )
+      end
+
+      expect(client.queued_messages).to eq(1)
+      expect(client.dequeue_last_message[:properties]).to include('$job_class' => 'FakeJob', '$job_id' => 'job-1')
     end
 
     it 'allows a Rails report to retry when the job event was dropped' do

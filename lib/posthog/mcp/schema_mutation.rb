@@ -120,7 +120,7 @@ module PostHog
                       tool_name: tool_name, required: false, options: options, label: 'conversation_id')
       end
 
-      def add_model_parameter(schema, tool_name:, description: nil, required: true, options: nil)
+      def add_model_parameter(schema, tool_name:, description: nil, required: false, options: nil)
         add_parameter(schema, ModelCapture::PARAM_NAME, description || DEFAULT_MODEL_PARAMETER_DESCRIPTION,
                       tool_name: tool_name, required: required, options: options, label: 'llm_model')
       end

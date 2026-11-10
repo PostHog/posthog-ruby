@@ -389,6 +389,10 @@ instance_method PostHog::Rails::Configuration#logs_level()
 instance_method PostHog::Rails::Configuration#logs_level=(arg0)
 instance_method PostHog::Rails::Configuration#logs_max_records_per_minute()
 instance_method PostHog::Rails::Configuration#logs_max_records_per_minute=(arg0)
+instance_method PostHog::Rails::Configuration#logs_notifications()
+instance_method PostHog::Rails::Configuration#logs_notifications=(arg0)
+instance_method PostHog::Rails::Configuration#report_active_job_retries()
+instance_method PostHog::Rails::Configuration#report_active_job_retries=(arg0)
 instance_method PostHog::Rails::Configuration#report_rescued_exceptions()
 instance_method PostHog::Rails::Configuration#report_rescued_exceptions=(arg0)
 instance_method PostHog::Rails::Configuration#should_capture_exception?(exception)
@@ -397,6 +401,7 @@ instance_method PostHog::Rails::Configuration#use_tracing_headers=(arg0)
 instance_method PostHog::Rails::Configuration#user_id_method()
 instance_method PostHog::Rails::Configuration#user_id_method=(arg0)
 constant PostHog::Rails::Configuration::DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE: Integer
+module PostHog::Rails::ControllerHelpers
 class PostHog::Rails::InitConfig
 instance_method PostHog::Rails::InitConfig#api_key=(value)
 instance_method PostHog::Rails::InitConfig#before_send=(value)
@@ -414,4 +419,6 @@ instance_method PostHog::Rails::InitConfig#test_mode=(value)
 instance_method PostHog::Rails::InitConfig#to_client_options()
 module PostHog::Rails::Logs
 class PostHog::Rails::Railtie < Rails::Railtie
+module PostHog::Rails::Sidekiq
+class_method PostHog::Rails::Sidekiq.install(config, error_reporting:)
 constant PostHog::Rails::VERSION: String
