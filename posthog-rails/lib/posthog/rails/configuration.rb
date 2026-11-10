@@ -47,6 +47,11 @@ module PostHog
       #   (only takes effect when {#logs_enabled} is true).
       attr_accessor :logs_forward_rails_logger
 
+      # @return [Array<Symbol>] Components whose notifications produce structured logs. Defaults to [].
+      #   Supports :action_controller, :active_record, :active_job, and :action_mailer.
+      #   Only takes effect when logs_enabled is true; components are not loaded automatically.
+      attr_accessor :logs_notifications
+
       # @return [Integer, Symbol, nil] Minimum severity to forward to PostHog Logs. When nil, inherits the
       #   current Rails.logger level. Accepts a Logger severity constant (e.g. Logger::INFO) or symbol (:info).
       attr_accessor :logs_level
@@ -76,6 +81,7 @@ module PostHog
         @user_id_method = nil
         @logs_enabled = false
         @logs_forward_rails_logger = true
+        @logs_notifications = []
         @logs_level = nil
         @logs_max_records_per_minute = DEFAULT_LOGS_MAX_RECORDS_PER_MINUTE
         @logs_before_send = nil

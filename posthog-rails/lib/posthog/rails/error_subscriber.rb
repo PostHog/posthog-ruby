@@ -23,6 +23,11 @@ module PostHog
         runner_report = !handled && source == 'application.runner.railties'
         return unless runner_report || PostHog::Rails.config&.should_capture_exception?(error)
 
+        if defined?(::Sidekiq::JobRetry::Handled) && error.is_a?(::Sidekiq::JobRetry::Handled)
+          error = error.cause || error
+          return unless PostHog::Rails.config&.should_capture_exception?(error)
+        end
+
         distinct_id = context[:user_id] || context[:distinct_id]
 
         properties = {

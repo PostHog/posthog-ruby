@@ -1,5 +1,33 @@
 # posthog-rails
 
+## 3.23.0
+
+### Minor Changes
+
+- 1ab206e: Add opt-in structured logs for controller, SQL, Active Job, and Action Mailer notifications through the existing logs pipeline. Notification records use allowlisted metadata, filtered parameter payloads, and the same severity threshold, scrubbing hook, rate cap, and context correlation as forwarded logs. Controller records reuse Rails' already-filtered parameters without rerunning custom filters. Job argument filtering preserves native Rails custom-filter key/value semantics, honors argument logging opt-outs, and omits mail delivery job arguments. Unsafe or oversized trees are redacted instead of exporting partial data. Empty parameter-filter lists redact keyed job payloads, and unencodable JSON payloads are redacted without dropping lifecycle records. Rescued Active Job enqueue errors are logged at error severity, and suppressed notification records skip parameter processing. Retry waits accept durations and are logged in seconds; error-bearing retry notifications report failed attempts at error severity even when retries remain.
+
+## 3.22.0
+
+### Minor Changes
+
+- 419a8fe: Capture exceptions escaping Action Cable connection, channel lifecycle, and action boundaries when auto_capture_exceptions is enabled. Correlate events with isolated connection request context and include filtered channel details without attaching raw connection environments or authentication cookies.
+
+### Patch Changes
+
+- 071569a: Report Sidekiq retry failures using the original exception, preventing duplicate Active Job error events while honoring exclusions for both the wrapper and the original error.
+
+## 3.21.0
+
+### Minor Changes
+
+- c08fd1b: Capture errors logged by ActionController::Live and ActionView streaming templates when automatic exception capture is enabled, preserving Rails logging and completion behavior and reusing existing filtering and duplicate prevention.
+
+### Patch Changes
+
+- 38a14da: Remove unstable numeric suffixes from Rails-generated template method names in exception frames when the name matches the template source path. Preserve filenames, line numbers, source context, frame classification, cause chains, and duplicate capture prevention.
+- Updated dependencies [38a14da]
+  - posthog-ruby@3.32.1
+
 ## 3.20.7
 
 ### Patch Changes

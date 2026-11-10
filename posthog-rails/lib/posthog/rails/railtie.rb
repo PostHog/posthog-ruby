@@ -12,6 +12,13 @@ module PostHog
         PostHog::Rails.install_posthog_facade!
       end
 
+      initializer 'posthog.controller_helpers' do
+        ActiveSupport.on_load(:action_controller) do
+          include PostHog::Rails::ControllerHelpers unless method_defined?(:capture_exception) ||
+                                                           private_method_defined?(:capture_exception)
+        end
+      end
+
       # Insert middleware for request context and exception capturing
       initializer 'posthog.insert_middlewares' do |app|
         # Wrap the Rails exception middleware so request context is active for
@@ -32,6 +39,34 @@ module PostHog
           app, ActionDispatch::ShowExceptions,
           PostHog::Rails::CaptureExceptions
         )
+      end
+
+      initializer 'posthog.action_cable' do
+        require 'posthog/rails/action_cable'
+
+        ActiveSupport.on_load(:action_cable_connection) do
+          prepend ActionCableConnectionExtensions unless self < ActionCableConnectionExtensions
+          subscriptions = ::ActionCable::Connection::Subscriptions
+          unless subscriptions < ActionCableSubscriptionsExtensions
+            subscriptions.prepend(ActionCableSubscriptionsExtensions)
+          end
+        end
+        ActiveSupport.on_load(:action_cable_channel) do
+          prepend ActionCableChannelExtensions unless self < ActionCableChannelExtensions
+        end
+
+        # Rails 5.2 has only the server configuration hook.
+        if ::Rails.version.to_f < 6.0
+          ActiveSupport.on_load(:action_cable) do
+            ::ActionCable::Connection::Base.prepend(ActionCableConnectionExtensions)
+            ::ActionCable::Channel::Base.prepend(ActionCableChannelExtensions)
+            ::ActionCable::Connection::Subscriptions.prepend(ActionCableSubscriptionsExtensions)
+          end
+        end
+      end
+
+      initializer 'posthog.streaming_errors' do
+        StreamingExceptions.install
       end
 
       # After initialization, set up remaining integrations

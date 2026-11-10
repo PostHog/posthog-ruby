@@ -9,6 +9,10 @@ SDK usage examples and code snippets live in the official documentation so they 
 - [Ruby on Rails framework docs](https://posthog.com/docs/libraries/ruby-on-rails)
 - [Ruby library docs](https://posthog.com/docs/libraries/ruby)
 
+## Exception stack frames
+
+Rails-generated template method names lose their unstable numeric suffixes when they match the template source path. File paths, line numbers, source context, and application-frame classification stay unchanged; no additional frames are silenced or removed.
+
 ## OpenTelemetry span context (optional)
 
 Request context adds missing `sessionId` and `posthogDistinctId` attributes to an active recording OpenTelemetry SDK span. Register the optional `PostHog::ContextSpanProcessor` on the application's existing provider for child spans. OpenTelemetry SDK 1.0.0 or later is supported and remains optional.
@@ -25,11 +29,43 @@ See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-r
 
 Only initialized, enabled clients are used. Delivery is best-effort through the normal transport. Failures before runner hooks load, immediate process termination (`exit!`), and forced termination that bypasses Ruby exit hooks cannot be captured. No separate runner-code or command-line argument properties are added; exception messages and stack source context still follow the normal exception pipeline.
 
+## Controller exception reporting
+
+Controllers and API controllers gain a private `capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)` helper. Existing controller helpers with that name are not replaced. It returns the core capture result (`true`, `false`, or `nil`) and is not a controller action.
+
+The existing `PostHog.capture_exception` API remains available. This helper keeps configured-user resolution, controller/action and filtered parameters local to an explicit exception-reporting call rather than adding them to every event through `RequestContext`.
+
+Manual reports do not require `auto_capture_exceptions` and do not apply automatic exception exclusions. They retain the core manual handled-exception defaults and duplicate prevention. Missing or disabled clients no-op without initializing a client.
+
+These remain plain manual captures: the default mechanism is `generic` with `handled: true`, and the helper does not add `$exception_source`. Adding Rails context does not introduce a new automatic capture boundary.
+
+Explicit identity wins over the configured current user, then request identity. Explicit properties win over inferred request properties. The helper respects `capture_user_context`, current-user resolution settings, and `use_tracing_headers`. Request parameters use Rails `filter_parameters`; automatically derived URLs omit queries and fragments. Explicit properties and exception messages are not parameter-filtered. Unavailable or malformed enrichment is omitted without dropping the original report or replacing application exceptions. Request context is not retained after the request.
+
+Manual reports use already-parsed Rails parameter/body caches, with query/path parameters as fallback. The helper does not proactively parse uncached bodies; richer body collection is outside this helper. Rails may independently parse or log bodies before an action runs; the helper does not suppress framework-owned diagnostics. A response status is included only when already known, including after a controller has performed its response; the default pre-response status is not inferred.
+
+## Streaming exceptions
+
+With `auto_capture_exceptions` enabled (default `false`), errors reported by ActionController::Live and ActionView streaming templates are captured through the existing exception pipeline, respecting excluded exceptions and duplicate prevention. Rails logging and streaming completion behavior are unchanged.
+
+Live reporters rebuild context from their controller's own filtered request data and headers only while reporting, restoring any ambient context afterward without annotating ambient spans. Authenticated controller identity still takes precedence over header identity. Streaming template bodies use only the context active when Rails reports the error; they do not retain the context from body creation. Errors enumerated after request middleware exits may therefore lack request identity and metadata. Identity is not automatically transferred across arbitrary application-created threads or fibers.
+
 ## Active Job context
 
 Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.
 
 The existing job distinct ID extractor takes precedence over the saved ID. Rescue, discard, and terminal retry handlers keep this effective context, including when they enqueue child jobs. Integer and finite floating-point distinct IDs are stored as strings in job snapshots; session IDs must be strings. Events, optional logs, and application OpenTelemetry spans use the shared job context. Register `PostHog::ContextSpanProcessor` for child spans as described in the trace context guide. An existing job span receives IDs only when its public `messaging.system` is `active_job` and `messaging.message.id` matches the current job ID. Other active spans stay unchanged. This transfers PostHog IDs; it does not transfer a distributed trace or configure a tracing provider.
+
+## Action Cable exceptions
+
+`auto_capture_exceptions` (default: false) also captures exceptions escaping Action Cable connection open/close, channel subscribe/unsubscribe callbacks, and dispatched channel actions. `excluded_exceptions` applies. Action Cable stays optional and loads lazily; no spans are created or enriched.
+
+Each operation uses fresh connection-env context owned by the current Rails facade client and restores the caller's context on exit. Sanitized PostHog headers provide session and fallback identity unless `use_tracing_headers` is false. Explicit capture IDs/properties retain precedence.
+
+Exception identity prefers authenticated controller context from the environment. Without a controller, the connection's `current_user_method` and existing `user_id_method`/common ID rules apply. `capture_user_context = false` disables lookup; unavailable users fall back to headers. `current_user_resolver` retains its controller-only contract and is not called with a connection. Connection identifiers and cookies never infer identity.
+
+Properties include connection/channel classes, operation, and channel params/action data filtered by both application `filter_parameters` and the effective connection's `config.filter_parameters` (including Cable-specific rules). Nested values and Rails-supported Proc filters apply before serialization. Raw environments, cookies, authorization headers, subscription identifiers, and URL query strings are not attached. Review filtering and `before_send` for application-specific sensitive data.
+
+Channel failures dispatched through `Subscriptions#execute_command` wait for connection `rescue_from` handling before capture. Application-consumed exceptions, including channel-local and connection `rescue_from`, are not captured by these boundaries, even with `report_rescued_exceptions = true`. That option does not enable handled Action Cable events. Unhandled channel failures retain channel/action context, including when the dispatcher logs them without re-raising. Direct channel calls capture escaping errors without invoking connection handlers. Return values, handler invocation counts, and escaping exceptions remain unchanged.
 
 ## PostHog Logs (optional)
 
@@ -85,6 +121,48 @@ configuration needed.
 what your app logs. Setting it below the Rails logger level (e.g. `:debug`
 with an `:info` app) does not make Rails or ActiveRecord generate extra
 output — only records the app actually produces are forwarded.
+
+Structured notification logs are separately opt-in with `config.logs_notifications`
+(default `[]`), selecting `:action_controller`, `:active_record`, `:active_job`,
+and/or `:action_mailer`. Components register lazily without loading optional Rails
+packages. `logs_enabled` remains the master gate; notification records share the
+forwarding threshold, rate cap, hook, correlation, and shutdown pipeline. Set
+`logs_forward_rails_logger` to `false` to collect notifications without also
+forwarding generic logger lines. SQL records use debug severity; successful
+controller/job/mailer records use info, controller 4xx responses warn, and failures
+error. Error-bearing retry notifications also use error severity: they describe a
+failed attempt, not necessarily terminal job failure. `rails.job.retry_wait` is
+reported in seconds, including waits supplied as `ActiveSupport::Duration`.
+These records do not create spans or collect timings.
+
+Notification bodies are fixed descriptions with allowlisted event metadata.
+`rails.params` serializes Rails' already-filtered controller notification parameters
+without applying filters again. `rails.job.arguments` applies the application's
+`filter_parameters` to copied original key/value types before JSON normalization.
+Unkeyed job arguments are redacted; jobs with `log_arguments = false` and Action
+Mailer delivery jobs omit arguments entirely. Unsupported, cyclic, or oversized
+parameter trees are wholly redacted rather than partially truncated. Unencodable
+or oversized JSON payloads are replaced with a redaction marker without dropping
+the lifecycle record. An empty `filter_parameters` list redacts keyed job payloads
+rather than exporting them unfiltered.
+SQL statements/binds, cookies/headers, and mail recipients/subject/content are not
+collected. Review configured parameter filters and use `logs_before_send` for
+additional scrubbing. Job completion records reuse saved/effective job identity
+only when the existing `auto_instrument_active_job` integration is enabled; logging
+alone does not enable job context propagation or exception capture.
+
+To exercise real controller and inline job notifications against your project:
+
+```bash
+POSTHOG_API_KEY='<project_api_key>' POSTHOG_HOST='https://us.i.posthog.com' \
+  BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle exec ruby examples/rails_notification_logs.rb
+```
+
+Run from the repository root after installing the OpenTelemetry bundle. The example
+checks outgoing record counts and filtering, then prints a unique run ID to find
+its eight analytics events and eleven records in PostHog Logs. Controller responses
+exercise info, warn, and error severity; the hook drops the 418 controller record.
+SQL and mailer notifications are not exercised by this example.
 
 Known limitations of the broadcast approach:
 
