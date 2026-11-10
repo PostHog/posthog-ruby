@@ -3,9 +3,12 @@ const { join } = require('node:path');
 
 const unsuccessful = new Set(['failure', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale']);
 const publishJob = 'Release and publish';
+const publishStep = 'Publish';
 const gems = ['posthog-ruby', 'posthog-rails'];
 
 const isJob = (job, name) => job.name === name || job.name.startsWith(`${name} (`);
+const gemOf = job => /\((.*)\)$/.exec(job.name)?.[1];
+const didPublish = job => job.steps?.some(step => step.name === `${publishStep} ${gemOf(job)}` && step.conclusion === 'success') ?? false;
 
 function readThreadTimestamp(directory, attempt) {
     if (!directory) return undefined;
@@ -69,13 +72,13 @@ module.exports = async function releaseFailureNotification({ github, context, ch
     }
 
     const publishJobs = jobs.filter(job => isJob(job, publishJob));
-    const gemsPublished = publishJobs.length > 0 && publishJobs.every(job => job.conclusion === 'success');
+    const gemsPublished = publishJobs.length > 0 && publishJobs.every(didPublish);
     const releasedNotification = jobs.find(job => job.name === 'Notify Slack - Released');
     const problems = failedJobs.map(job => `• <${job.html_url}|${job.name}>: ${job.conclusion}`);
 
     const publishedGems = publishJobs
-        .filter(job => job.conclusion === 'success')
-        .map(job => /\((.*)\)$/.exec(job.name)?.[1])
+        .filter(didPublish)
+        .map(gemOf)
         .filter(gem => gems.includes(gem));
     if (!gemsPublished && publishedGems.length > 0) {
         problems.push(`• Published: ${publishedGems.join(', ')}`);
