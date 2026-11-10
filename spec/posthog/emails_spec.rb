@@ -187,11 +187,14 @@ module PostHog
       it 'sends the category it defines, and a description only when it has one' do
         stub_request(:post, send_url).to_return(accept)
 
-        send_code(category: Emails::MessageCategory.new(key: 'newsletter', type: 'marketing', name: 'Newsletter'))
+        marketing_html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        send_code(category: Emails::MessageCategory.new(key: 'newsletter', type: 'marketing', name: 'Newsletter'),
+                  html: marketing_html)
         send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts',
                                                         description: 'Order receipts'))
         send_code(category: Emails::TRANSACTIONAL)
 
+        expect(sent_bodies.first['html']).to eq(marketing_html)
         expect(sent_bodies.map { |body| body['category'] }).to eq(
           [
             { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' },
