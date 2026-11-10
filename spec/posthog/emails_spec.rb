@@ -47,7 +47,8 @@ module PostHog
         case category
         when nil, 'transactional' then accept
         when Hash
-          unsubscribable = "#{body['html']}#{body['text']}".include?('{{ unsubscribe_url }}')
+          content = body['html'].to_s.empty? ? body['text'] : body['html']
+          unsubscribable = content.to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
           next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
 
           (categories[category['key']] ||= {}).merge!(category)
@@ -417,10 +418,10 @@ module PostHog
         it "makes #{attempts} attempts for a #{status} #{code}" do
           stub_request(:post, send_url).to_return(refuse(status, code), accept)
 
-          begin
-            send_template
-          rescue EmailError
-            nil
+          if attempts == 1
+            expect { send_template }.to raise_error(EmailError) { |error| expect(error.code).to eq(code) }
+          else
+            expect(send_template.id).to eq('msg_1')
           end
           expect(a_request(:post, send_url)).to have_been_made.times(attempts)
         end
