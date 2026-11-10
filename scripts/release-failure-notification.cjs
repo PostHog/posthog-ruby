@@ -8,7 +8,10 @@ const gems = ['posthog-ruby', 'posthog-rails'];
 
 const isJob = (job, name) => job.name === name || job.name.startsWith(`${name} (`);
 const gemOf = job => /\((.*)\)$/.exec(job.name)?.[1];
-const didPublish = job => job.steps?.some(step => step.name === `${publishStep} ${gemOf(job)}` && step.conclusion === 'success') ?? false;
+const publishOutcome = job => job.steps?.find(step => step.name === `${publishStep} ${gemOf(job)}`)?.conclusion;
+const didPublish = job => publishOutcome(job) === 'success';
+// A gem without a version bump skips its publish step; that is not a failure.
+const publishSettled = job => ['success', 'skipped'].includes(publishOutcome(job));
 
 function readThreadTimestamp(directory, attempt) {
     if (!directory) return undefined;
@@ -72,17 +75,16 @@ module.exports = async function releaseFailureNotification({ github, context, ch
     }
 
     const publishJobs = jobs.filter(job => isJob(job, publishJob));
-    const gemsPublished = publishJobs.length > 0 && publishJobs.every(didPublish);
+    const gemsPublished = publishJobs.some(didPublish) && publishJobs.every(publishSettled);
     const releasedNotification = jobs.find(job => job.name === 'Notify Slack - Released');
     const problems = failedJobs.map(job => `• <${job.html_url}|${job.name}>: ${job.conclusion}`);
 
-    const publishedGems = publishJobs
-        .filter(didPublish)
-        .map(gemOf)
-        .filter(gem => gems.includes(gem));
+    const gemsIn = predicate => publishJobs.filter(predicate).map(gemOf).filter(gem => gems.includes(gem));
+    const publishedGems = gemsIn(didPublish);
+    const unpublishedGems = gemsIn(job => !publishSettled(job));
     if (!gemsPublished && publishedGems.length > 0) {
         problems.push(`• Published: ${publishedGems.join(', ')}`);
-        problems.push(`• Not published: ${gems.filter(gem => !publishedGems.includes(gem)).join(', ')}`);
+        problems.push(`• Not published: ${unpublishedGems.join(', ')}`);
     }
 
     if (run.conclusion !== 'success' && failedJobs.length === 0 && publishJobs.length === 0) {
