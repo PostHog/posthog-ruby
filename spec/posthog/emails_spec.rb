@@ -213,7 +213,9 @@ module PostHog
       let(:outbox) { [] }
       let(:faults) { { uploads: [], storage: [], send: [] } }
       let(:clock) { { now: 0.0, storage_busy_until: 0.0 } }
-      let(:emails) { client.emails.tap { |emails| allow(emails).to receive(:sleep) { |seconds| pass(seconds) } } }
+      let(:emails) do
+        client.emails.tap { |emails| allow(emails).to receive(:sleep) { |seconds| clock[:now] += seconds } }
+      end
 
       before { fake_posthog }
 
@@ -265,10 +267,6 @@ module PostHog
         usage[:stored_bytes] += bytes.bytesize
         bucket[sha256] = bytes
         { status: 200 }
-      end
-
-      def pass(seconds)
-        clock[:now] += seconds
       end
 
       def storage_busy
@@ -636,6 +634,15 @@ module PostHog
         expect(refused.map(&:code)).to all(eq('message_too_large'))
         expect(usage[:quota_bytes]).to eq(29_182_761)
         expect(outbox.size).to eq(1)
+      end
+
+      it 'leaves the size of an email without files to PostHog' do
+        html = "<p>#{'a' * 20_000_000}</p>"
+
+        results = [nil, []].map { |attachments| send_code(subject: '', html: html, attachments: attachments) }
+
+        expect(results.map(&:id)).to eq(%w[msg_1 msg_1])
+        expect(outbox.map { |email| email['html'].bytesize }).to eq([html.bytesize] * 2)
       end
 
       it 'counts the subject in 75-byte steps per 42 of its UTF-8 bytes, and an empty subject not at all' do

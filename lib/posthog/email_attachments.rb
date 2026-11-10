@@ -150,7 +150,7 @@ module PostHog
     private
 
     def check_size(bodies, subject)
-      return if message_bytes(bodies, subject) <= MAX_MESSAGE_BYTES
+      return if empty? || message_bytes(bodies, subject) <= MAX_MESSAGE_BYTES
 
       raise EmailError.new(
         code: 'message_too_large', field: 'attachments',
