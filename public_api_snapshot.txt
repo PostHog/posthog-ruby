@@ -74,7 +74,7 @@ instance_method PostHog::EmailError#status_code()
 instance_method PostHog::EmailError#why()
 class PostHog::Emails
 instance_method PostHog::Emails#get(message_id)
-instance_method PostHog::Emails#send(to:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., capture_engagement: ..., track_opens_and_clicks: ..., distinct_id: ..., idempotency_key: ..., max_retries: ...)
+instance_method PostHog::Emails#send(to:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., tracking: ..., capture_engagement: ..., distinct_id: ..., idempotency_key: ..., max_retries: ...)
 class_method PostHog::Emails.logger()
 class PostHog::Emails::SendResult < Struct
 instance_method PostHog::Emails::SendResult#id()

@@ -94,7 +94,7 @@ module PostHog
                         "project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'
     TEMPLATE_FIELDS = %i[template_data].freeze
-    CODE_FIELDS = %i[subject html text from reply_to capture_engagement track_opens_and_clicks].freeze
+    CODE_FIELDS = %i[subject html text from reply_to tracking capture_engagement].freeze
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
@@ -140,13 +140,17 @@ module PostHog
     # @param from [String] Code form: a verified sender, such as `Acme <hello@example.com>`. Without it, the
     #   project's default sender.
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
-    # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
-    #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
-    # @param track_opens_and_clicks [Boolean] Code form: whether PostHog tracks opens and clicks of the email.
-    #   Defaults to +true+. With +false+, the email goes out without PostHog's open pixel, so PostHog can't count its
-    #   opens. PostHog doesn't track clicks on emails sent from code, so their links are never rewritten either way.
-    #   Independent of +capture_engagement+, which decides whether engagement events are captured on the recipient's
-    #   person. Needs a PostHog version that takes this field.
+    # @param tracking [Boolean, Hash] Code form: what PostHog tracks for the email. Left out, PostHog counts opens and
+    #   captures engagement events, and doesn't track clicks. +true+ turns on opens, clicks and engagement events.
+    #   +false+ turns them all off: the email has no open pixel and no rewritten links, and PostHog captures no
+    #   engagement events for it. A Hash such as +{ clicks: true }+ sets +:opens+ (default +true+), +:clicks+
+    #   (default +false+) and +:engagement+ (default +true+) one by one. Clicks are off by default because PostHog
+    #   can't tell whether an email's links carry login or reset tokens: turn them on only when the links are safe to
+    #   rewrite. Click tracking needs open tracking. A project whose admin turned engagement capture off captures
+    #   nothing, whatever the send says. Sent only when you set it, and needs a PostHog version that takes it.
+    # @param capture_engagement [Boolean] Deprecated: use +tracking: { engagement: false }+ instead. Code form:
+    #   whether PostHog captures the email's engagement events. It still works, but a send can't set both. Sent
+    #   (default +true+) only when +tracking+ is left out, or when you set it.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -160,12 +164,11 @@ module PostHog
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
-      reply_to: nil, capture_engagement: nil, track_opens_and_clicks: nil, distinct_id: nil, idempotency_key: nil,
-      max_retries: nil
+      reply_to: nil, tracking: nil, capture_engagement: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
-        capture_engagement: capture_engagement, track_opens_and_clicks: track_opens_and_clicks
+        tracking: tracking, capture_engagement: capture_engagement
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
@@ -311,16 +314,28 @@ module PostHog
       %i[html text from].each do |name|
         raise ArgumentError, "#{name} must be a string." if fields.key?(name) && !fields[name].is_a?(String)
       end
-      %i[capture_engagement track_opens_and_clicks].each do |name|
-        raise ArgumentError, "#{name} must be true or false." unless [nil, true, false].include?(fields[name])
+      unless [nil, true, false].include?(fields[:capture_engagement])
+        raise ArgumentError, 'capture_engagement must be true or false.'
       end
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(fields[:reply_to]) if fields.key?(:reply_to)
-      code[:capture_engagement] = fields.fetch(:capture_engagement, true)
-      # An API that predates the field refuses it, so a send that leaves it unset keeps the old body.
-      code[:track_opens_and_clicks] = fields[:track_opens_and_clicks] if fields.key?(:track_opens_and_clicks)
+      if !fields.key?(:tracking) || fields.key?(:capture_engagement)
+        code[:capture_engagement] = fields.fetch(:capture_engagement, true)
+      end
+      code[:tracking] = tracking(fields[:tracking]) if fields.key?(:tracking)
       code
+    end
+
+    def tracking(value)
+      return value if [true, false].include?(value)
+      raise ArgumentError, 'tracking must be true, false or a Hash such as { clicks: true }.' unless value.is_a?(Hash)
+
+      kinds = value.compact
+      kinds.each do |kind, on|
+        raise ArgumentError, "tracking[#{kind.inspect}] must be true or false." unless [true, false].include?(on)
+      end
+      kinds
     end
 
     def refuse_fields(fields, allowed:, form:, other_form:, why:)

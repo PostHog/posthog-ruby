@@ -140,8 +140,8 @@ module PostHog
       it 'refuses code content, because the template sets its own' do
         expect { send_template(subject: 'Hi') }
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
-        expect { send_template(track_opens_and_clicks: false) }
-          .to raise_error(ArgumentError, /template_id doesn't take track_opens_and_clicks/)
+        expect { send_template(tracking: false) }
+          .to raise_error(ArgumentError, /template_id doesn't take tracking/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
     end
@@ -175,14 +175,29 @@ module PostHog
                                              'reply_to' => %w[a@example.com b@example.com])
       end
 
-      [false, true].each do |track|
-        it "sends track_opens_and_clicks: #{track} when the caller sets it" do
+      {
+        true => true,
+        false => false,
+        { clicks: true } => { 'clicks' => true },
+        { opens: false, clicks: nil, engagement: false } => { 'opens' => false, 'engagement' => false },
+        {} => {}
+      }.each do |tracking, sent|
+        it "sends tracking: #{tracking.inspect} in place of capture_engagement" do
           stub_request(:post, send_url).to_return(accept)
 
-          send_code(track_opens_and_clicks: track)
+          send_code(tracking: tracking)
 
-          expect(sent_bodies.first).to include('track_opens_and_clicks' => track, 'capture_engagement' => true)
+          expect(sent_bodies.first).to include('tracking' => sent)
+          expect(sent_bodies.first).not_to have_key('capture_engagement')
         end
+      end
+
+      it 'sends capture_engagement next to tracking when the caller sets both' do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(tracking: true, capture_engagement: false)
+
+        expect(sent_bodies.first).to include('tracking' => true, 'capture_engagement' => false)
       end
 
       it 'sends text alone' do
@@ -224,7 +239,8 @@ module PostHog
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
         expect { send_code(capture_engagement: 'no') }.to raise_error(ArgumentError, /capture_engagement/)
-        expect { send_code(track_opens_and_clicks: 'no') }.to raise_error(ArgumentError, /track_opens_and_clicks/)
+        expect { send_code(tracking: 'no') }.to raise_error(ArgumentError, /tracking must be/)
+        expect { send_code(tracking: { clicks: 'yes' }) }.to raise_error(ArgumentError, /tracking\[:clicks\]/)
         expect { send_code(reply_to: [1]) }.to raise_error(ArgumentError, /reply_to/)
         expect { send_template(cc: 'x@example.com') }.to raise_error(ArgumentError, /unknown keyword: :cc/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
