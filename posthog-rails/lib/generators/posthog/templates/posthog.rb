@@ -10,7 +10,8 @@
 # These settings control how PostHog integrates with Rails features.
 
 PostHog::Rails.configure do |config|
-  # Automatically capture exceptions (default: false)
+  # Automatically capture exceptions, including terminating rails runner failures (default: false)
+  # Successful runner exits are ignored; failures are captured before SDK shutdown
   # Includes Action Cable connect/disconnect, channel subscribe/unsubscribe, and channel actions.
   # config.auto_capture_exceptions = true
 
@@ -21,6 +22,10 @@ PostHog::Rails.configure do |config|
   # Automatically instrument ActiveJob background jobs (default: false)
   # Set to true to enable automatic ActiveJob exception tracking
   # config.auto_instrument_active_job = true
+
+  # Report failures when Active Job schedules a retry (default: false)
+  # Requires auto_instrument_active_job; terminal unhandled failures are already reported.
+  # config.report_active_job_retries = true
 
   # Use PostHog tracing headers for request-scoped identity/session context (default: true)
   # Request metadata (current URL, method, path, user agent, and IP) is always captured during Rails requests

@@ -431,6 +431,40 @@ RSpec.describe 'Sidekiq retry reporting' do
         '$queue_name' => 'origin-queue', '$job_priority' => 7
       )
     end
+
+    it "owns automatic Active Job retry reports inside the #{policy} scope" do
+      PostHog::Rails.config.auto_instrument_active_job = true
+      PostHog::Rails.config.report_active_job_retries = true
+      retry_job = stub_failing_active_job('OwnedActiveJobRetry')
+      retry_job.retry_on RuntimeError, wait: 0, attempts: 2
+      retry_job.queue_adapter = :test
+      retry_job.posthog_distinct_id -> { 'retry-user' }
+      allow_any_instance_of(RetryPolicyJob).to receive(:perform) { retry_job.perform_now }
+      enable_policy(policy)
+      work = Sidekiq::BasicFetch::UnitOfWork.new('queue:default', Sidekiq.dump_json(job), config)
+      allow(work).to receive(:acknowledge)
+
+      expect(run_work(work)).to be_nil
+
+      expect(work).to have_received(:acknowledge).once
+      expect(client.queued_messages).to eq(0)
+      expect(retry_job.queue_adapter.enqueued_jobs.size).to eq(1)
+      retry_payload = JSON.parse(
+        JSON.generate(retry_job.queue_adapter.enqueued_jobs.last.select { |key, _| key.is_a?(String) })
+      )
+      allow_any_instance_of(RetryPolicyJob).to receive(:perform) { ActiveJob::Base.execute(retry_payload) }
+      job['retry'] = 0
+
+      process_failure
+
+      expect(client.queued_messages).to eq(1)
+      event = client.dequeue_last_message
+      expect(event[:distinct_id]).to eq('retry-user')
+      expect(event[:properties]).to include('$job_class' => 'OwnedActiveJobRetry', '$job_executions' => 2)
+      expect(event[:properties]['$exception_source']).to eq(
+        policy == :all ? 'sidekiq.error_handler' : 'sidekiq.death_handler'
+      )
+    end
   end
 
   it 'assigns a newly wrapped exception to its outer Active Job observer' do
