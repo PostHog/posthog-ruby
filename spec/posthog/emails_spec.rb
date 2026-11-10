@@ -212,6 +212,8 @@ module PostHog
       let(:usage) { { quota_bytes: 0, stored_bytes: 0 } }
       let(:outbox) { [] }
       let(:faults) { { uploads: [], storage: [], send: [] } }
+      let(:clock) { { now: 0.0, storage_busy_until: 0.0 } }
+      let(:emails) { client.emails.tap { |emails| allow(emails).to receive(:sleep) { |seconds| pass(seconds) } } }
 
       before { fake_posthog }
 
@@ -251,6 +253,7 @@ module PostHog
       def store(request)
         sha256 = request.uri.path[/\h{64}\z/]
         return faults[:storage].shift if faults[:storage].any?
+        return storage_busy if clock[:now] < clock[:storage_busy_until]
         return storage_error(403, 'AccessDenied') if request.headers.key?('Authorization')
 
         bytes = request.body.b
@@ -262,6 +265,15 @@ module PostHog
         usage[:stored_bytes] += bytes.bytesize
         bucket[sha256] = bytes
         { status: 200 }
+      end
+
+      def pass(seconds)
+        clock[:now] += seconds
+      end
+
+      def storage_busy
+        retry_after = (clock[:storage_busy_until] - clock[:now]).ceil
+        storage_error(503, 'SlowDown').merge(headers: { 'Retry-After' => retry_after.to_s })
       end
 
       def storage_error(status, code)
@@ -454,14 +466,13 @@ module PostHog
       end
 
       it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do
-        faults[:storage] << { status: 503, headers: { 'Retry-After' => '3' } }
-        sent = send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }])
-        faults[:storage] << { status: 503, headers: { 'Retry-After' => '60' } }
+        clock[:storage_busy_until] = 3.0
+        sent = send_code(max_retries: 1, attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        clock[:storage_busy_until] = clock[:now] + 60
 
-        error = refused_attachment(attachments: [{ filename: 'logo.png', content: png }])
+        error = refused_attachment(max_retries: 1, attachments: [{ filename: 'logo.png', content: png }])
 
         expect(sent.id).to eq('msg_1')
-        expect(delays.first).to be >= 3
         expect([error.code, error.retry_after]).to eq(['attachment_upload_failed', 60.0])
         expect(bucket).to eq(pdf_sha256 => pdf)
       end
