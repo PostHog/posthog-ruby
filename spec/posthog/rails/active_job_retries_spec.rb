@@ -108,9 +108,11 @@ RSpec.describe 'Active Job retry reporting' do
         expect(event[:properties]['$exception_source']).to eq('rails.active_job')
         expect(event[:properties]['$exception_level']).to eq('error')
         expect(event[:properties]['$exception_list'].first['mechanism']).to include('type' => 'task',
-                                                                                    'handled' => false)
+                                                                                    'handled' => true)
       end
       expect(events.last[:properties]['$exception_source']).to eq('active_job')
+      expect(events.last[:properties]['$exception_list'].first['mechanism']).to include('type' => 'active_job',
+                                                                                        'handled' => false)
       expect(context_class.current).to be_nil
     end
   end

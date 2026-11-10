@@ -101,6 +101,8 @@ end
     assert_lifecycle(event[:distinct_id] == 'job-person', 'extractor identity lost')
     assert_lifecycle(event[:properties]['$session_id'] == 'saved-session', 'saved session lost')
     assert_lifecycle(event[:properties]['$exception_source'] == 'rails.active_job', 'retry source lost')
+    mechanism = event[:properties]['$exception_list'].first['mechanism']
+    assert_lifecycle(mechanism['type'] == 'task' && mechanism['handled'] == true, 'retry not marked handled')
     assert_lifecycle(!event[:properties].key?('request'), 'request properties leaked')
   end
   begin
@@ -109,7 +111,10 @@ end
   rescue RuntimeError => e
     assert_lifecycle(e.equal?(RetryLifecycleJob.last_failure), 'terminal error replaced')
   end
-  assert_lifecycle(lifecycle_event&.dig(:properties, '$exception_source') == 'active_job', 'terminal event missing')
+  terminal_event = lifecycle_event
+  assert_lifecycle(terminal_event&.dig(:properties, '$exception_source') == 'active_job', 'terminal event missing')
+  mechanism = terminal_event[:properties]['$exception_list'].first['mechanism']
+  assert_lifecycle(mechanism['type'] == 'active_job' && mechanism['handled'] == false, 'terminal metadata changed')
   assert_lifecycle(lifecycle_event.nil?, 'duplicate event')
   assert_lifecycle(context.current.nil?, 'context leaked')
 end

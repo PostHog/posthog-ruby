@@ -224,7 +224,7 @@ module PostHog
           exception,
           distinct_id,
           properties,
-          mechanism: { 'type' => retry_failure ? 'task' : 'active_job', 'handled' => false }
+          mechanism: { 'type' => retry_failure ? 'task' : 'active_job', 'handled' => retry_failure }
         )
       rescue StandardError => e
         # Don't let PostHog errors break job processing
