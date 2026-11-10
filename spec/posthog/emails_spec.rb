@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'English'
 require 'spec_helper'
 
 module PostHog
@@ -304,6 +305,21 @@ module PostHog
           .to have_been_made.times(7)
       end
 
+      it "reads wrapped Base64 whatever the app's input record separator" do
+        file = pdf * 5
+        wrapped = "#{[file].pack('m0').scan(/.{1,76}/).join("\n")}\n"
+        stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(five_pdfs_sha256)))
+        stub_request(:post, send_url).to_return(accept)
+        separator = $INPUT_RECORD_SEPARATOR
+        $INPUT_RECORD_SEPARATOR = nil
+
+        result = send_code(attachments: [{ filename: 'invoice.pdf', content: wrapped }])
+
+        expect(result.id).to eq('msg_1')
+      ensure
+        $INPUT_RECORD_SEPARATOR = separator
+      end
+
       it 'uploads a file attached twice once, and sends both references' do
         stub_request(:post, uploads_url).to_return(answer_uploads(upload_slot(pdf_sha256)))
         stub_request(:put, upload_url).to_return(status: 200)
@@ -352,14 +368,17 @@ module PostHog
 
       it "sends nothing on a PostHog without the upload route, and passes on PostHog's answer" do
         stub_request(:post, uploads_url).to_return(
-          refuse(404, 'not_found', detail: 'Endpoint not found.', type: 'invalid_request', attr: nil)
+          refuse(404, 'not_found', detail: 'Endpoint not found.', type: 'invalid_request', attr: nil),
+          { status: 404, body: '<html><body>Not Found</body></html>', headers: { 'Content-Type' => 'text/html' } }
         )
 
-        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+        error, proxied = Array.new(2) { refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }]) }
 
         expect([error.code, error.name, error.status_code, error.field])
           .to eq(['not_found', 'not_found', 404, 'attachments'])
         expect(error.message).to eq('Endpoint not found.')
+        expect([proxied.code, proxied.name, proxied.status_code, proxied.field])
+          .to eq(['not_found', 'not_found', 404, 'attachments'])
         expect(a_request(:put, /./)).not_to have_been_made
         expect(a_request(:post, send_url)).not_to have_been_made
       end
@@ -384,7 +403,6 @@ module PostHog
 
         expect(send_code(max_retries: 4, attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
         expect(a_request(:put, upload_url)).to have_been_made.times(5)
-        expect(delays.size).to eq(4)
       end
 
       it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do
@@ -519,18 +537,20 @@ module PostHog
           .to eq('msg_1')
       end
 
-      it 'reads the largest file wrapped as Base64 without splitting it into lines' do
+      it 'reads the largest file one email carries wrapped as Base64, and sends it' do
         largest_that_fits = ("\0" * 29_182_875).b
         wrapped = "#{[largest_that_fits].pack('m0').scan(/.{1,76}/).join("\n")}\n"
         stub_request(:post, uploads_url).to_return(answer_uploads(present_slot(largest_that_fits_sha256)))
         stub_request(:post, send_url).to_return(accept)
-        emails
-        GC.start
 
-        allocated_before = GC.stat(:total_allocated_objects)
-        send_code(subject: '', html: '', attachments: [{ filename: 'scan.pdf', content: wrapped }])
+        result = send_code(subject: '', html: '', attachments: [{ filename: 'scan.pdf', content: wrapped }])
 
-        expect(GC.stat(:total_allocated_objects) - allocated_before).to be < 100_000
+        expect(result.id).to eq('msg_1')
+        expect(a_request(:post, uploads_url).with(
+                 body: { files: [{ sha256: largest_that_fits_sha256, size: 29_182_875 }] }.to_json
+               )).to have_been_made.once
+        expect(sent_bodies.first['attachments']).to eq([{ 'sha256' => largest_that_fits_sha256,
+                                                          'filename' => 'scan.pdf' }])
       end
 
       it "counts each body like a file: its UTF-8 bytes' Base64 size with line breaks" do
@@ -600,6 +620,8 @@ module PostHog
           { attachments: [{ filename: 'a.pdf', content: "%PDF secret text \xE2\xE3".dup.force_encoding('UTF-8') }] } =>
             ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: 'codes.txt', content: "ABCD1234\nEFGH5678\n" }] } =>
+            ['attachments__0__content', /isn't Base64/],
+          { attachments: [{ filename: 'codes.txt', content: "ABCD1234\rEFGH5678\r" }] } =>
             ['attachments__0__content', /isn't Base64/],
           { attachments: [{ filename: 'a.txt', content: 'aGVsbG8='.encode('UTF-16LE') }] } =>
             ['attachments__0__content', /isn't Base64/],

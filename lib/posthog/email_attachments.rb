@@ -85,7 +85,7 @@ module PostHog
         raise invalid('An attachment needs content: the bytes File.binread returns, a list of byte values, or the ' \
                       'file encoded as Base64.', field)
       end
-      raise ArgumentError if content.include?("\n") && !wrapped_base64?(content)
+      raise ArgumentError if content.match?(/[\r\n]/) && !wrapped_base64?(content)
 
       content.delete("\r\n").unpack1('m0')
     rescue ArgumentError, EncodingError
@@ -94,7 +94,10 @@ module PostHog
     end
 
     def self.wrapped_base64?(content)
-      text = content.delete("\r").chomp
+      text = content.gsub("\r\n", "\n")
+      return false if text.include?("\r")
+
+      text = text.delete_suffix("\n")
       width = text.index("\n")
       return true if width.nil?
 

@@ -459,7 +459,7 @@ module PostHog
 
     def parse_uploads_reply((status, payload, retry_after), files)
       fields = payload.is_a?(Hash) ? payload : {}
-      fields = { 'attr' => 'attachments' }.merge(fields.compact) if status == 404
+      fields = { 'code' => 'not_found', 'attr' => 'attachments' }.merge(fields.compact) if status == 404
       raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
 
       slots = fields['files']
