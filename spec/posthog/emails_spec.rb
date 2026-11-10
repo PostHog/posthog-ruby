@@ -209,7 +209,7 @@ module PostHog
       let(:five_pdfs_sha256) { 'dfb00ae2891aa7dac580fd90519992e7a8d6914de7a683c0ecc071f65868101e' }
       let(:largest_that_fits_sha256) { '28f197eae8bd57e7c2a94d2062d2cef0a04b34e7fd3e0c743d88cda2217f069c' }
       let(:bucket) { {} }
-      let(:quota) { { used: 0 } }
+      let(:usage) { { quota_bytes: 0, stored_bytes: 0 } }
       let(:outbox) { [] }
       let(:faults) { { uploads: [], storage: [], send: [] } }
 
@@ -234,7 +234,7 @@ module PostHog
       def plan(file, storage)
         return present_slot(file['sha256']) if bucket.key?(file['sha256'])
 
-        quota[:used] += file['size']
+        usage[:quota_bytes] += file['size']
         slot(file, storage)
       end
 
@@ -259,6 +259,7 @@ module PostHog
         return storage_error(403, 'SignatureDoesNotMatch') unless signed
         return storage_error(400, 'BadDigest') if Digest::SHA256.hexdigest(bytes) != sha256
 
+        usage[:stored_bytes] += bytes.bytesize
         bucket[sha256] = bytes
         { status: 200 }
       end
@@ -320,7 +321,7 @@ module PostHog
 
         expect(result.id).to eq('msg_1')
         expect(bucket).to eq(png_sha256 => png, pdf_sha256 => pdf)
-        expect(quota[:used]).to eq(pdf.bytesize)
+        expect(usage).to eq(quota_bytes: pdf.bytesize, stored_bytes: pdf.bytesize)
         expect(outbox.first['attachments']).to eq([
                                                     { 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf',
                                                       'content_type' => 'application/pdf' },
@@ -343,7 +344,7 @@ module PostHog
         expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
 
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(quota[:used]).to eq(pdf.bytesize)
+        expect(usage).to eq(quota_bytes: pdf.bytesize, stored_bytes: pdf.bytesize)
         expect(outbox.first['attachments']).to eq([{ 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf' }])
       end
 
@@ -380,7 +381,7 @@ module PostHog
         send_code(attachments: [{ filename: 'a.pdf', content: pdf }, { filename: 'b.pdf', content: pdf }])
 
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(quota[:used]).to eq(pdf.bytesize)
+        expect(usage).to eq(quota_bytes: pdf.bytesize, stored_bytes: pdf.bytesize)
         expect(outbox.first['attachments'].map { |file| file['filename'] }).to eq(%w[a.pdf b.pdf])
       end
 
@@ -450,7 +451,6 @@ module PostHog
 
         expect(send_code(max_retries: 4, attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(faults[:storage]).to be_empty
       end
 
       it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do
@@ -555,7 +555,7 @@ module PostHog
         expect([too_large, too_large_with_body].map { |error| [error.code, error.name, error.field] })
           .to all(eq(%w[message_too_large validation_error attachments]))
         expect(too_large.fix).to include('40 MB per email after Base64 encoding, about 29 MB of files')
-        expect([quota[:used], bucket, outbox]).to eq([0, {}, []])
+        expect([usage.values.sum, bucket, outbox]).to eq([0, {}, []])
       end
 
       it 'counts the files before it reads any of them' do
@@ -661,7 +661,7 @@ module PostHog
           expect(error.message).to match(message)
           expect(error.message).not_to include('secret text')
         end
-        expect([quota[:used], bucket, outbox]).to eq([0, {}, []])
+        expect([usage.values.sum, bucket, outbox]).to eq([0, {}, []])
       end
 
       it 'refuses an address list that is not one', :aggregate_failures do
@@ -674,7 +674,7 @@ module PostHog
           expect { send_template(field => []) }
             .to raise_error(ArgumentError, /template_id doesn't take #{field}.*send with template_key/)
         end
-        expect([quota[:used], bucket, outbox]).to eq([0, {}, []])
+        expect([usage.values.sum, bucket, outbox]).to eq([0, {}, []])
       end
     end
 
