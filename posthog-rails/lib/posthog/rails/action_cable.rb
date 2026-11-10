@@ -7,7 +7,28 @@ require 'posthog/rails/request_metadata'
 module PostHog
   module Rails
     # @api private
+    class ActionCableExceptionContext < ExceptionContext
+      def initialize(request, connection)
+        super(request)
+        @connection = connection
+      end
+
+      private
+
+      def extract_current_user(controller)
+        return super if controller
+
+        method_name = PostHog::Rails.config&.current_user_method || :current_user
+        @connection.send(method_name) if @connection.respond_to?(method_name, true)
+      rescue StandardError
+        nil
+      end
+    end
+
+    # @api private
     class ActionCableCapture < CaptureExceptions
+      include ParameterFilter
+
       def initialize(connection, operation, channel: nil, data: nil)
         super(nil)
         @connection = connection
@@ -76,16 +97,7 @@ module PostHog
       end
 
       def extract_distinct_id(env)
-        super
-      rescue StandardError
-        nil
-      end
-
-      def extract_current_user(controller)
-        return super if controller
-
-        method_name = PostHog::Rails.config&.current_user_method || :current_user
-        @connection.send(method_name) if @connection.respond_to?(method_name, true)
+        ActionCableExceptionContext.new(ActionDispatch::Request.new(env), @connection).distinct_id
       rescue StandardError
         nil
       end
@@ -213,7 +225,7 @@ module PostHog
       end
     end
 
-    private_constant :ActionCableCapture, :ActionCableContext,
+    private_constant :ActionCableExceptionContext, :ActionCableCapture, :ActionCableContext,
                      :ActionCableConnectionExtensions, :ActionCableChannelExtensions,
                      :ActionCableDispatch, :ActionCableSubscriptionsExtensions
   end
