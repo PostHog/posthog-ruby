@@ -55,6 +55,7 @@ module PostHog
       # @api private
       def self.defer_capture?(error, distinct_id, properties)
         return false unless in_job?
+        return true if error.instance_variable_defined?(DEFERRED_REPORT_IVAR)
 
         context = Internal::Context.current
         # Sidekiq invokes its handlers after the job's tracing middleware unwinds.

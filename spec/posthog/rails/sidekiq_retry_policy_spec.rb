@@ -70,6 +70,25 @@ RSpec.describe 'Sidekiq retry reporting' do
     end)
   end
 
+  def setup_nested_active_jobs(&perform_inner)
+    context_class = PostHog.const_get(:Internal)::Context
+    PostHog::Rails.config.auto_instrument_active_job = true
+    inner_job = stub_failing_active_job('OriginatingPolicyJob')
+    inner_job.posthog_distinct_id -> { 'origin-user' }
+    inner_job.queue_as 'origin-queue'
+    inner_job.queue_with_priority 7
+    outer_job = stub_failing_active_job('OuterPolicyJob')
+    outer_job.posthog_distinct_id -> { 'outer-user' }
+    allow_any_instance_of(outer_job).to receive(:perform) do
+      context_class.with_context(session_id: 'origin-session', enrich_current_span: false) do
+        perform_inner ? perform_inner.call(inner_job) : inner_job.perform_now
+      end
+    end
+    allow_any_instance_of(RetryPolicyJob).to receive(:perform) do
+      context_class.with_context(session_id: 'outer-session', enrich_current_span: false) { outer_job.perform_now }
+    end
+  end
+
   def run_work(work, server_config = config)
     capsule = server_config.default_capsule
     result = Queue.new
@@ -397,6 +416,39 @@ RSpec.describe 'Sidekiq retry reporting' do
       expect(event[:distinct_id]).to eq('job-user')
       expect(event[:properties]).to include('$job_class' => 'InnerPolicyJob', '$session_id' => 'job-session')
     end
+
+    it "preserves originating nested Active Job metadata in #{policy} mode" do
+      setup_nested_active_jobs
+      enable_policy(policy)
+
+      process_retries
+
+      expect(client.queued_messages).to eq(policy == :all ? 3 : 1)
+      event = client.dequeue_last_message
+      expect(event[:distinct_id]).to eq('origin-user')
+      expect(event[:properties]).to include(
+        '$session_id' => 'origin-session', '$job_class' => 'OriginatingPolicyJob',
+        '$queue_name' => 'origin-queue', '$job_priority' => 7
+      )
+    end
+  end
+
+  it 'assigns a newly wrapped exception to its outer Active Job observer' do
+    setup_nested_active_jobs do |inner_job|
+      inner_job.perform_now
+    rescue RuntimeError => e
+      raise RuntimeError.new('job failed'), cause: e
+    end
+    enable_policy(:all)
+    job['retry'] = 0
+
+    process_failure
+
+    expect(client.queued_messages).to eq(1)
+    event = client.dequeue_last_message
+    expect(event[:distinct_id]).to eq('outer-user')
+    expect(event[:properties]).to include('$session_id' => 'outer-session', '$job_class' => 'OuterPolicyJob')
+    expect(event[:properties]['$exception_list'].size).to eq(2)
   end
 
   it 'keeps reporting ownership when Sidekiq handles another error while the job is running' do
@@ -432,6 +484,36 @@ RSpec.describe 'Sidekiq retry reporting' do
     after { @trace_provider&.shutdown }
 
     %i[all exhausted dead].each do |policy|
+      it "preserves originating nested Active Job spans in #{policy} mode" do
+        tracer = @trace_provider.tracer('nested-sidekiq-policy-spec')
+        origin_spans = []
+        middleware = Class.new do
+          define_method(:call) do |_worker, _job, _queue, &block|
+            tracer.in_span('outer-worker') { block.call }
+          end
+        end
+        config.server_middleware { |chain| chain.add(middleware) }
+        setup_nested_active_jobs do |inner_job|
+          tracer.in_span('origin-job') do |span|
+            origin_spans << span
+            inner_job.perform_now
+          end
+        end
+        enable_policy(policy)
+        job['retry'] = 0
+
+        process_failure
+
+        expect(client.queued_messages).to eq(1)
+        properties = client.dequeue_last_message[:properties]
+        expect(origin_spans.size).to eq(1)
+        span = origin_spans.first
+        expect(span.recording?).to be(false)
+        expect(properties.values_at('$trace_id', '$span_id')).to eq(
+          [span.context.hex_trace_id, span.context.hex_span_id]
+        )
+      end
+
       it "retains the ended job span IDs in #{policy} mode" do
         tracer = @trace_provider.tracer('sidekiq-policy-spec')
         spans = []
