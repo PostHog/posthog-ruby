@@ -70,6 +70,18 @@ PostHog::Rails.configure do |config|
   # Broadcast Rails.logger into PostHog Logs (default: true when logs enabled)
   # config.logs_forward_rails_logger = true
 
+  # Structured notification logs (default: []; requires logs_enabled).
+  # Select only installed components; this does not load optional Rails components.
+  # Set logs_forward_rails_logger = false to avoid also forwarding generic log lines.
+  # config.logs_notifications = [:action_controller, :active_record, :active_job, :action_mailer]
+  # SQL records are debug; other successful lifecycle events are info, failures error.
+  # Controller params and keyed job arguments respect Rails filter_parameters and
+  # are JSON strings in rails.params / rails.job.arguments (bounded to 10 KB).
+  # Custom filters see original key/value types; unsafe or oversized parameter
+  # trees are redacted as a whole, not truncated before filtering.
+  # Unkeyed job arguments are redacted. SQL text/binds, headers/cookies, mail
+  # recipients, subject and content are not collected by notification logging.
+
   # Minimum severity to forward; nil inherits Rails.logger's level (default: nil)
   # config.logs_level = :info
 
