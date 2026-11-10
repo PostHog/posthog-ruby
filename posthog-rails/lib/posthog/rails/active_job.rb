@@ -178,7 +178,6 @@ module PostHog
         config = PostHog::Rails.config
         return unless config&.auto_instrument_active_job && config.report_active_job_retries && exception
         return unless PostHog.initialized? && PostHog.client.enabled?
-        return if excluded_posthog_retry?(exception, config)
 
         Internal::Context.with_context(
           @posthog_execution_context || posthog_job_context, fresh: true, enrich_current_span: false
@@ -189,20 +188,9 @@ module PostHog
         PostHog::Logging.logger.error("Failed to capture job retry: #{e.class}")
       end
 
-      def excluded_posthog_retry?(exception, config)
-        seen = {}.compare_by_identity
-        current = exception
-        while current && seen.size < PostHog::ExceptionCapture::MAX_CHAINED_EXCEPTIONS && !seen.key?(current)
-          return true unless config.should_capture_exception?(current)
-
-          seen[current] = true
-          current = current.respond_to?(:cause) ? current.cause : nil
-        end
-        false
-      end
-
       def capture_job_exception(exception, retry_failure: false)
         return unless PostHog::Rails.config&.auto_instrument_active_job
+        return unless PostHog::Rails.config&.should_capture_exception?(exception)
 
         # Build distinct_id from job arguments if possible
         distinct_id = if @posthog_execution_context

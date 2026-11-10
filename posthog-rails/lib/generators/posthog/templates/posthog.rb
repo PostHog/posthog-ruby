@@ -49,7 +49,8 @@ PostHog::Rails.configure do |config|
   # config.current_user_resolver = proc { |controller| controller.current_user }
 
   # Additional exception classes to exclude from reporting
-  # These are added to the default excluded exceptions
+  # These are added to the default excluded exceptions. Subclasses of a listed
+  # class are excluded too, and so is any exception whose cause chain contains one.
   # config.excluded_exceptions = [
   #   # 'MyCustom404Error',
   #   # 'MyCustomValidationError'

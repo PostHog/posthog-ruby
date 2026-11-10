@@ -4,6 +4,8 @@
 # Copyright (c) 2020 Sentry
 # Licensed under the MIT License: https://github.com/getsentry/sentry-ruby/blob/master/LICENSE
 
+require 'posthog/exception_capture'
+
 module PostHog
   module Rails
     class Configuration
@@ -23,7 +25,8 @@ module PostHog
       #   Defaults to false.
       attr_accessor :report_active_job_retries
 
-      # @return [Array<String>] Exception class names to ignore in addition to the defaults.
+      # @return [Array<String>] Exception class names to ignore in addition to the defaults. Subclasses are
+      #   ignored too, and so is any exception whose cause chain contains a listed class.
       attr_accessor :excluded_exceptions
 
       # @return [Boolean] Whether to use PostHog tracing headers for request-scoped identity/session context.
@@ -117,14 +120,25 @@ module PostHog
       # @param exception [Exception] The exception to check.
       # @return [Boolean] Whether the exception should be captured.
       def should_capture_exception?(exception)
-        exception_name = exception.class.name
-        !all_excluded_exceptions.include?(exception_name)
+        excluded = all_excluded_exceptions
+        exception_chain(exception).none? do |error|
+          error.class.ancestors.any? { |ancestor| excluded.include?(ancestor.name) }
+        end
       end
 
       private
 
       def all_excluded_exceptions
         default_excluded_exceptions + excluded_exceptions
+      end
+
+      def exception_chain(exception)
+        chain = []
+        while exception.is_a?(Exception) && chain.size < ExceptionCapture::MAX_CHAINED_EXCEPTIONS
+          chain << exception
+          exception = exception.cause
+        end
+        chain
       end
     end
   end
