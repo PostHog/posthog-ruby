@@ -3,6 +3,7 @@ const { join } = require('node:path');
 
 const unsuccessful = new Set(['failure', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale']);
 const publishJob = 'Release and publish';
+const gems = ['posthog-ruby', 'posthog-rails'];
 
 const isJob = (job, name) => job.name === name || job.name.startsWith(`${name} (`);
 
@@ -66,6 +67,15 @@ module.exports = async function releaseFailureNotification({ github, context, ch
     const gemsPublished = publishJobs.length > 0 && publishJobs.every(job => job.conclusion === 'success');
     const releasedNotification = jobs.find(job => job.name === 'Notify Slack - Released');
     const problems = failedJobs.map(job => `• <${job.html_url}|${job.name}>: ${job.conclusion}`);
+
+    const publishedGems = publishJobs
+        .filter(job => job.conclusion === 'success')
+        .map(job => /\((.*)\)$/.exec(job.name)?.[1])
+        .filter(gem => gems.includes(gem));
+    if (!gemsPublished && publishedGems.length > 0) {
+        problems.push(`• Published: ${publishedGems.join(', ')}`);
+        problems.push(`• Not published: ${gems.filter(gem => !publishedGems.includes(gem)).join(', ')}`);
+    }
 
     if (run.conclusion !== 'success' && failedJobs.length === 0 && publishJobs.length === 0) {
         problems.push(`• ${publishJob}: never ran`);
