@@ -22,6 +22,7 @@ module PostHog
 
         runner_report = !handled && source == 'application.runner.railties'
         return unless runner_report || PostHog::Rails.config&.should_capture_exception?(error)
+        return if defined?(PostHog::Rails::Sidekiq) && Sidekiq.suppress_rails_report?(error, source)
 
         if defined?(::Sidekiq::JobRetry::Handled) && error.is_a?(::Sidekiq::JobRetry::Handled)
           error = error.cause || error

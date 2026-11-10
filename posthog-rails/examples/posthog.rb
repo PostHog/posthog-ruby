@@ -188,6 +188,15 @@ PostHog.init do |config|
 end
 
 # ============================================================================
+# OPTIONAL SIDEKIQ INTEGRATION (Rails 7.1+, Sidekiq 7.0.3+)
+# ============================================================================
+# Install explicitly to report only terminal job failures. Other policies: :all, :dead.
+# require 'posthog/rails/sidekiq'
+# Sidekiq.configure_server do |config|
+#   PostHog::Rails::Sidekiq.install(config, error_reporting: :exhausted)
+# end
+
+# ============================================================================
 # DEFAULT EXCLUDED EXCEPTIONS
 # ============================================================================
 # The following exceptions are excluded by default:
