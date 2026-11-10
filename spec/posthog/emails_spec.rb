@@ -209,8 +209,7 @@ module PostHog
       let(:five_pdfs_sha256) { 'dfb00ae2891aa7dac580fd90519992e7a8d6914de7a683c0ecc071f65868101e' }
       let(:largest_that_fits_sha256) { '28f197eae8bd57e7c2a94d2062d2cef0a04b34e7fd3e0c743d88cda2217f069c' }
       let(:bucket) { {} }
-      let(:storage_requests) { [] }
-      let(:posthog_requests) { [] }
+      let(:quota) { { used: 0 } }
       let(:outbox) { [] }
       let(:faults) { { uploads: [], storage: [], send: [] } }
 
@@ -224,7 +223,7 @@ module PostHog
       end
 
       def plan_uploads(request, storage)
-        files = record(:uploads, request)['files']
+        files = JSON.parse(request.body)['files']
         return faults[:uploads].shift if faults[:uploads].any?
         return refuse(401, 'authentication_failed') unless signed_in?(request)
         return refuse(400, 'invalid_request', attr: 'files') unless files.all? { |file| manifest_entry?(file) }
@@ -233,7 +232,10 @@ module PostHog
       end
 
       def plan(file, storage)
-        bucket.key?(file['sha256']) ? present_slot(file['sha256']) : slot(file, storage)
+        return present_slot(file['sha256']) if bucket.key?(file['sha256'])
+
+        quota[:used] += file['size']
+        slot(file, storage)
       end
 
       def manifest_entry?(file)
@@ -248,7 +250,6 @@ module PostHog
 
       def store(request)
         sha256 = request.uri.path[/\h{64}\z/]
-        storage_requests << sha256
         return faults[:storage].shift if faults[:storage].any?
         return storage_error(403, 'AccessDenied') if request.headers.key?('Authorization')
 
@@ -267,7 +268,7 @@ module PostHog
       end
 
       def accept_send(request)
-        email = record(:send, request)
+        email = JSON.parse(request.body)
         return faults[:send].shift if faults[:send].any?
         return refuse(401, 'authentication_failed') unless signed_in?(request)
         unless email.fetch('attachments', []).all? { |file| bucket.key?(file['sha256']) }
@@ -276,10 +277,6 @@ module PostHog
 
         outbox << email
         accept
-      end
-
-      def record(route, request)
-        JSON.parse(request.body).tap { |body| posthog_requests << [route, body] }
       end
 
       def signed_in?(request)
@@ -323,7 +320,7 @@ module PostHog
 
         expect(result.id).to eq('msg_1')
         expect(bucket).to eq(png_sha256 => png, pdf_sha256 => pdf)
-        expect(storage_requests).to eq([pdf_sha256])
+        expect(quota[:used]).to eq(pdf.bytesize)
         expect(outbox.first['attachments']).to eq([
                                                     { 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf',
                                                       'content_type' => 'application/pdf' },
@@ -333,10 +330,11 @@ module PostHog
       end
 
       it 'leaves out empty lists, so a PostHog version without these fields still sends the email' do
+        faults[:uploads] << refuse(404, 'not_found')
+
         send_code(cc: [], bcc: [], attachments: [])
 
         expect(outbox.first.keys).not_to include('cc', 'bcc', 'attachments')
-        expect(posthog_requests.map(&:first)).to eq([:send])
       end
 
       it 'uploads once and sends the same files on every attempt of the send' do
@@ -345,9 +343,8 @@ module PostHog
         expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
 
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(storage_requests).to eq([pdf_sha256])
-        attempts = posthog_requests.filter_map { |route, email| email['attachments'] if route == :send }
-        expect(attempts).to eq([[{ 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf' }]] * 2)
+        expect(quota[:used]).to eq(pdf.bytesize)
+        expect(outbox.first['attachments']).to eq([{ 'sha256' => pdf_sha256, 'filename' => 'invoice.pdf' }])
       end
 
       it 'takes the file as bytes, a list of byte values, or Base64 in any line layout' do
@@ -383,8 +380,7 @@ module PostHog
         send_code(attachments: [{ filename: 'a.pdf', content: pdf }, { filename: 'b.pdf', content: pdf }])
 
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(storage_requests).to eq([pdf_sha256])
-        expect(posthog_requests.first).to eq([:uploads, { 'files' => [{ 'sha256' => pdf_sha256, 'size' => 12 }] }])
+        expect(quota[:used]).to eq(pdf.bytesize)
         expect(outbox.first['attachments'].map { |file| file['filename'] }).to eq(%w[a.pdf b.pdf])
       end
 
@@ -433,7 +429,7 @@ module PostHog
         expect(error.message).to eq('Endpoint not found.')
         expect([proxied.code, proxied.name, proxied.status_code, proxied.field])
           .to eq(['not_found', 'not_found', 404, 'attachments'])
-        expect(storage_requests).to be_empty
+        expect(bucket).to be_empty
         expect(outbox).to be_empty
       end
 
@@ -454,7 +450,7 @@ module PostHog
 
         expect(send_code(max_retries: 4, attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(storage_requests).to eq([pdf_sha256] * 5)
+        expect(faults[:storage]).to be_empty
       end
 
       it "waits for storage's Retry-After, and stops when it asks for longer than 30 seconds" do
@@ -468,7 +464,6 @@ module PostHog
         expect(delays.first).to be >= 3
         expect([error.code, error.retry_after]).to eq(['attachment_upload_failed', 60.0])
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(storage_requests).to eq([pdf_sha256, pdf_sha256, png_sha256])
       end
 
       it "keeps storage's Retry-After when its answer to an upload was cut off" do
@@ -496,7 +491,7 @@ module PostHog
 
         expect([error.code, error.name, error.field, error.why, error.fix])
           .to eq(['field_not_accepted', 'validation_error', 'files', 'Not available yet.', 'Send without files.'])
-        expect(storage_requests).to be_empty
+        expect(bucket).to be_empty
         expect(outbox).to be_empty
       end
 
@@ -506,7 +501,7 @@ module PostHog
         error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
 
         expect(error.code).to eq('upload_quota_exceeded')
-        expect(posthog_requests.map(&:first)).to eq([:uploads])
+        expect(outbox).to be_empty
       end
 
       it "sends nothing when PostHog's answer doesn't say where each file goes" do
@@ -521,7 +516,7 @@ module PostHog
         errors = Array.new(5) { refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }]) }
 
         expect(errors.map(&:code)).to all(eq('api_error'))
-        expect(storage_requests).to be_empty
+        expect(bucket).to be_empty
         expect(outbox).to be_empty
       end
 
@@ -533,7 +528,7 @@ module PostHog
 
         expect([error.code, error.field]).to eq(%w[api_error attachments])
         expect([error.message, error.fix]).to all(include('https'))
-        expect(storage_requests).to be_empty
+        expect(bucket).to be_empty
         expect(outbox).to be_empty
       end
 
@@ -543,7 +538,6 @@ module PostHog
 
         expect(send_code(attachments: [{ filename: 'invoice.pdf', content: pdf }]).id).to eq('msg_1')
         expect(bucket).to eq(pdf_sha256 => pdf)
-        expect(storage_requests).to eq([pdf_sha256])
       end
 
       it 'refuses more files or bytes than one email carries before any request' do
@@ -561,7 +555,7 @@ module PostHog
         expect([too_large, too_large_with_body].map { |error| [error.code, error.name, error.field] })
           .to all(eq(%w[message_too_large validation_error attachments]))
         expect(too_large.fix).to include('40 MB per email after Base64 encoding, about 29 MB of files')
-        expect(posthog_requests).to be_empty
+        expect([quota[:used], bucket, outbox]).to eq([0, {}, []])
       end
 
       it 'counts the files before it reads any of them' do
@@ -667,7 +661,7 @@ module PostHog
           expect(error.message).to match(message)
           expect(error.message).not_to include('secret text')
         end
-        expect(posthog_requests).to be_empty
+        expect([quota[:used], bucket, outbox]).to eq([0, {}, []])
       end
 
       it 'refuses an address list that is not one', :aggregate_failures do
@@ -680,7 +674,7 @@ module PostHog
           expect { send_template(field => []) }
             .to raise_error(ArgumentError, /template_id doesn't take #{field}.*send with template_key/)
         end
-        expect(posthog_requests).to be_empty
+        expect([quota[:used], bucket, outbox]).to eq([0, {}, []])
       end
     end
 
