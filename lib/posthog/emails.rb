@@ -99,7 +99,8 @@ module PostHog
     # @!attribute [r] name
     #   @return [String] The name recipients see in their email preferences.
     # @!attribute [r] description
-    #   @return [String, nil] What the category's emails are about.
+    #   @return [String, nil] What the category's emails are about. Leave it nil to keep the stored description, or
+    #     set it to "" to clear it.
     MessageCategory = Struct.new(:key, :type, :name, :description, keyword_init: true)
 
     SEND_PATH = '/api/projects/@current/messaging/send/email/'

@@ -36,6 +36,25 @@ module PostHog
       bodies
     end
 
+    # Answers sends like PostHog's endpoint does for categories, and returns the categories it holds by key. A category
+    # object upserts by key: a missing description keeps the stored one and "" clears it. A marketing send needs an
+    # unsubscribe link.
+    def serve_categories
+      categories = {}
+      stub_request(:post, send_url).to_return do |request|
+        body = JSON.parse(request.body)
+        category = body['category']
+        if category.is_a?(Hash)
+          unsubscribable = "#{body['html']}#{body['text']}".include?('{{ unsubscribe_url }}')
+          next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
+
+          (categories[category['key']] ||= {}).merge!(category)
+        end
+        accept
+      end
+      categories
+    end
+
     # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. WebMock
     # is off meanwhile: its Net::HTTP wrapper reads the whole body before it hands over the response.
     def serve(*responses, tls: nil)
@@ -184,23 +203,23 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'capture_engagement', 'to')
       end
 
-      it 'sends the category it defines, and a description only when it has one' do
-        stub_request(:post, send_url).to_return(accept)
+      it 'defines the categories it names, and keeps a description unless the send sets one, even to ""' do
+        categories = serve_categories
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
 
-        marketing_html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        send_code(category: Emails::MessageCategory.new(key: 'newsletter', type: 'marketing', name: 'Newsletter'),
-                  html: marketing_html)
-        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts',
-                                                        description: 'Order receipts'))
+        send_code(category: Emails::MessageCategory.new(**newsletter, description: 'Monthly product news'), html: html)
+        send_code(category: Emails::MessageCategory.new(**newsletter), html: html)
+        expect(categories['newsletter']).to include('description' => 'Monthly product news')
+
+        result = send_code(category: Emails::MessageCategory.new(**newsletter, description: ''), html: html)
+        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts'))
         send_code(category: Emails::TRANSACTIONAL)
 
-        expect(sent_bodies.first['html']).to eq(marketing_html)
-        expect(sent_bodies.map { |body| body['category'] }).to eq(
-          [
-            { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' },
-            { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts', 'description' => 'Order receipts' },
-            'transactional'
-          ]
+        expect(result.id).to eq('msg_1')
+        expect(categories).to eq(
+          'newsletter' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter', 'description' => '' },
+          'receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' }
         )
       end
 
