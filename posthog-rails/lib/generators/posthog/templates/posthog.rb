@@ -10,7 +10,8 @@
 # These settings control how PostHog integrates with Rails features.
 
 PostHog::Rails.configure do |config|
-  # Automatically capture exceptions (default: false)
+  # Automatically capture exceptions, including terminating rails runner failures (default: false)
+  # Successful runner exits are ignored; failures are captured before SDK shutdown
   # Includes Action Cable connect/disconnect, channel subscribe/unsubscribe, and channel actions.
   # config.auto_capture_exceptions = true
 
