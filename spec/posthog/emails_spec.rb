@@ -441,23 +441,19 @@ module PostHog
         expect(a_request(:post, send_url)).to have_been_made.once
       end
 
-      [
-        [503, 'delivery_unavailable', 2],
-        [429, 'throttled', 2],
-        [409, 'idempotency_key_in_flight', 2],
-        [429, 'quota_limited', 1],
-        [422, 'recipient_suppressed', 1],
-        [422, 'recipient_opted_out', 1]
-      ].each do |status, code, attempts|
-        it "makes #{attempts} attempts for a #{status} #{code}" do
+      [[503, 'delivery_unavailable'], [429, 'throttled'], [409, 'idempotency_key_in_flight']].each do |status, code|
+        it "retries a #{status} #{code} and sends the email" do
           stub_request(:post, send_url).to_return(refuse(status, code), accept)
 
-          if attempts == 1
-            expect { send_template }.to raise_error(EmailError) { |error| expect(error.code).to eq(code) }
-          else
-            expect(send_template.id).to eq('msg_1')
-          end
-          expect(a_request(:post, send_url)).to have_been_made.times(attempts)
+          expect(send_template.id).to eq('msg_1')
+        end
+      end
+
+      [[429, 'quota_limited'], [422, 'recipient_suppressed'], [422, 'recipient_opted_out']].each do |status, code|
+        it "raises a #{status} #{code} without retrying it" do
+          stub_request(:post, send_url).to_return(refuse(status, code), accept)
+
+          expect { send_template }.to raise_error(EmailError) { |error| expect(error.code).to eq(code) }
         end
       end
 
