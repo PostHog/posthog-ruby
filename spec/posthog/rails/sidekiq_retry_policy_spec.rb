@@ -61,6 +61,15 @@ RSpec.describe 'Sidekiq retry reporting' do
     PostHog::Rails::Sidekiq.install(config, error_reporting: policy)
   end
 
+  def stub_failing_active_job(name, message = 'job failed')
+    stub_const(name, Class.new(ActiveJob::Base) do
+      prepend PostHog::Rails::ActiveJobExtensions
+
+      self.logger = Logger.new(File::NULL)
+      define_method(:perform) { raise message }
+    end)
+  end
+
   def run_work(work, server_config = config)
     capsule = server_config.default_capsule
     result = Queue.new
@@ -211,6 +220,47 @@ RSpec.describe 'Sidekiq retry reporting' do
     expect(client.queued_messages).to eq(0)
     expect(stored_jobs['retry']).to be_empty
     expect(stored_jobs['dead']).to be_empty
+  end
+
+  [false, true].each do |installed|
+    it "preserves unrelated Active Job capture after an inline failure with policy installed=#{installed}" do
+      previous_scope = Thread.current[:posthog_sidekiq_job]
+      enable_policy(:all) if installed
+      allow(config).to receive(:redis_pool).and_return(Object.new)
+
+      expect { RetryPolicyJob.perform_inline }.to raise_error('job failed')
+      expect(client.queued_messages).to eq(0)
+
+      PostHog::Rails.config.auto_instrument_active_job = true
+      followup_job = stub_failing_active_job('FollowupInlineJob', 'later AJ failed')
+
+      expect { followup_job.perform_now }.to raise_error('later AJ failed')
+
+      expect(client.queued_messages).to eq(1)
+      expect(client.dequeue_last_message[:properties]['$job_class']).to eq('FollowupInlineJob')
+      expect(PostHog::Rails::Sidekiq.in_job?).to be_falsey
+    ensure
+      Thread.current[:posthog_sidekiq_job] = previous_scope
+    end
+  end
+
+  it 'releases ownership when an outer middleware consumes the job failure' do
+    enable_policy(:all)
+    consuming_middleware = Class.new do
+      def call(_worker, _job, _queue)
+        yield
+      rescue RuntimeError
+        :handled
+      end
+    end
+    config.server_middleware { |chain| chain.prepend(consuming_middleware) }
+    work = Sidekiq::BasicFetch::UnitOfWork.new('queue:default', Sidekiq.dump_json(job), config)
+    allow(work).to receive(:acknowledge)
+
+    expect(run_work(work)).to be_nil
+
+    expect(work).to have_received(:acknowledge).once
+    expect(client.queued_messages).to eq(0)
   end
 
   it 'reports every failed attempt once in all mode' do

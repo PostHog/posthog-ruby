@@ -10,7 +10,7 @@ module PostHog
       JOB_SCOPE_KEY = :posthog_sidekiq_job
       INSTALLATION_IVAR = :@posthog_sidekiq_integration
       DEFERRED_REPORT_IVAR = :@posthog_sidekiq_report
-      Scope = Struct.new(:installation, :previous, :failed)
+      Scope = Struct.new(:installation, :previous)
 
       # Install job error reporting on a Sidekiq server configuration.
       # @param config [::Sidekiq::Config]
@@ -87,15 +87,11 @@ module PostHog
         end
 
         def with_job
-          scope = Scope.new(self, Thread.current[JOB_SCOPE_KEY], false)
+          scope = Scope.new(self, Thread.current[JOB_SCOPE_KEY])
           Thread.current[JOB_SCOPE_KEY] = scope
           yield
-        rescue StandardError => e
-          # The Rails reporter runs after middleware unwinds. Release this scope in the error handler instead.
-          scope.failed = !(defined?(::Sidekiq::JobRetry::Skip) && e.is_a?(::Sidekiq::JobRetry::Skip))
-          raise
         ensure
-          Thread.current[JOB_SCOPE_KEY] = scope.previous unless scope.failed
+          Thread.current[JOB_SCOPE_KEY] = scope.previous
         end
 
         def report_error(error, context, _config = nil)
@@ -103,9 +99,6 @@ module PostHog
           return unless context[:job].is_a?(Hash)
 
           capture(error, 'sidekiq.error_handler')
-        ensure
-          scope = Thread.current[JOB_SCOPE_KEY]
-          Thread.current[JOB_SCOPE_KEY] = scope.previous if scope&.failed && scope.installation.equal?(self)
         end
 
         def report_death(job, error)
