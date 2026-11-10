@@ -412,6 +412,28 @@ module PostHog
         expect(outbox).to be_empty
       end
 
+      it 'never follows storage redirecting an upload elsewhere, and names the file but not the URL' do
+        elsewhere = {}
+        stub_request(:put, %r{\Ahttp://elsewhere\.test/}).to_return do |request|
+          elsewhere[request.uri.to_s] = request.body
+          { status: 200 }
+        end
+        faults[:storage] << {
+          status: 307, headers: { 'Location' => "http://elsewhere.test/stolen/#{pdf_sha256}" },
+          body: '<Error><Code>TemporaryRedirect</Code><Message>Please re-send this request to the specified ' \
+                'temporary endpoint.</Message><Endpoint>elsewhere.test</Endpoint></Error>'
+        }
+
+        error = refused_attachment(attachments: [{ filename: 'invoice.pdf', content: pdf }])
+
+        expect([error.code, error.field, error.status_code]).to eq(['attachment_upload_failed', 'attachments__0', 307])
+        expect(error.message).to include('invoice.pdf')
+        expect([error.message, error.why, error.fix].join).not_to include('elsewhere.test')
+        expect(elsewhere).to be_empty
+        expect(bucket).to be_empty
+        expect(outbox).to be_empty
+      end
+
       it "names a refused upload by storage's failure, never by PostHog's categories" do
         faults[:storage].push({ status: 403, body: '<Error><Code>AccessDenied</Code></Error>' }, { status: 401 },
                               { status: 503, body: '<Error><Code>SlowDown</Code></Error>' })
