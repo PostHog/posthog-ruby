@@ -1,5 +1,12 @@
 # posthog-rails
 
+## 3.26.1
+
+### Patch Changes
+
+- Updated dependencies [1e29b54]
+  - posthog-ruby@3.32.2
+
 ## 3.26.0
 
 ### Minor Changes
