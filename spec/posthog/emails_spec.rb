@@ -142,6 +142,8 @@ module PostHog
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
         expect { send_template(tracking: false) }
           .to raise_error(ArgumentError, /template_id doesn't take tracking/)
+        expect { send_template(sensitive: true) }
+          .to raise_error(ArgumentError, /template_id doesn't take sensitive/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
     end
@@ -188,6 +190,16 @@ module PostHog
 
           expect(sent_bodies.first).to include('tracking' => sent)
           expect(sent_bodies.first).not_to have_key('capture_engagement')
+        end
+      end
+
+      [true, false].each do |sensitive|
+        it "sends sensitive: #{sensitive} next to the tracking the caller set" do
+          stub_request(:post, send_url).to_return(accept)
+
+          send_code(sensitive: sensitive, tracking: { clicks: false })
+
+          expect(sent_bodies.first).to include('sensitive' => sensitive, 'tracking' => { 'clicks' => false })
         end
       end
 
@@ -238,6 +250,7 @@ module PostHog
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
         expect { send_code(capture_engagement: 'no') }.to raise_error(ArgumentError, /capture_engagement/)
+        expect { send_code(sensitive: 'yes') }.to raise_error(ArgumentError, /sensitive must be true or false/)
         expect { send_code(tracking: 'no') }.to raise_error(ArgumentError, /tracking must be/)
         expect { send_code(tracking: { clicks: 'yes' }) }.to raise_error(ArgumentError, /tracking\[:clicks\]/)
         expect { send_code(reply_to: [1]) }.to raise_error(ArgumentError, /reply_to/)
