@@ -2,6 +2,6 @@
 
 module PostHog
   module Rails
-    VERSION = '3.26.1'
+    VERSION = '3.26.2'
   end
 end
