@@ -13,8 +13,8 @@ require 'posthog/logging'
 require 'posthog/utils'
 
 module PostHog
-  # Sends transactional email, from an email template made in PostHog or from content your code rendered,
-  # and reads the status of each email sent. Reach it through {Client#emails}.
+  # Sends transactional email from an email template made in PostHog, and transactional or marketing email from
+  # content your code rendered. It also reads the status of each email sent. Reach it through {Client#emails}.
   #
   # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the
   # `transactional_email:write` scope: the "Send transactional email" preset in your project settings. A key with
@@ -43,6 +43,18 @@ module PostHog
   #     html: rendered_html,
   #     distinct_id: 'user_123'
   #   )
+  #
+  # @example A marketing email in one of the project's message categories
+  #   posthog.emails.send(
+  #     to: 'user@example.com',
+  #     template_key: 'monthly-digest',
+  #     subject: 'Your monthly digest',
+  #     html: rendered_html, # links to {{ unsubscribe_url }}
+  #     category: PostHog::Emails::MessageCategory.new(
+  #       key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly product news'
+  #     ),
+  #     distinct_id: 'user_123'
+  #   )
   class Emails
     include PostHog::Logging
     include PostHog::Utils
@@ -66,9 +78,33 @@ module PostHog
     #   @return [String] `queued`, `sent`, `failed`, `delivered`, `bounced` or `complained`. Later SDK versions
     #     can see values this list does not have yet.
     # @!attribute [r] reason
-    #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed`, or the bounce type
+    #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed` or
+    #     `recipient_opted_out`, or the bounce type
     #     of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
+
+    # The built-in `category` of {#send}: a transactional email with no category. Unlike leaving `category` out, it
+    # doesn't follow the category of the template that `template_key` names, so PostHog refuses it for a template in a
+    # category.
+    TRANSACTIONAL = 'transactional'
+
+    # A message category that a send defines in code. PostHog creates the category the first time a send names its
+    # key, or restores it if it was deleted, and otherwise leaves it unchanged. Its name and description apply only
+    # when the send creates the category; change them later in PostHog. Recipients opt in to and out of it in their
+    # email preferences.
+    #
+    # @!attribute [r] key
+    #   @return [String] The category's key, such as `newsletter`. It names the category in the opt-out and
+    #     preferences APIs.
+    # @!attribute [r] type
+    #   @return [String] `marketing` or `transactional`. It must match the type of an existing category with the
+    #     same key.
+    # @!attribute [r] name
+    #   @return [String] The name recipients see in their email preferences, used only when the send creates the
+    #     category.
+    # @!attribute [r] description
+    #   @return [String, nil] What the category's emails are about, used only when the send creates the category.
+    MessageCategory = Struct.new(:key, :type, :name, :description, keyword_init: true)
 
     SEND_PATH = '/api/projects/@current/messaging/send/email/'
     STATUS_PATH = '/api/projects/@current/messaging/emails/%<message_id>s/'
@@ -90,11 +126,12 @@ module PostHog
                       'transactional_email:write scope.'
     READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the ' \
                       'transactional_email:read or transactional_email:write scope.'
-    TEMPLATE_FORM_WHY = 'A template made in PostHog sets its own sender, subject and content, and follows the ' \
-                        "project's engagement setting."
+    TEMPLATE_FORM_WHY = 'A template made in PostHog sets its own sender, subject, content and category, and ' \
+                        "follows the project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'
     TEMPLATE_FIELDS = %i[template_data].freeze
-    CODE_FIELDS = %i[subject html text from reply_to capture_engagement].freeze
+    CODE_FIELDS = %i[subject html text from reply_to capture_engagement category].freeze
+    CATEGORY_TYPES = [TRANSACTIONAL, 'marketing'].freeze
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
@@ -102,7 +139,7 @@ module PostHog
     private_constant :SEND_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
                      :HEADER_TOKEN_PATTERN, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY,
-                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :NETWORK_ERRORS
+                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :CATEGORY_TYPES, :NETWORK_ERRORS
 
     # @api private
     def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:,
@@ -142,6 +179,15 @@ module PostHog
     # @param reply_to [String, Array<String>] Code form: one address or a list of addresses.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
     #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
+    # @param category [String, MessageCategory] Code form: {TRANSACTIONAL} for a transactional email with no category,
+    #   or the {MessageCategory} the email belongs to. Left out, the email follows the category of the template that
+    #   `template_key` names, or is transactional with no category. A marketing email skips recipients who opted out of
+    #   its category or of all marketing, can't have copies, and needs a `{{ unsubscribe_url }}` link in its `html`, or
+    #   in its `text` when it has no `html`. PostHog refuses a send with `category_mismatch` when the type differs from
+    #   the existing category's, or when `template_key` names a template in another category, {TRANSACTIONAL} for a
+    #   template in a category included; `marketing_template` when `template_key` names a template in a marketing
+    #   category, because a template made in PostHog is transactional; `too_many_categories` when the project can't
+    #   take another category; `unsubscribe_link_required`; `copies_not_allowed`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -155,11 +201,11 @@ module PostHog
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
-      reply_to: nil, capture_engagement: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
+      reply_to: nil, capture_engagement: nil, category: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
-        capture_engagement: capture_engagement
+        capture_engagement: capture_engagement, category: category
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
@@ -312,6 +358,7 @@ module PostHog
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(fields[:reply_to]) if fields.key?(:reply_to)
       code[:capture_engagement] = fields.fetch(:capture_engagement, true)
+      code[:category] = category_payload(fields[:category]) if fields.key?(:category)
       code
     end
 
@@ -328,6 +375,28 @@ module PostHog
       return list if list.is_a?(Array) && list.all? { |address| nonempty_string?(address) }
 
       raise ArgumentError, 'reply_to must be one address or a list of addresses.'
+    end
+
+    def category_payload(category)
+      return category if category == TRANSACTIONAL
+      unless category.is_a?(MessageCategory)
+        raise ArgumentError, 'category must be PostHog::Emails::TRANSACTIONAL or a PostHog::Emails::MessageCategory.'
+      end
+
+      check_category_fields(category)
+      category.to_h.compact
+    end
+
+    def check_category_fields(category)
+      raise ArgumentError, 'category key and name must be strings.' unless [category.key, category.name].all?(String)
+      raise ArgumentError, "category type must be 'marketing' or 'transactional'." unless category_type?(category.type)
+      return if category.description.nil? || category.description.is_a?(String)
+
+      raise ArgumentError, 'category description must be a string.'
+    end
+
+    def category_type?(value)
+      CATEGORY_TYPES.include?(value)
     end
 
     def call(nothing_done, key_needed)

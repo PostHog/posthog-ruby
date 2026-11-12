@@ -36,6 +36,36 @@ module PostHog
       bodies
     end
 
+    def serve_categories(categories = {}, templates: {})
+      filed = []
+      stub_request(:post, send_url).to_return do |request|
+        body = JSON.parse(request.body)
+        category = body['category']
+        next refuse(400, 'invalid_input') unless [nil, 'transactional'].include?(category) || category.is_a?(Hash)
+
+        if templates.key?(body['template_key'])
+          stored = categories[templates[body['template_key']]]
+          next refuse(400, 'marketing_template') if stored&.fetch('type') == 'marketing'
+
+          named = category.is_a?(Hash) ? category.slice('key', 'type') : category
+          followed = stored&.slice('key', 'type') || 'transactional'
+          next refuse(400, 'category_mismatch') unless category.nil? || named == followed
+
+          category = stored
+        end
+        if category.is_a?(Hash)
+          content = body['html'].to_s.empty? ? body['text'] : body['html']
+          unsubscribable = content.to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
+          next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
+
+          categories[category['key']] ||= category
+        end
+        filed << (category['key'] if category.is_a?(Hash))
+        accept
+      end
+      [categories, filed]
+    end
+
     # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. WebMock
     # is off meanwhile: its Net::HTTP wrapper reads the whole body before it hands over the response.
     def serve(*responses, tls: nil)
@@ -140,6 +170,9 @@ module PostHog
       it 'refuses code content, because the template sets its own' do
         expect { send_template(subject: 'Hi') }
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
+        expect { send_template(category: Emails::TRANSACTIONAL) }
+          .to raise_error(ArgumentError,
+                          /template_id doesn't take category.*its own sender, subject, content and category/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
     end
@@ -181,6 +214,66 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'capture_engagement', 'to')
       end
 
+      it 'creates a category the first time a send names it, and leaves it unchanged on later sends' do
+        categories, = serve_categories
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        newsletter = { key: 'newsletter', type: 'marketing' }
+
+        send_code(category: Emails::MessageCategory.new(**newsletter, name: 'Newsletter',
+                                                                      description: 'Monthly product news'), html: html)
+        result = send_code(category: Emails::MessageCategory.new(**newsletter, name: 'Weekly news',
+                                                                               description: 'Weekly'), html: html)
+
+        expect(result.id).to eq('msg_1')
+        expect(categories).to eq(
+          'newsletter' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter',
+                            'description' => 'Monthly product news' }
+        )
+      end
+
+      it 'files a send under the transactional category it names, and TRANSACTIONAL under none' do
+        categories, filed = serve_categories
+
+        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts'))
+        send_code(category: Emails::TRANSACTIONAL)
+
+        expect(filed).to eq(['receipts', nil])
+        expect(categories).to eq('receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' })
+      end
+
+      context 'with a template_key that names a template in a transactional category' do
+        let(:receipts) { { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' } }
+
+        it "files the email under the template's category when the send leaves category out" do
+          _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
+
+          send_code(template_key: 'order-receipt')
+
+          expect(filed).to eq(['receipts'])
+        end
+
+        it 'refuses TRANSACTIONAL with category_mismatch' do
+          _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
+
+          expect { send_code(template_key: 'order-receipt', category: Emails::TRANSACTIONAL) }
+            .to raise_error(EmailError) do |error|
+              expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
+            end
+          expect(filed).to be_empty
+        end
+      end
+
+      it 'refuses a template_key that names a template in a marketing category with marketing_template' do
+        newsletter = { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' }
+        _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
+
+        expect { send_code(template_key: 'november-digest', html: '<a href="{{ unsubscribe_url }}">Unsubscribe</a>') }
+          .to raise_error(EmailError) do |error|
+            expect([error.code, error.name]).to eq(%w[marketing_template validation_error])
+          end
+        expect(filed).to be_empty
+      end
+
       it 'refuses template_data, because local templates are not supported' do
         expect { send_code(template_data: { name: 'Ada' }) }
           .to raise_error(ArgumentError, /template_key doesn't take template_data/)
@@ -208,6 +301,16 @@ module PostHog
         expect { send_template(template_id: 'welcome') }.to raise_error(ArgumentError, /template's UUID/)
         expect { send_template(to: ' ') }.to raise_error(ArgumentError, /to must be/)
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
+        newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
+        [
+          'newsletter', newsletter,
+          Emails::MessageCategory.new(**newsletter, key: :newsletter),
+          Emails::MessageCategory.new(**newsletter, type: 'promotional'),
+          Emails::MessageCategory.new(**newsletter, name: nil),
+          Emails::MessageCategory.new(**newsletter, description: 1)
+        ].each do |category|
+          expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
+        end
         expect { send_template(idempotency_key: 'has space') }.to raise_error(ArgumentError, /idempotency_key/)
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
@@ -351,22 +454,19 @@ module PostHog
         expect(a_request(:post, send_url)).to have_been_made.once
       end
 
-      [
-        [503, 'delivery_unavailable', 2],
-        [429, 'throttled', 2],
-        [409, 'idempotency_key_in_flight', 2],
-        [429, 'quota_limited', 1],
-        [422, 'recipient_suppressed', 1]
-      ].each do |status, code, attempts|
-        it "makes #{attempts} attempts for a #{status} #{code}" do
+      [[503, 'delivery_unavailable'], [429, 'throttled'], [409, 'idempotency_key_in_flight']].each do |status, code|
+        it "retries a #{status} #{code} and sends the email" do
           stub_request(:post, send_url).to_return(refuse(status, code), accept)
 
-          begin
-            send_template
-          rescue EmailError
-            nil
-          end
-          expect(a_request(:post, send_url)).to have_been_made.times(attempts)
+          expect(send_template.id).to eq('msg_1')
+        end
+      end
+
+      [[429, 'quota_limited'], [422, 'recipient_suppressed'], [422, 'recipient_opted_out']].each do |status, code|
+        it "raises a #{status} #{code} without retrying it" do
+          stub_request(:post, send_url).to_return(refuse(status, code), accept)
+
+          expect { send_template }.to raise_error(EmailError) { |error| expect(error.code).to eq(code) }
         end
       end
 
@@ -508,6 +608,11 @@ module PostHog
         [409, 'idempotency_key_in_flight', 'concurrent_idempotent_requests'],
         [422, 'idempotency_key_reused', 'invalid_idempotent_request'],
         [422, 'recipient_suppressed', 'validation_error'],
+        [422, 'recipient_opted_out', 'validation_error'],
+        [400, 'category_mismatch', 'validation_error'],
+        [400, 'too_many_categories', 'validation_error'],
+        [400, 'unsubscribe_link_required', 'validation_error'],
+        [400, 'copies_not_allowed', 'validation_error'],
         [429, 'quota_limited', 'monthly_quota_exceeded'],
         [429, 'throttled', 'rate_limit_exceeded'],
         [500, 'server_error', 'application_error']
