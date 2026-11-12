@@ -156,13 +156,13 @@ module PostHog
         expect(snapshot.enabled?('boolean-flag')).to be(false)
       end
 
-      it 'enabled? keeps a flag marked failed by /flags as false, ignoring the caller default' do
+      it 'enabled? honors the caller default for a flag marked failed by /flags' do
         stub_flags(
           flags: { 'failed-flag' => { key: 'failed-flag', enabled: false, variant: nil, failed: true } },
           errorsWhileComputingFlags: true
         )
         snapshot = client.evaluate_flags('user-1')
-        expect(snapshot.enabled?('failed-flag', default_value: true)).to be(false)
+        expect(snapshot.enabled?('failed-flag', default_value: true)).to be(true)
       end
 
       it 'enabled? still reports the evaluated response, not the default, on $feature_flag_called' do
@@ -893,7 +893,7 @@ module PostHog
         end
       end
 
-      it 'keeps a failed remote flag without a local definition as false' do
+      it 'omits a failed remote flag without a local definition' do
         c = local_client(beta_ui)
         stub_flags(
           flags: { 'remote-only' => { key: 'remote-only', enabled: false, variant: nil, failed: true } },
@@ -902,12 +902,12 @@ module PostHog
 
         snapshot = c.evaluate_flags('user-123')
 
-        expect(snapshot.keys).to include('remote-only')
-        expect(snapshot.get_flag('remote-only')).to be(false)
+        expect(snapshot.keys).not_to include('remote-only')
+        expect(snapshot.get_flag('remote-only')).to be_nil
         expect(snapshot.unresolved_flags).to eq({})
       end
 
-      it 'keeps a failed remote flag that local evaluation left unresolved as false' do
+      it 'omits a failed remote flag that local evaluation left unresolved' do
         c = local_client(checkout_with_continuity)
         stub_flags(
           flags: { 'checkout' => { key: 'checkout', enabled: false, variant: nil, failed: true } },
@@ -916,13 +916,13 @@ module PostHog
 
         snapshot = c.evaluate_flags('user-123')
 
-        expect(snapshot.keys).to include('checkout')
-        expect(snapshot.get_flag('checkout')).to be(false)
-        expect(snapshot.enabled?('checkout', default_value: true)).to be(false)
+        expect(snapshot.keys).not_to include('checkout')
+        expect(snapshot.get_flag('checkout')).to be_nil
+        expect(snapshot.enabled?('checkout', default_value: true)).to be(true)
         expect(snapshot.unresolved_flags).to eq({})
         c.capture(distinct_id: 'user-123', event: 'test-event', flags: snapshot)
         event = drain_messages(c).find { |m| m[:event] == 'test-event' }
-        expect(event[:properties]['$feature/checkout']).to be(false)
+        expect(event[:properties]).not_to have_key('$feature/checkout')
       end
 
       it 'reports a key without a local definition as missing, not unresolved' do

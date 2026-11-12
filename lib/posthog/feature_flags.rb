@@ -302,14 +302,19 @@ module PostHog
           errors << FeatureFlagError.api_error(status) if status && status >= 400
           errors << FeatureFlagError::ERRORS_WHILE_COMPUTING if flags_data[:errorsWhileComputingFlags]
           errors << FeatureFlagError::QUOTA_LIMITED if flags_data[:quotaLimited]&.include?('feature_flags')
-          errors << FeatureFlagError::FLAG_MISSING unless flags.key?(key.to_s)
+          flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
+          failed = flag_detail&.failed == true && !flags.key?(key)
+          if failed
+            errors << 'evaluation_failed'
+          elsif !flags.key?(key)
+            errors << FeatureFlagError::FLAG_MISSING
+          end
 
           response = flags[key]
-          response = false if response.nil?
+          response = false if response.nil? && !failed
           payload = payloads[key]
           feature_flag_error = errors.join(',') unless errors.empty?
 
-          flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
           has_experiment = flag_detail&.metadata&.has_experiment
           minimal_flag_called_events = flags_data[:minimalFlagCalledEvents]
 
@@ -422,8 +427,11 @@ module PostHog
               flags = stringify_keys(flags).merge(server_flags)
               payloads = stringify_keys(payloads).merge(server_payloads)
             else
-              flags = server_flags
-              payloads = server_payloads
+              # A failed record must preserve a successful same-context local pair,
+              # independently of the response-wide error bit.
+              failed_keys = (flag_details || {}).select { |_, flag| flag.failed == true }.keys.map(&:to_s)
+              flags = stringify_keys(flags).slice(*failed_keys).merge(server_flags)
+              payloads = stringify_keys(payloads).slice(*failed_keys).merge(server_payloads)
             end
           end
         rescue StandardError => e

@@ -76,7 +76,10 @@ module PostHog
     )
       @host = host
       @distinct_id = distinct_id || ''
-      @flags = flags || {}
+      # Remote failures have no enabled value, unlike healthy disabled records.
+      failed, evaluated = (flags || {}).partition { |_, flag| flag.enabled.nil? }
+      @failed_flags = failed.to_h
+      @flags = evaluated.to_h
       @groups = groups
       @disable_geoip = disable_geoip
       @request_id = request_id
@@ -98,9 +101,8 @@ module PostHog
     # @param default_value [Boolean, nil] Returned when the flag has no value in this
     #   snapshot — it was never loaded, the `/flags` request failed, or no flag with that
     #   key exists. A flag that does have a value, including `false` and variant strings,
-    #   always wins over this default; so does a flag the server returned but marked as
-    #   failed, which resolves to `false`. Defaults to `nil`, which keeps the historical
-    #   `false` result for a missing flag.
+    #   always wins over this default. A failed remote record has no value. Defaults to
+    #   `nil`, which keeps the historical `false` result for a missing flag.
     # @return [Boolean] true when the flag is enabled, false when disabled, and the
     #   caller-supplied default (or false when none was supplied) when the flag is missing.
     def enabled?(key, default_value: nil)
@@ -177,7 +179,7 @@ module PostHog
     # Variant string when present, else boolean enabled status; `nil` for
     # unknown flags.
     def _flag_value(flag)
-      return nil if flag.nil?
+      return nil if flag.nil? || flag.enabled.nil?
       return flag.variant if flag.variant
 
       flag.enabled ? true : false
@@ -187,6 +189,8 @@ module PostHog
       @accessed.add(key)
       return if @distinct_id.nil? || @distinct_id.to_s.empty?
 
+      failed = @failed_flags.key?(key)
+      flag ||= @failed_flags[key]
       response = _flag_value(flag)
       properties = {
         '$feature_flag' => key,
@@ -212,7 +216,9 @@ module PostHog
       errors = []
       errors << 'errors_while_computing_flags' if @errors_while_computing
       errors << 'quota_limited' if @quota_limited
-      if flag.nil? && @unresolved_flags.key?(key)
+      if failed
+        errors << 'evaluation_failed'
+      elsif flag.nil? && @unresolved_flags.key?(key)
         errors << FeatureFlagError::LOCAL_EVALUATION_INCONCLUSIVE
       elsif flag.nil?
         errors << FeatureFlagError::FLAG_MISSING

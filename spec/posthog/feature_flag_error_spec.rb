@@ -302,12 +302,11 @@ module PostHog
           stub_request(:post, flags_endpoint)
             .to_return(status: 200, body: flags_response.to_json)
 
-          # The failed flag has enabled=true, but should be filtered out and treated as missing.
-          # Without filtering, this would return true.
+          # The failed flag has no evaluated value, despite its enabled placeholder.
           result = client.get_feature_flag('my-flag', 'test-user')
-          expect(result).to eq(false)
+          expect(result).to be_nil
           captured_message = client.dequeue_last_message
-          expect(captured_message[:properties]['$feature_flag_error']).to include(FeatureFlagError::FLAG_MISSING)
+          expect(captured_message[:properties]['$feature_flag_error']).to include('evaluation_failed')
 
           # The non-failed flag should return its value normally
           good_result = client.get_feature_flag('good-flag', 'test-user')
@@ -335,9 +334,9 @@ module PostHog
 
           # Without filtering, this would return 'test-variant'.
           result = client.get_feature_flag('variant-flag', 'test-user')
-          expect(result).to eq(false)
+          expect(result).to be_nil
           captured_message = client.dequeue_last_message
-          expect(captured_message[:properties]['$feature_flag_error']).to include(FeatureFlagError::FLAG_MISSING)
+          expect(captured_message[:properties]['$feature_flag_error']).to include('evaluation_failed')
         end
 
         it 'excludes failed flags from get_all_flags results' do
