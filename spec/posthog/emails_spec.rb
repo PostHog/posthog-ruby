@@ -45,6 +45,8 @@ module PostHog
 
         if templates.key?(body['template_key'])
           stored = categories[templates[body['template_key']]]
+          next refuse(400, 'marketing_template') if stored&.fetch('type') == 'marketing'
+
           named = category.is_a?(Hash) ? category.slice('key', 'type') : category
           followed = stored&.slice('key', 'type') || 'transactional'
           next refuse(400, 'category_mismatch') unless category.nil? || named == followed
@@ -239,27 +241,37 @@ module PostHog
         expect(categories).to eq('receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' })
       end
 
-      context 'with a template_key that names a template in a marketing category' do
-        let(:newsletter) { { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' } }
-        let(:digest_html) { '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>' }
+      context 'with a template_key that names a template in a transactional category' do
+        let(:receipts) { { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' } }
 
         it "files the email under the template's category when the send leaves category out" do
-          _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
+          _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
 
-          send_code(template_key: 'november-digest', html: digest_html)
+          send_code(template_key: 'order-receipt')
 
-          expect(filed).to eq(['newsletter'])
+          expect(filed).to eq(['receipts'])
         end
 
         it 'refuses TRANSACTIONAL with category_mismatch' do
-          _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
+          _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
 
-          expect { send_code(template_key: 'november-digest', html: digest_html, category: Emails::TRANSACTIONAL) }
+          expect { send_code(template_key: 'order-receipt', category: Emails::TRANSACTIONAL) }
             .to raise_error(EmailError) do |error|
               expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
             end
           expect(filed).to be_empty
         end
+      end
+
+      it 'refuses a template_key that names a template in a marketing category with marketing_template' do
+        newsletter = { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' }
+        _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
+
+        expect { send_code(template_key: 'november-digest', html: '<a href="{{ unsubscribe_url }}">Unsubscribe</a>') }
+          .to raise_error(EmailError) do |error|
+            expect([error.code, error.name]).to eq(%w[marketing_template validation_error])
+          end
+        expect(filed).to be_empty
       end
 
       it 'refuses template_data, because local templates are not supported' do

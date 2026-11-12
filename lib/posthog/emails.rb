@@ -13,8 +13,8 @@ require 'posthog/logging'
 require 'posthog/utils'
 
 module PostHog
-  # Sends transactional or marketing email, from an email template made in PostHog or from content your code rendered,
-  # and reads the status of each email sent. Reach it through {Client#emails}.
+  # Sends transactional email from an email template made in PostHog, and transactional or marketing email from
+  # content your code rendered. It also reads the status of each email sent. Reach it through {Client#emails}.
   #
   # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the
   # `transactional_email:write` scope: the "Send transactional email" preset in your project settings. A key with
@@ -185,8 +185,9 @@ module PostHog
     #   its category or of all marketing, can't have copies, and needs a `{{ unsubscribe_url }}` link in its `html`, or
     #   in its `text` when it has no `html`. PostHog refuses a send with `category_mismatch` when the type differs from
     #   the existing category's, or when `template_key` names a template in another category, {TRANSACTIONAL} for a
-    #   template in a category included; `too_many_categories` when the project can't take another category;
-    #   `unsubscribe_link_required`; `copies_not_allowed`; or `recipient_opted_out`.
+    #   template in a category included; `marketing_template` when `template_key` names a template in a marketing
+    #   category, because a template made in PostHog is transactional; `too_many_categories` when the project can't
+    #   take another category; `unsubscribe_link_required`; `copies_not_allowed`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
