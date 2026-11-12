@@ -89,7 +89,8 @@ module PostHog
     TRANSACTIONAL = 'transactional'
 
     # A message category that a send defines in code. PostHog creates the category the first time a send names its
-    # key, and updates its name and description when they change. Recipients opt in to and out of it in their
+    # key, or restores it if it was deleted, and otherwise leaves it unchanged. Its name and description apply only
+    # when the send creates the category; change them later in PostHog. Recipients opt in to and out of it in their
     # email preferences.
     #
     # @!attribute [r] key
@@ -99,10 +100,10 @@ module PostHog
     #   @return [String] `marketing` or `transactional`. It must match the type of an existing category with the
     #     same key.
     # @!attribute [r] name
-    #   @return [String] The name recipients see in their email preferences.
+    #   @return [String] The name recipients see in their email preferences, used only when the send creates the
+    #     category.
     # @!attribute [r] description
-    #   @return [String, nil] What the category's emails are about. Leave it nil to keep the stored description, or
-    #     set it to "" to clear it.
+    #   @return [String, nil] What the category's emails are about, used only when the send creates the category.
     MessageCategory = Struct.new(:key, :type, :name, :description, keyword_init: true)
 
     SEND_PATH = '/api/projects/@current/messaging/send/email/'

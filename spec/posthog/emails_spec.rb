@@ -36,12 +36,6 @@ module PostHog
       bodies
     end
 
-    # Answers sends like PostHog's endpoint does for categories. Returns the categories it holds by key, and the key of
-    # the category each accepted send was filed under, nil for none. A category object upserts by key: a missing
-    # description keeps the stored one and "" clears it. A send whose template_key names one of `templates` follows
-    # that template's category (a template key maps to its category key, or nil for none): left out, it takes it, and
-    # anything but that same category is refused, "transactional" included. A marketing send needs an unsubscribe
-    # link. Any category that is not left out, "transactional" or an object is refused.
     def serve_categories(categories = {}, templates: {})
       filed = []
       stub_request(:post, send_url).to_return do |request|
@@ -62,7 +56,7 @@ module PostHog
           unsubscribable = content.to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
           next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
 
-          (categories[category['key']] ||= {}).merge!(category)
+          categories[category['key']] ||= category
         end
         filed << (category['key'] if category.is_a?(Hash))
         accept
@@ -218,24 +212,31 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'capture_engagement', 'to')
       end
 
-      it 'defines the categories it names, and keeps a description unless the send sets one, even to ""' do
+      it 'creates a category the first time a send names it, and leaves it unchanged on later sends' do
         categories, = serve_categories
         html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
+        newsletter = { key: 'newsletter', type: 'marketing' }
 
-        send_code(category: Emails::MessageCategory.new(**newsletter, description: 'Monthly product news'), html: html)
-        send_code(category: Emails::MessageCategory.new(**newsletter), html: html)
-        expect(categories['newsletter']).to include('description' => 'Monthly product news')
-
-        result = send_code(category: Emails::MessageCategory.new(**newsletter, description: ''), html: html)
-        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts'))
-        expect(send_code(category: Emails::TRANSACTIONAL).id).to eq('msg_1')
+        send_code(category: Emails::MessageCategory.new(**newsletter, name: 'Newsletter',
+                                                                      description: 'Monthly product news'), html: html)
+        result = send_code(category: Emails::MessageCategory.new(**newsletter, name: 'Weekly news',
+                                                                               description: 'Weekly'), html: html)
 
         expect(result.id).to eq('msg_1')
         expect(categories).to eq(
-          'newsletter' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter', 'description' => '' },
-          'receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' }
+          'newsletter' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter',
+                            'description' => 'Monthly product news' }
         )
+      end
+
+      it 'files a send under the transactional category it names, and TRANSACTIONAL under none' do
+        categories, filed = serve_categories
+
+        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts'))
+        send_code(category: Emails::TRANSACTIONAL)
+
+        expect(filed).to eq(['receipts', nil])
+        expect(categories).to eq('receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' })
       end
 
       context 'with a template_key that names a template in a marketing category' do
