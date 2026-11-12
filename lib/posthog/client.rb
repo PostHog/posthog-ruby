@@ -816,7 +816,7 @@ module PostHog
         errors_while_computing: errors_while_computing,
         quota_limited: quota_limited,
         minimal_flag_called_events: minimal_flag_called_events,
-        unresolved_flags: unresolved_flags.reject { |key, _reason| records.key?(key) }
+        unresolved_flags: unresolved_flags.reject { |key, _reason| records.key?(key) && !records[key].enabled.nil? }
       )
     end
 

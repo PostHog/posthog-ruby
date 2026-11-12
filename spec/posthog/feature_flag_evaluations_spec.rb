@@ -863,14 +863,16 @@ module PostHog
         expect(snapshot.unresolved_flags).to eq('beta-ui' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
 
-      it 'does not report a flag the remote fallback resolved' do
-        c = local_client(checkout_with_continuity)
-        stub_flags(flags: { 'checkout' => { key: 'checkout', enabled: true, variant: nil } })
+      [true, false].each do |enabled|
+        it "does not report a flag the remote fallback resolved to #{enabled}" do
+          c = local_client(checkout_with_continuity)
+          stub_flags(flags: { 'checkout' => { key: 'checkout', enabled: enabled, variant: nil } })
 
-        snapshot = c.evaluate_flags('user-123')
+          snapshot = c.evaluate_flags('user-123')
 
-        expect(snapshot.get_flag('checkout')).to be(true)
-        expect(snapshot.unresolved_flags).to eq({})
+          expect(snapshot.get_flag('checkout')).to be(enabled)
+          expect(snapshot.unresolved_flags).to eq({})
+        end
       end
 
       {
@@ -919,7 +921,7 @@ module PostHog
         expect(snapshot.keys).not_to include('checkout')
         expect(snapshot.get_flag('checkout')).to be_nil
         expect(snapshot.enabled?('checkout', default_value: true)).to be(true)
-        expect(snapshot.unresolved_flags).to eq({})
+        expect(snapshot.unresolved_flags).to eq('checkout' => UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
         c.capture(distinct_id: 'user-123', event: 'test-event', flags: snapshot)
         event = drain_messages(c).find { |m| m[:event] == 'test-event' }
         expect(event[:properties]).not_to have_key('$feature/checkout')
