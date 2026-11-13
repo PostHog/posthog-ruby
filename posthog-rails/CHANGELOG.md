@@ -1,5 +1,77 @@
 # posthog-rails
 
+## 3.22.0
+
+### Minor Changes
+
+- 419a8fe: Capture exceptions escaping Action Cable connection, channel lifecycle, and action boundaries when auto_capture_exceptions is enabled. Correlate events with isolated connection request context and include filtered channel details without attaching raw connection environments or authentication cookies.
+
+### Patch Changes
+
+- 071569a: Report Sidekiq retry failures using the original exception, preventing duplicate Active Job error events while honoring exclusions for both the wrapper and the original error.
+
+## 3.21.0
+
+### Minor Changes
+
+- c08fd1b: Capture errors logged by ActionController::Live and ActionView streaming templates when automatic exception capture is enabled, preserving Rails logging and completion behavior and reusing existing filtering and duplicate prevention.
+
+### Patch Changes
+
+- 38a14da: Remove unstable numeric suffixes from Rails-generated template method names in exception frames when the name matches the template source path. Preserve filenames, line numbers, source context, frame classification, cause chains, and duplicate capture prevention.
+- Updated dependencies [38a14da]
+  - posthog-ruby@3.32.1
+
+## 3.20.7
+
+### Patch Changes
+
+- Updated dependencies [d309582]
+  - posthog-ruby@3.32.0
+
+## 3.20.6
+
+### Patch Changes
+
+- Updated dependencies [3be40e8]
+  - posthog-ruby@3.31.0
+
+## 3.20.5
+
+### Patch Changes
+
+- Updated dependencies [eb7216a]
+  - posthog-ruby@3.30.3
+
+## 3.20.4
+
+### Patch Changes
+
+- 2cad6bc: Exclude client-only flag definitions from local evaluation warnings on API and shared-cache loads, while preserving local evaluation and warning again if their runtime changes back.
+- Updated dependencies [2cad6bc]
+  - posthog-ruby@3.30.2
+
+## 3.20.3
+
+### Patch Changes
+
+- Updated dependencies [ff00d29]
+  - posthog-ruby@3.30.1
+
+## 3.20.2
+
+### Patch Changes
+
+- Updated dependencies [f71d774]
+  - posthog-ruby@3.30.0
+
+## 3.20.1
+
+### Patch Changes
+
+- Updated dependencies [aa3fcf9]
+  - posthog-ruby@3.29.1
+
 ## 3.20.0
 
 ### Minor Changes

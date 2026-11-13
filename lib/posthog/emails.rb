@@ -8,6 +8,7 @@ require 'time'
 require 'uri'
 require 'zlib'
 
+require 'posthog/email_attachments'
 require 'posthog/email_error'
 require 'posthog/logging'
 require 'posthog/utils'
@@ -16,7 +17,9 @@ module PostHog
   # Sends transactional email, from an email template made in PostHog or from content your code rendered,
   # and reads the status of each email sent. Reach it through {Client#emails}.
   #
-  # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the `hog_flow:write` scope.
+  # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the
+  # `transactional_email:write` scope: the "Send transactional email" preset in your project settings. A key with
+  # only `transactional_email:read` can read statuses but not send. Keys made with `hog_flow:write` still work.
   # Sends go to the PostHog app host: a client on PostHog Cloud uses its region's app host, and any other `host`
   # needs `app_host`, because a reverse proxy for ingestion must not receive the secret key.
   #
@@ -69,6 +72,7 @@ module PostHog
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
 
     SEND_PATH = '/api/projects/@current/messaging/send/email/'
+    UPLOADS_PATH = '/api/projects/@current/messaging/attachments/uploads/'
     STATUS_PATH = '/api/projects/@current/messaging/emails/%<message_id>s/'
     US_APP_HOST = 'https://us.posthog.com'
     EU_APP_HOST = 'https://eu.posthog.com'
@@ -85,25 +89,25 @@ module PostHog
     TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
     HEADER_TOKEN_PATTERN = /\A[\x21-\x7e]+\z/
     INTEGRATION_PATTERN = %r{\A[a-z0-9-]{1,40}/[0-9A-Za-z.+-]{1,40}\z}
-    SEND_KEY_NEEDED = 'Sending email needs secret_key, a project secret API key with the hog_flow:write scope.'
-    READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the hog_flow:read ' \
-                      'or hog_flow:write scope.'
+    JSON_CONTENT = { 'Content-Type' => 'application/json' }.freeze
+    SEND_KEY_NEEDED = 'Sending email needs secret_key, a project secret API key with the ' \
+                      'transactional_email:write scope.'
+    READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the ' \
+                      'transactional_email:read or transactional_email:write scope.'
     TEMPLATE_FORM_WHY = 'A template made in PostHog sets its own sender, subject and content, and follows the ' \
                         "project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'
     TEMPLATE_FIELDS = %i[template_data].freeze
     CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments capture_engagement].freeze
-    ATTACHMENT_FIELDS = %w[filename content content_type content_id].freeze
-    BASE64_PATTERN = %r{\A(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\z}
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
     ].freeze
-    private_constant :SEND_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
+    private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
-                     :HEADER_TOKEN_PATTERN, :INTEGRATION_PATTERN, :SEND_KEY_NEEDED, :READ_KEY_NEEDED,
-                     :TEMPLATE_FORM_WHY, :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :ATTACHMENT_FIELDS,
-                     :BASE64_PATTERN, :NETWORK_ERRORS
+                     :HEADER_TOKEN_PATTERN, :INTEGRATION_PATTERN, :JSON_CONTENT, :SEND_KEY_NEEDED,
+                     :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY, :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS,
+                     :NETWORK_ERRORS
 
     # @api private
     def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:,
@@ -145,12 +149,14 @@ module PostHog
     #   most 10. An empty list sends no copy.
     # @param bcc [String, Array<String>] Code form: one address or a list of addresses that get a hidden copy, at
     #   most 10. An empty list sends no copy.
-    # @param attachments [Array<Hash>] Code form: files sent with the email, at most 10 and 512 KB in total. Each
-    #   file is a Hash with:
+    # @param attachments [Array<Hash>] Code form: files sent with the email, at most 10 files and 40 MB per email
+    #   after Base64 encoding, about 29 MB of files. The client hashes each file, uploads the files PostHog doesn't
+    #   have yet straight to PostHog's file storage, then sends the email naming the files by their SHA-256. A file
+    #   sent before by the same project uploads nothing again. Each file is a Hash with:
     #   - +filename+ [String] the name the recipient sees, such as `invoice.pdf`;
     #   - +content+ [String, Array<Integer>] the file's bytes, as a binary String such as `File.binread(path)`
-    #     returns or as a list of byte values, which the client encodes as Base64. Any other String is taken as the
-    #     file already Base64 encoded. PostHog can't fetch a file from a path or URL;
+    #     returns or as a list of byte values. Any other String is taken as the file encoded as Base64, on one
+    #     line or wrapped at 60, 64 or 76 characters. PostHog can't fetch a file from a path or URL;
     #   - +content_type+ [String] the MIME type, optional. Without it, the type follows the file name;
     #   - +content_id+ [String] optional: shows the file inline where `html` has `<img src="cid:...">` with this ID.
     # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
@@ -168,7 +174,12 @@ module PostHog
     #   letters, digits and hyphens; the version is letters, digits, dots, plus signs and hyphens; each at most 40.
     # @return [SendResult] The queued email.
     # @raise [EmailError] PostHog did not queue the email, or the client could not tell whether it did.
-    #   {EmailError#code} is `invalid_attachment`, before any request, for a file the client can't send.
+    #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
+    #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
+    #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
+    #   {EmailError#field} `attachments` when PostHog has no upload route for this project. Unless `app_host` is
+    #   an http URL, an upload URL without https raises `api_error` on the file's field, such as
+    #   `attachments__0`, before any file goes out. No email was sent.
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
@@ -182,12 +193,15 @@ module PostHog
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       check_integration(integration)
       payload = content(template_id, template_key, fields).merge(to: to)
+      files = EmailAttachments.from(fields.fetch(:attachments, []), bodies_with_derived_text(fields), fields[:subject])
+      payload[:attachments] = files.references unless files.empty?
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
       headers['X-PostHog-Integration'] = integration if integration
 
       result = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+        upload(files, secret_key, max_retries || @max_retries) unless files.empty?
         uri = URI(@app_host + SEND_PATH)
         with_retries(max_retries || @max_retries) do
           parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body))
@@ -253,6 +267,11 @@ module PostHog
 
     def uuid?(value)
       value.is_a?(String) && UUID_PATTERN.match?(value)
+    end
+
+    def bodies_with_derived_text(fields)
+      html, text = fields.values_at(:html, :text)
+      [html, text.to_s.empty? ? html : text].compact
     end
 
     def resolve_app_host(host, app_host)
@@ -337,8 +356,10 @@ module PostHog
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
       code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
-      %i[cc bcc].each { |name| put_unless_empty(code, name, addresses(name, fields[name])) if fields.key?(name) }
-      put_unless_empty(code, :attachments, attachment_list(fields[:attachments])) if fields.key?(:attachments)
+      %i[cc bcc].each do |name|
+        list = fields.key?(name) ? addresses(name, fields[name]) : []
+        code[name] = list unless list.empty?
+      end
       code[:capture_engagement] = fields.fetch(:capture_engagement, true)
       code
     end
@@ -351,80 +372,11 @@ module PostHog
       raise ArgumentError, "#{message} #{why} Remove #{field}, or send with #{other_form}."
     end
 
-    def put_unless_empty(code, name, list)
-      code[name] = list unless list.empty?
-    end
-
     def addresses(name, value)
       list = value.is_a?(String) ? [value] : value
       return list if list.is_a?(Array) && list.all? { |address| nonempty_string?(address) }
 
       raise ArgumentError, "#{name} must be one address or a list of addresses."
-    end
-
-    def attachment_list(files)
-      raise invalid_attachment('attachments must be a list of files.', 'attachments') unless files.is_a?(Array)
-
-      files.each_with_index.map { |file, index| attachment(file, "attachments__#{index}") }
-    end
-
-    def attachment(file, field)
-      unless file.is_a?(Hash)
-        raise invalid_attachment("An attachment is a Hash with filename and content. Pass the file's bytes as its " \
-                                 'content.', field)
-      end
-
-      file = file.transform_keys(&:to_s).compact
-      if file.key?('path')
-        raise invalid_attachment("PostHog can't fetch an attachment from a path or URL. Read the file with " \
-                                 'File.binread and pass it as content instead.', "#{field}__path")
-      end
-      unknown = file.keys.find { |key| !ATTACHMENT_FIELDS.include?(key) }
-      if unknown
-        raise invalid_attachment("An attachment takes filename, content, content_type and content_id, not #{unknown}.",
-                                 "#{field}__#{unknown}")
-      end
-
-      %w[filename content_type content_id].each do |name|
-        next if name != 'filename' && !file.key?(name)
-        next if file[name].is_a?(String)
-
-        raise invalid_attachment("An attachment's #{name} must be a String.", "#{field}__#{name}")
-      end
-      file.merge('content' => base64_content(file['content'], "#{field}__content"))
-    end
-
-    def base64_content(content, field)
-      bytes = file_bytes(content)
-      return [bytes].pack('m0') if bytes
-      unless content.is_a?(String)
-        raise invalid_attachment('An attachment needs content: the bytes File.binread returns, a list of byte ' \
-                                 'values, or the file encoded as Base64.', field)
-      end
-      return content if single_line_base64?(content)
-      return content.delete("\n") if encode64_layout?(content)
-
-      raise invalid_attachment("An attachment's content is text that isn't Base64. Pass the file's bytes, read " \
-                               'with File.binread, or the file encoded as Base64.', field)
-    end
-
-    def single_line_base64?(content)
-      content.ascii_only? && BASE64_PATTERN.match?(content)
-    end
-
-    def encode64_layout?(content)
-      content.ascii_only? && content.include?("\n") && [content.unpack1('m')].pack('m') == content
-    end
-
-    def file_bytes(content)
-      return content if content.is_a?(String) && content.encoding == Encoding::BINARY
-      return unless content.is_a?(Array) && content.all? { |byte| byte.is_a?(Integer) && byte.between?(0, 255) }
-
-      content.pack('C*')
-    end
-
-    def invalid_attachment(message, field)
-      EmailError.new(code: 'invalid_attachment', message: message, field: field)
     end
 
     def call(nothing_done, key_needed)
@@ -506,9 +458,84 @@ module PostHog
       case error.status_code
       when nil then error.code == 'network_error'
       when 409 then error.code == 'idempotency_key_in_flight'
-      when 429 then error.code != 'quota_limited'
+      when 429 then !%w[quota_limited upload_quota_exceeded].include?(error.code)
+      when 500, 502, 504 then error.code == 'attachment_upload_failed'
       else error.status_code == 503
       end
+    end
+
+    def upload(files, secret_key, max_retries)
+      distinct = files.distinct
+      uri = URI(@app_host + UPLOADS_PATH)
+      body = JSON.generate(files: distinct.map { |file| { sha256: file.sha256, size: file.bytes.bytesize } })
+      slots = with_retries(max_retries) do
+        parse_uploads_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, body), distinct)
+      end
+      distinct.zip(slots).each { |file, slot| put_file(file, slot, max_retries) if slot['status'] == 'upload' }
+    end
+
+    def parse_uploads_reply((status, payload, retry_after), files)
+      fields = payload.is_a?(Hash) ? payload : {}
+      fields = { 'code' => 'not_found', 'attr' => 'attachments' }.merge(fields.compact) if status == 404
+      raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
+
+      slots = fields['files']
+      unless slots.is_a?(Array) && slots.size == files.size && files.zip(slots).all? { |pair| slot?(*pair) }
+        raise EmailError.new(code: 'api_error', message: "PostHog answered without the files' uploads.",
+                             status_code: status)
+      end
+      file_without_tls, = files.zip(slots).find { |_, slot| without_tls?(slot) }
+      raise upload_without_tls(file_without_tls, status) if file_without_tls
+
+      slots
+    end
+
+    def without_tls?(slot)
+      slot['status'] == 'upload' && URI(@app_host).scheme == 'https' && URI(slot['url']).scheme != 'https'
+    end
+
+    def upload_without_tls(file, status)
+      filename = file.reference['filename']
+      EmailError.new(code: 'api_error', field: file.field, status_code: status,
+                     message: "PostHog gave an upload URL for #{filename} that isn't https, so no file was uploaded " \
+                              'and no email was sent.',
+                     why: "Your app_host uses https, and #{filename} would have gone to file storage unencrypted.",
+                     fix: "Fix the file storage's URL so it uses https. For local development over http, set " \
+                          'app_host to an http URL.')
+    end
+
+    def slot?(file, slot)
+      return false unless slot.is_a?(Hash) && slot['sha256'] == file.sha256
+      return slot['status'] == 'present' unless slot['status'] == 'upload'
+
+      slot['method'] == 'PUT' && web_url?(slot['url'].to_s) && slot['headers'].is_a?(Hash) &&
+        slot['headers'].all? { |name, value| name.is_a?(String) && value.is_a?(String) }
+    end
+
+    def put_file(file, slot, max_retries)
+      uri = URI(slot['url'])
+      with_retries(max_retries) do
+        request = Net::HTTP::Put.new(uri)
+        request['Content-Type'] = 'application/octet-stream'
+        status, answer, retry_after = exchange(request, uri, slot['headers'], file.bytes)
+        raise upload_failed(file, status, answer, retry_after) unless status.between?(200, 299)
+      end
+    rescue EmailError => e
+      raise unless e.code == 'network_error'
+
+      raise EmailError.new(code: 'network_error', field: file.field, retry_after: e.retry_after,
+                           message: "The upload of #{file.reference['filename']} to file storage failed, so no " \
+                                    'email was sent.')
+    end
+
+    def upload_failed(file, status, answer, retry_after)
+      answer = answer.to_s.dup.force_encoding(Encoding::UTF_8).scrub
+      storage_said = [answer[%r{<Code>([^<]*)</Code>}, 1], answer[%r{<Message>([^<]*)</Message>}, 1]].compact
+      EmailError.new(
+        code: 'attachment_upload_failed', status_code: status, field: file.field, retry_after: retry_after,
+        message: "File storage refused the upload of #{file.reference['filename']} with HTTP #{status}" \
+                 "#{" (#{storage_said.join(': ')})" unless storage_said.empty?}, so no email was sent."
+      )
     end
 
     def request(request, uri, secret_key, headers, body = nil)
@@ -516,6 +543,11 @@ module PostHog
       request['Accept'] = 'application/json'
       request['User-Agent'] = @user_agent if @user_agent
       request['X-PostHog-Migrated-From'] = @migrated_from if @migrated_from
+      status, answer, retry_after = exchange(request, uri, headers, body)
+      [status, parse_json(answer), retry_after]
+    end
+
+    def exchange(request, uri, headers, body)
       headers.each { |name, value| request[name] = value }
       request.body = body if body
 
@@ -523,7 +555,7 @@ module PostHog
       response = Net::HTTP.start(uri.hostname, uri.port, connection_options(uri)) do |http|
         http.request(request) { |started| head = started }
       end
-      [response.code.to_i, parse_json(response.body), parse_retry_after(response['Retry-After'])]
+      [response.code.to_i, response.body, parse_retry_after(response['Retry-After'])]
     rescue *NETWORK_ERRORS
       # A reply whose body broke off retries with the same idempotency key, after its Retry-After when it sent one.
       raise EmailError.new(code: 'network_error', message: 'The request to PostHog failed.',

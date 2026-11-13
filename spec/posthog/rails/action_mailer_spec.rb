@@ -42,6 +42,7 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
   let(:send_url) { 'https://us.posthog.com/api/projects/@current/messaging/send/email/' }
   let(:message_id) { '01a18356-c56c-0001-e494-7666bc915188' }
   let(:settings) { {} }
+  let(:stored) { {} }
   let(:shipped_body) do
     { 'to' => 'ana@example.com', 'from' => 'Shop <shop@example.com>', 'subject' => 'Your order shipped',
       'html' => '<p>On its way.</p>', 'text' => 'On its way.', 'template_key' => 'action-mailer',
@@ -52,6 +53,12 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
     PostHog::Logging.logger = Logger.new(File::NULL)
     stub_request(:get, %r{/flags/definitions}).to_return(status: 200, body: '{"flags":[]}')
     stub_request(:post, send_url).to_return(status: 202, body: JSON.generate(message_id: message_id))
+    stub_request(:post, 'https://us.posthog.com/api/projects/@current/messaging/attachments/uploads/')
+      .to_return { |request| upload_slots(JSON.parse(request.body)['files']) }
+    stub_request(:put, %r{\Ahttps://files\.example\.com/team/\h{64}\?}).to_return do |request|
+      stored[request.uri.path[/\h{64}\z/]] = request.body.b
+      { status: 200 }
+    end
     PostHog.init(api_key: API_KEY, secret_key: 'phs_test', test_mode: true, email_request_max_retries: 0)
   end
 
@@ -94,6 +101,23 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
 
   def sent_body
     JSON.parse(sent_request.body)
+  end
+
+  # PostHog's upload route: file storage takes every file of the manifest.
+  def upload_slots(files)
+    slots = files.map do |file|
+      { sha256: file['sha256'], status: 'upload', method: 'PUT', headers: {},
+        url: "https://files.example.com/team/#{file['sha256']}?X-Amz-Signature=fake",
+        url_expires_at: '2026-11-13T12:15:00Z' }
+    end
+    { status: 200, body: JSON.generate(files: slots) }
+  end
+
+  # The files PostHog attaches to the sent email: each one the send names, with the bytes file storage holds for it.
+  def sent_files
+    sent_body.fetch('attachments').map do |file|
+      file.except('sha256').merge('content' => stored.fetch(file['sha256']))
+    end
   end
 
   def refusal_of(mail)
@@ -142,15 +166,13 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
 
       deliver(mail)
 
-      expect(sent_body).to eq(shipped_body.merge(
-                                'html' => '<img src="cid:logo">',
-                                'attachments' => [
-                                  { 'filename' => 'invoice.pdf', 'content_type' => 'application/pdf',
-                                    'content' => 'JVBERi0xLjQK' },
-                                  { 'filename' => 'logo.png', 'content_type' => 'image/png',
-                                    'content' => 'iVBORw0KGgo=', 'content_id' => 'logo' }
-                                ]
-                              ))
+      expect(sent_body.except('attachments')).to eq(shipped_body.merge('html' => '<img src="cid:logo">'))
+      expect(sent_files).to eq([
+                                 { 'filename' => 'invoice.pdf', 'content_type' => 'application/pdf',
+                                   'content' => "%PDF-1.4\n" },
+                                 { 'filename' => 'logo.png', 'content_type' => 'image/png',
+                                   'content' => "\x89PNG\r\n\x1A\n".b, 'content_id' => 'logo' }
+                               ])
     end
 
     it '05 reads the PostHog options from the reserved headers and sends none of them' do
@@ -292,8 +314,8 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(latin1)).to eq('unsupported_part')
       deliver(utf8)
 
-      expect(sent_body['attachments']).to eq([{ 'filename' => 'notes.txt', 'content_type' => 'text/plain',
-                                                'content' => 'Y2Fmw6k=' }])
+      expect(sent_files).to eq([{ 'filename' => 'notes.txt', 'content_type' => 'text/plain',
+                                  'content' => 'café'.b }])
     end
 
     it 'refuses a Content-Type parameter PostHog would drop, such as format=flowed' do
@@ -380,11 +402,9 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
     it 'sends a mailer action with deliver_now, its attachment and the headers Rails adds' do
       ShippingMailer.shipped.deliver_now
 
-      expect(sent_body).to eq(shipped_body.merge(
-                                'template_key' => 'shipping_mailer-shipped',
-                                'attachments' => [{ 'filename' => 'invoice.pdf', 'content_type' => 'application/pdf',
-                                                    'content' => 'JVBERi0xLjQK' }]
-                              ))
+      expect(sent_body.except('attachments')).to eq(shipped_body.merge('template_key' => 'shipping_mailer-shipped'))
+      expect(sent_files).to eq([{ 'filename' => 'invoice.pdf', 'content_type' => 'application/pdf',
+                                  'content' => "%PDF-1.4\n" }])
     end
 
     it 'sends a deliver_later job with the idempotency key the mail sets' do

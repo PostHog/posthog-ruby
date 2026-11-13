@@ -2547,6 +2547,141 @@ module PostHog
       end
     end
 
+    %w[API shared-cache].each do |source|
+      context "with #{source} runtime definitions" do
+        let(:definition_source) { source }
+        let(:unsupported) do
+          beta_ui.merge(key: 'static', filters: {
+                          groups: [{ properties: [{ key: 'id', value: 42, type: 'cohort' }] }]
+                        })
+        end
+
+        after do
+          @runtime_client&.shutdown
+          expect(WebMock).not_to have_requested(:post, 'https://us.i.posthog.com/flags/?v=2')
+        end
+
+        def load_runtime_flags(*flags)
+          options = { api_key: API_KEY, secret_key: API_KEY, test_mode: true }
+          if definition_source == 'API'
+            stub_request(:get, feature_flag_endpoint).to_return(status: 200, body: definitions(*flags))
+          else
+            @runtime_cache = double(
+              'cache provider',
+              flag_definitions: JSON.parse(definitions(*flags)),
+              should_fetch_flag_definitions?: false, on_flag_definitions_received: nil, shutdown: nil
+            )
+            options[:flag_definition_cache_provider] = @runtime_cache
+          end
+          @runtime_client = Client.new(**options)
+          @runtime_client.instance_variable_get(:@feature_flags_poller)
+        end
+
+        def refresh_runtime_flags(poller, *flags)
+          if definition_source == 'API'
+            stub_request(:get, feature_flag_endpoint).to_return(status: 200, body: definitions(*flags))
+          else
+            allow(@runtime_cache).to receive(:flag_definitions).and_return(JSON.parse(definitions(*flags)))
+          end
+          poller.load_feature_flags(true)
+        end
+
+        {
+          'experience_continuity' => :checkout,
+          'unsupported_definition' => :unsupported
+        }.each do |reason, definition|
+          context "for #{reason}" do
+            let(:unresolvable) { send(definition).merge(version: 7) }
+
+            {
+              'client' => { evaluation_runtime: 'client' },
+              'server' => { evaluation_runtime: 'server' },
+              'all' => { evaluation_runtime: 'all' },
+              'null' => { evaluation_runtime: nil },
+              'absent' => {}
+            }.each do |runtime, metadata|
+              it "#{runtime == 'client' ? 'excludes' : 'warns for'} runtime #{runtime} and retains its definition" do
+                flag = unresolvable.merge(metadata)
+                poller = load_runtime_flags(flag)
+
+                expect(warnings(flag[:key], reason).length).to eq(runtime == 'client' ? 0 : 1)
+                expect(poller._evaluation_snapshot[:flags_by_key][flag[:key]]).to eq(flag)
+              end
+
+              next if runtime == 'client'
+
+              it "forgets client warning history before restoring the original #{runtime} definition and version" do
+                original = unresolvable.merge(metadata)
+                server = unresolvable.merge(evaluation_runtime: 'server')
+                poller = load_runtime_flags(original)
+                expect(warnings(original[:key], reason).length).to eq(1)
+                [original, server].each do |eligible|
+                  refresh_runtime_flags(poller, eligible)
+                  previous_count = warnings(original[:key], reason).length
+                  refresh_runtime_flags(poller, unresolvable.merge(evaluation_runtime: 'client'))
+                  expect(warnings(original[:key], reason).length).to eq(previous_count)
+                  expect(poller.instance_variable_get(:@warned_unresolvable_flags)).to be_empty
+
+                  refresh_runtime_flags(poller, original)
+                  expect(warnings(original[:key], reason).length).to eq(previous_count + 1)
+                  expect(poller._evaluation_snapshot[:flags_by_key][original[:key]]).to eq(original)
+                  refresh_runtime_flags(poller, original)
+                  expect(warnings(original[:key], reason).length).to eq(previous_count + 1)
+                end
+              end
+            end
+
+            it 'deduplicates unchanged and reordered eligible definitions while keeping client definitions silent' do
+              server = unresolvable.merge(evaluation_runtime: 'server')
+              client = unresolvable.merge(key: 'client-only', evaluation_runtime: 'client')
+              poller = load_runtime_flags(server, client)
+              refresh_runtime_flags(poller, server, client)
+              refresh_runtime_flags(poller, client.to_a.reverse.to_h, server.to_a.reverse.to_h)
+              if definition_source == 'API'
+                stub_request(:get, feature_flag_endpoint).to_return(status: 304, body: '')
+                poller.load_feature_flags(true)
+              end
+
+              expect(warnings(server[:key], reason).length).to eq(1)
+              expect(log.string).not_to include('client-only')
+              expect(log.string.lines.length).to eq(1)
+            end
+          end
+        end
+
+        it 'counts and names only nonclient candidates in mixed warnings' do
+          flags = [checkout, unsupported].flat_map do |flag|
+            %w[client server all].map do |runtime|
+              flag.merge(key: "#{flag[:key]}-#{runtime}", evaluation_runtime: runtime)
+            end
+          end
+          load_runtime_flags(*flags, beta_ui.merge(key: 'resolvable', evaluation_runtime: 'client'))
+
+          expect(log.string.lines.length).to eq(2)
+          { 'checkout' => 'experience_continuity', 'static' => 'unsupported_definition' }.each do |key, reason|
+            expect(warnings("#{key}-server", reason).first).to include('2 flag(s)', "#{key}-all")
+          end
+          expect(log.string).not_to include('-client', 'resolvable')
+        end
+
+        it 'preserves local client values and both normal unresolved reasons without warnings' do
+          flags = [beta_ui, checkout, unsupported].map { |flag| flag.merge(evaluation_runtime: 'client') }
+          poller = load_runtime_flags(*flags)
+
+          expect(poller.get_all_flags('user-123', {}, {}, {}, true)).to eq('beta-ui' => true)
+          snapshot = @runtime_client.evaluate_flags('user-123', only_evaluate_locally: true)
+          expect(snapshot.keys).to eq(['beta-ui'])
+          expect(snapshot.get_flag('beta-ui')).to be(true)
+          expect(snapshot.unresolved_flags).to eq(
+            'checkout' => UnresolvedFlagReason::EXPERIENCE_CONTINUITY,
+            'static' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+          )
+          expect(poller._evaluation_snapshot[:flags]).to eq(flags)
+          expect(log.string).to be_empty
+        end
+      end
+    end
+
     it 'logs the warning again when the definition changes' do
       refresh_with({ status: 200, body: definitions(checkout) },
                    { status: 200, body: definitions(checkout.merge(id: 3)) })

@@ -14,6 +14,7 @@ gem 'irb'
 rails_version = ENV.fetch('RAILS_VERSION', '~> 7.1')
 
 group :development, :test do
+  gem 'actioncable', rails_version
   gem 'actionmailer', rails_version
   gem 'activejob', rails_version
   gem 'activesupport', rails_version

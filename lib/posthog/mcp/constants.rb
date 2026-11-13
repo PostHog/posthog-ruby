@@ -16,24 +16,20 @@ module PostHog
 
     # Description of the injected `context` argument.
     DEFAULT_CONTEXT_PARAMETER_DESCRIPTION =
-      'Explain in 15-25 words, in third person, why this tool is called and how it supports ' \
-      "the user's goal. For analytics only. You MUST describe only the abstract purpose of the " \
-      'tool call. NEVER include, repeat, paraphrase, or infer personal, sensitive, or identifying ' \
-      'information from the user request or tool results, including names, emails, phone numbers, ' \
-      'IPs, IDs, or credentials. You MUST generalize specific entities into roles such as "a user", ' \
-      '"the customer", or "an account". Example: "Retrieving a customer\'s recent orders to ' \
-      'investigate a billing issue and help support determine the appropriate resolution."'
+      "A few words on why you are calling this tool, for the server developer's analytics. " \
+      'Describe people and things by role, such as "a customer". Do not quote the user or include ' \
+      'names, emails, or other personal details.'
 
     # Description of the injected `llm_model` argument.
     DEFAULT_MODEL_PARAMETER_DESCRIPTION =
-      'The exact model identifier you (the assistant) are running as, taken from your system ' \
-      'prompt or environment (e.g. "claude-opus-4-8", "gpt-5.2"). Used for analytics only. If you ' \
-      'do not know your model identifier with certainty, pass "unknown" — never guess.'
+      'The model identifier you are running as, for example "claude-opus-4-8" or "gpt-5.2". ' \
+      'Pass "unknown" if you are not certain. Recorded for the server developer\'s analytics.'
 
     # Description of the injected `conversation_id` argument.
     DEFAULT_CONVERSATION_ID_DESCRIPTION =
-      "Echo the conversation_id from the server's previous response. The server provides it on " \
-      'the first call — never invent one, and do not issue parallel tool calls until you have it.'
+      'The conversation_id this server returned earlier in this conversation, unchanged, ' \
+      'including after later user messages. ' \
+      "Omit it if you have none. Recorded for the server developer's analytics."
 
     # PostHog-owned event names. All `$`-prefixed per the PostHog convention.
     module Event
@@ -93,6 +89,7 @@ module PostHog
       MCP_RESOURCES_READ = 'mcp:resources/read'
       MCP_TOOLS_CALL = 'mcp:tools/call'
       MCP_TOOLS_LIST = 'mcp:tools/list'
+      MCP_UNKNOWN_TOOL = 'mcp:unknown_tool'
 
       EVENT_NAME_BY_TYPE = {
         CUSTOM => Event::CUSTOM,
@@ -104,7 +101,8 @@ module PostHog
         MCP_RESOURCES_LIST => Event::RESOURCES_LIST,
         MCP_RESOURCES_READ => Event::RESOURCE_READ,
         MCP_TOOLS_CALL => Event::TOOL_CALL,
-        MCP_TOOLS_LIST => Event::TOOLS_LIST
+        MCP_TOOLS_LIST => Event::TOOLS_LIST,
+        MCP_UNKNOWN_TOOL => '$mcp_unknown_tool'
       }.freeze
     end
   end

@@ -11,8 +11,9 @@ module PostHog
     # @api private
     class RequestContext
       # @param app [#call] Rack application.
-      def initialize(app)
+      def initialize(app, enrich_current_span: true)
         @app = app
+        @enrich_current_span = enrich_current_span
       end
 
       # @param env [Hash] Rack environment.
@@ -20,7 +21,9 @@ module PostHog
       def call(env)
         request = build_request(env)
 
-        Internal::Context.with_context(context_data(request), fresh: true, owner: PostHog.client) do
+        Internal::Context.with_context(
+          context_data(request), fresh: true, owner: PostHog.client, enrich_current_span: @enrich_current_span
+        ) do
           @app.call(env)
         end
       end

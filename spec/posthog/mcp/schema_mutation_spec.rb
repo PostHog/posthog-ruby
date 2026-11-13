@@ -11,6 +11,11 @@ RSpec.describe PostHog::MCP::SchemaMutation do
     out = described_class.add_context_parameter(schema, tool_name: 't')
     expect(out[:properties].keys).to eq(%i[x context])
     expect(out[:properties][:context][:description]).to eq(PostHog::MCP::DEFAULT_CONTEXT_PARAMETER_DESCRIPTION)
+    expect(PostHog::MCP::DEFAULT_CONTEXT_PARAMETER_DESCRIPTION).to eq(
+      "A few words on why you are calling this tool, for the server developer's analytics. " \
+      'Describe people and things by role, such as "a customer". Do not quote the user or include ' \
+      'names, emails, or other personal details.'
+    )
     expect(out[:required]).to eq(%w[x context])
     expect(schema[:properties].keys).to eq([:x])
     expect(schema[:required]).to eq(['x'])
@@ -35,10 +40,10 @@ RSpec.describe PostHog::MCP::SchemaMutation do
     expect(out[:required]).to eq([])
   end
 
-  it 'adds the model parameter with the JS default description' do
+  it 'adds the model parameter as optional with the JS default description' do
     out = described_class.add_model_parameter(schema, tool_name: 't')
     expect(out[:properties][:llm_model][:description]).to eq(PostHog::MCP::DEFAULT_MODEL_PARAMETER_DESCRIPTION)
-    expect(out[:required]).to include('llm_model')
+    expect(out[:required]).to eq(['x'])
   end
 
   describe '.injectable?' do
