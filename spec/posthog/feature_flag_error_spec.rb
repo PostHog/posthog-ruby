@@ -260,6 +260,7 @@ module PostHog
       it 'has all required error constants' do
         expect(FeatureFlagError::ERRORS_WHILE_COMPUTING).to eq('errors_while_computing_flags')
         expect(FeatureFlagError::FLAG_MISSING).to eq('flag_missing')
+        expect(FeatureFlagError::EVALUATION_FAILED).to eq('evaluation_failed')
         expect(FeatureFlagError::QUOTA_LIMITED).to eq('quota_limited')
         expect(FeatureFlagError::TIMEOUT).to eq('timeout')
         expect(FeatureFlagError::CONNECTION_ERROR).to eq('connection_error')

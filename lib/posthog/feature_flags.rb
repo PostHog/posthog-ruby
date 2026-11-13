@@ -305,7 +305,7 @@ module PostHog
           flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
           failed = flag_detail&.failed == true && !flags.key?(key)
           if failed
-            errors << 'evaluation_failed'
+            errors << FeatureFlagError::EVALUATION_FAILED
           elsif !flags.key?(key)
             errors << FeatureFlagError::FLAG_MISSING
           end

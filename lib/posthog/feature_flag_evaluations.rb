@@ -217,7 +217,7 @@ module PostHog
       errors << 'errors_while_computing_flags' if @errors_while_computing
       errors << 'quota_limited' if @quota_limited
       if failed
-        errors << 'evaluation_failed'
+        errors << FeatureFlagError::EVALUATION_FAILED
       elsif flag.nil? && @unresolved_flags.key?(key)
         errors << FeatureFlagError::LOCAL_EVALUATION_INCONCLUSIVE
       elsif flag.nil?
