@@ -46,11 +46,15 @@ module PostHog
       # may have queued the first attempt, and a retry with a new key could send the mail twice.
       #
       # @return [Boolean]
+      # A file storage failure is `attachment_upload_failed` with storage's own status: its 500, 502, 503 and 504
+      # pass. A used-up quota, for sends or for uploads, lasts until the quota resets. This is the rule
+      # PostHog::Emails retries by.
       def retryable?
         case status
         when nil then code == 'network_error'
         when 409 then code == 'idempotency_key_in_flight'
-        when 429 then code != 'quota_limited'
+        when 429 then !%w[quota_limited upload_quota_exceeded].include?(code)
+        when 500, 502, 504 then code == 'attachment_upload_failed'
         else status == 503
         end
       end

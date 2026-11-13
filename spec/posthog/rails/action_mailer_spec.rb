@@ -332,6 +332,45 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(mail)).to eq('unsupported_part')
     end
 
+    def related_mail
+      mail = Mail.new do
+        from 'Shop <shop@example.com>'
+        to 'ana@example.com'
+        subject 'Your order shipped'
+      end
+      mail.content_type = 'multipart/related'
+      mail.add_part(Mail::Part.new(content_type: 'text/html; charset=UTF-8', body: '<img src="cid:logo">'))
+      mail
+    end
+
+    it 'refuses an inline resource without a filename instead of sending it as a body' do
+      mail = related_mail
+      mail.add_part(Mail::Part.new(content_type: 'text/plain; charset=UTF-8', content_disposition: 'inline',
+                                   content_id: '<notes>', body: 'Notes'))
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'sends the content ID of a related resource that has no Content-Disposition' do
+      mail = related_mail
+      mail.add_part(Mail::Part.new(content_type: 'image/png; name=logo.png', content_id: '<logo>',
+                                   body: "\x89PNG\r\n\x1A\n".b))
+
+      deliver(mail)
+
+      expect(sent_files).to eq([{ 'filename' => 'logo.png', 'content_type' => 'image/png',
+                                  'content' => "\x89PNG\r\n\x1A\n".b, 'content_id' => 'logo' }])
+    end
+
+    it 'sends a body part marked inline as a body' do
+      mail = shipped_mail
+      mail.text_part.content_disposition = 'inline'
+
+      deliver(mail)
+
+      expect(sent_body).to eq(shipped_body)
+    end
+
     it 'sends the content ID of an inline attachment as written' do
       mail = shipped_mail
       mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
@@ -386,6 +425,32 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
           expect([error.retryable?, error.retry_after]).to eq([retryable, retry_after])
           expect(error.cause).to be_a(PostHog::EmailError)
         }
+      end
+    end
+
+    def invoice_mail
+      shipped_mail.tap { |mail| mail.attachments['invoice.pdf'] = "%PDF-1.4\n" }
+    end
+
+    it 'raises a permanent DeliveryError when the upload quota is used up' do
+      stub_request(:post, %r{/attachments/uploads/\z}).to_return(
+        status: 429, body: JSON.generate(code: 'upload_quota_exceeded', detail: 'No.', attr: 'attachments')
+      )
+
+      expect { deliver(invoice_mail) }.to raise_error(PostHog::Rails::DeliveryError) { |error|
+        expect([error.status, error.code, error.retryable?]).to eq([429, 'upload_quota_exceeded', false])
+      }
+      expect(a_request(:post, send_url)).not_to have_been_made
+    end
+
+    [[500, true], [502, true], [503, true], [504, true], [403, false]].each do |status, retryable|
+      it "raises a #{retryable ? 'retryable' : 'permanent'} DeliveryError when file storage answers #{status}" do
+        stub_request(:put, %r{\Ahttps://files\.example\.com/}).to_return(status: status, body: '<Error/>')
+
+        expect { deliver(invoice_mail) }.to raise_error(PostHog::Rails::DeliveryError) { |error|
+          expect([error.status, error.code, error.retryable?]).to eq([status, 'attachment_upload_failed', retryable])
+        }
+        expect(a_request(:post, send_url)).not_to have_been_made
       end
     end
 

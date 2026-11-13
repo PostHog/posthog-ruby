@@ -154,9 +154,11 @@ module PostHog
         end
       end
 
-      # Mail's own attachment? looks for a filename, but a Content-Disposition of attachment needs none.
+      # Mail's own attachment? looks for a filename, but a Content-Disposition of attachment needs none, and a part
+      # with a Content-ID is a resource the HTML refers to, never a body.
       def attached?(part)
-        part.attachment? || part.content_disposition.to_s.downcase.start_with?('attachment')
+        part.attachment? || part.content_disposition.to_s.downcase.start_with?('attachment') ||
+          !part.header[:content_id].nil?
       end
 
       # PostHog sends a body or an attachment by its MIME type, so a parameter such as format=flowed would be lost.
@@ -185,10 +187,12 @@ module PostHog
           refuse('unsupported_part', "PostHog can't send the #{part.charset} charset of #{part.filename}")
         end
         file = { filename: part.filename, content_type: part.mime_type, content: part.body.decoded.b }
-        return file unless part.inline?
+        # A multipart/related resource may carry its Content-ID without an inline Content-Disposition.
+        unless part.has_content_id?
+          refuse('inline_without_cid', "The inline attachment #{part.filename} has no Content-ID") if part.inline?
+          return file
+        end
 
-        refuse('inline_without_cid', "The inline attachment #{part.filename} has no Content-ID") unless
-          part.has_content_id?
         # Mail's cid escapes the ID as a URL, so the HTML's cid: reference would no longer match it.
         file.merge(content_id: part.content_id.to_s.delete_prefix('<').delete_suffix('>'))
       end
