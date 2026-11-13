@@ -127,7 +127,7 @@ module PostHog
       end
 
       def content(mail)
-        files, bodies = leaves(mail).partition { |part| attached?(part) }
+        bodies, files = sorted_parts(mail)
         content = bodies.each_with_object({}) do |part, by_kind|
           check_parameters(part, BODY_PARAMETERS)
           kind = body_kind(part)
@@ -138,13 +138,33 @@ module PostHog
         files.empty? ? content : content.merge(attachments: files.map { |file| attachment(file) })
       end
 
-      def leaves(part, root: true)
-        check_part_headers(part) unless root
-        return [part] unless part.multipart?
-        return part.parts.flat_map { |child| leaves(child, root: false) } if CONTAINERS.include?(part.mime_type) &&
-                                                                             !attached?(part)
+      # Splits the message into its bodies and its files. PostHog sends an HTML and a text body as alternatives of
+      # each other, so two bodies must share their nearest multipart/alternative.
+      def sorted_parts(mail)
+        bodies = []
+        files = []
+        sort_part(mail, bodies, files, alternative: nil)
+        groups = bodies.map(&:last)
+        if groups.size > 1 && (groups.uniq.size > 1 || groups.include?(nil))
+          refuse('unsupported_part', "PostHog sends an HTML and a text body as alternatives, so it can't send " \
+                                     'bodies that are sections of one message')
+        end
+        [bodies.map(&:first), files]
+      end
 
-        refuse('unsupported_part', "PostHog can't send a #{part.mime_type} part as it was built")
+      def sort_part(part, bodies, files, alternative:)
+        attached = attached?(part)
+        return attached ? files << part : bodies << [part, alternative] unless part.multipart?
+
+        if attached || !CONTAINERS.include?(part.mime_type)
+          refuse('unsupported_part', "PostHog can't send a #{part.mime_type} part as it was built")
+        end
+
+        alternative = part if part.mime_type == 'multipart/alternative'
+        part.parts.each do |child|
+          check_part_headers(child)
+          sort_part(child, bodies, files, alternative: alternative)
+        end
       end
 
       def check_part_headers(part)
@@ -155,11 +175,10 @@ module PostHog
         end
       end
 
-      # Mail's own attachment? looks for a filename, but a Content-Disposition of attachment needs none, and a part
-      # with a Content-ID is a resource the HTML refers to, never a body.
+      # Mail's own attachment? looks for a filename, but a Content-Disposition of attachment needs none. A Content-ID
+      # alone makes no file: Mail gives one to every inline part, bodies too, when it encodes the mail.
       def attached?(part)
-        part.attachment? || part.content_disposition.to_s.downcase.start_with?('attachment') ||
-          !part.header[:content_id].nil?
+        part.attachment? || part.content_disposition.to_s.downcase.start_with?('attachment')
       end
 
       # PostHog sends a body or an attachment by its MIME type, so a parameter such as format=flowed would be lost.

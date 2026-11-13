@@ -395,6 +395,52 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(sent_body).to eq(shipped_body)
     end
 
+    # Action Mailer encodes the mail before it delivers it, and encoding gives every inline part a Content-ID.
+    it 'sends body parts marked inline as bodies after Action Mailer encodes them' do
+      delivery = ShippingMailer.shipped
+      delivery.message.text_part.content_disposition = 'inline'
+      delivery.message.html_part.content_disposition = 'inline'
+
+      delivery.deliver_now
+
+      expect(sent_body.except('attachments')).to eq(shipped_body.merge('template_key' => 'shipping_mailer-shipped'))
+      expect(sent_files.map { |file| file['filename'] }).to eq(['invoice.pdf'])
+    end
+
+    it 'refuses text and HTML bodies that are sections of a mixed message, since PostHog sends them as alternatives' do
+      mail = Mail.new do
+        from 'Shop <shop@example.com>'
+        to 'ana@example.com'
+        subject 'Your order shipped'
+      end
+      mail.content_type = 'multipart/mixed'
+      mail.add_part(Mail::Part.new(content_type: 'text/plain; charset=UTF-8', body: 'Read the notes below.'))
+      mail.add_part(Mail::Part.new(content_type: 'text/html; charset=UTF-8', body: '<p>Notes</p>'))
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'sends a text alternative to HTML that refers to its own inline image' do
+      mail = Mail.new do
+        from 'Shop <shop@example.com>'
+        to 'ana@example.com'
+        subject 'Your order shipped'
+      end
+      mail.content_type = 'multipart/alternative'
+      mail.add_part(Mail::Part.new(content_type: 'text/plain; charset=UTF-8', body: 'On its way.'))
+      html = related_mail.parts.first
+      related = Mail::Part.new(content_type: 'multipart/related')
+      related.add_part(html)
+      related.add_part(Mail::Part.new(content_type: 'image/png; name=logo.png', content_id: '<logo>',
+                                      body: "\x89PNG\r\n\x1A\n".b))
+      mail.add_part(related)
+
+      deliver(mail)
+
+      expect(sent_body.slice('text', 'html')).to eq('text' => 'On its way.', 'html' => '<img src="cid:logo">')
+      expect(sent_files.map { |file| file['content_id'] }).to eq(['logo'])
+    end
+
     it 'sends the content ID of an inline attachment as written' do
       mail = shipped_mail
       mail.attachments.inline['logo.png'] = "\x89PNG\r\n\x1A\n".b
@@ -422,8 +468,19 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       mail.to = ['ana@example.com', 'bo@example.com']
       mail.raise_delivery_errors = false
 
+      log = StringIO.new
+      PostHog::Logging.logger = Logger.new(log)
+
       expect { deliver(mail) }.not_to raise_error
       expect(a_request(:post, send_url)).not_to have_been_made
+      expect(log.string).to include('PostHog did not send an email', 'multiple_to')
+    end
+
+    it 'refuses a mail PostHog would turn down as invalid, such as one with no subject' do
+      no_subject = shipped_mail.tap { |mail| mail.subject = nil }
+      spaced_key = shipped_mail.tap { |mail| mail['X-PostHog-Idempotency-Key'] = 'order 1' }
+
+      expect([refusal_of(no_subject), refusal_of(spaced_key)]).to eq(%w[invalid_mail invalid_mail])
     end
   end
 
@@ -475,6 +532,20 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
           expect([error.status, error.code, error.retryable?]).to eq([status, 'attachment_upload_failed', retryable])
         }
         expect(a_request(:post, send_url)).not_to have_been_made
+      end
+    end
+
+    # DeliveryError#retryable? repeats the rule PostHog::Emails retries by, which the SDK keeps private.
+    it 'judges every failure retryable exactly as the SDK does' do
+      statuses = [nil, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]
+      codes = %w[network_error idempotency_key_in_flight quota_limited upload_quota_exceeded throttled
+                 attachment_upload_failed delivery_unavailable server_error invalid_input]
+      emails = PostHog.emails
+      statuses.product(codes).each do |status, code|
+        error = PostHog::EmailError.new(code: code, message: 'No.', status_code: status)
+
+        expect(PostHog::Rails::DeliveryError.new(error).retryable?).to eq(emails.__send__(:retryable?, error)),
+                                                                       "#{status.inspect} #{code}"
       end
     end
 

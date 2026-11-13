@@ -3,10 +3,10 @@
 module PostHog
   module Rails
     # PostHog can't carry part of this mail, so nothing was sent. Raised before any request, and only when the mailer's
-    # `raise_delivery_errors` is on.
+    # `raise_delivery_errors` is on; with it off, the delivery method logs the error to `PostHog::Logging.logger`.
     class UnsupportedMailError < StandardError
       # @return [String] Which part PostHog can't carry, such as `multiple_to`, `unsupported_header` or
-      #   `template_unsupported`.
+      #   `template_unsupported`, or `invalid_mail` for a field PostHog would turn down, such as a missing subject.
       attr_reader :refusal
 
       # @api private
@@ -17,7 +17,7 @@ module PostHog
     end
 
     # PostHog did not queue the mail, or the delivery method could not tell whether it did. The PostHog::EmailError
-    # behind it is its {#cause}.
+    # behind it is its {#cause}. With the mailer's `raise_delivery_errors` off, the delivery method logs it instead.
     class DeliveryError < StandardError
       # @return [Integer, nil] The HTTP status, when PostHog answered.
       attr_reader :status

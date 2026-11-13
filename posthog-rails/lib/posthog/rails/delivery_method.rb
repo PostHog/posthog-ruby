@@ -35,11 +35,26 @@ module PostHog
       # @raise [UnsupportedMailError] PostHog can't send part of the mail, so nothing was sent.
       # @raise [DeliveryError] PostHog did not queue the mail.
       def deliver!(mail)
-        arguments = MailMapper.new(default_template_key: settings[:default_template_key])
-                              .map(mail, derived_template_key: MailerExtensions.template_key(mail))
-        result = PostHog.emails.send(**arguments, integration: INTEGRATION)
+        result = send_email(mail)
         mail.message_id = result.id
         result
+      rescue UnsupportedMailError, DeliveryError => e
+        # Mail drops the error when the mailer turns raise_delivery_errors off, so this line is all that is left of it.
+        PostHog::Logging.logger.error("PostHog did not send an email: #{e.message}") unless mail.raise_delivery_errors
+        raise
+      end
+
+      private
+
+      def send_email(mail)
+        arguments = MailMapper.new(default_template_key: settings[:default_template_key])
+                              .map(mail, derived_template_key: MailerExtensions.template_key(mail))
+        begin
+          PostHog.emails.send(**arguments, integration: INTEGRATION)
+        rescue ArgumentError => e
+          # The SDK checks its arguments before any request, such as the subject a send needs.
+          raise UnsupportedMailError.new(refusal: 'invalid_mail', detail: e.message.chomp('.'))
+        end
       rescue PostHog::EmailError => e
         raise DeliveryError, e
       end
