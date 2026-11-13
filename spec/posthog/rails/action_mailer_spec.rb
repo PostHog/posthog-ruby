@@ -714,6 +714,42 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
                                             'text' => 'Hi')
     end
 
+    it 'leaves an app on another delivery method sending as before' do
+      output = run_app(<<~RUBY)
+        require 'rails'
+        require 'action_mailer/railtie'
+        require 'posthog'
+        require 'posthog/rails'
+        require 'webmock'
+        include WebMock::API
+        WebMock.enable!
+
+        class App < Rails::Application
+          config.eager_load = false
+          config.logger = Logger.new(File::NULL)
+          config.action_mailer.delivery_method = :test
+        end
+        App.initialize!
+
+        class UserMailer < ActionMailer::Base
+          def welcome
+            attachments['invoice.pdf'] = 'pdf'
+            mail(from: 'shop@example.com', to: %w[ana@example.com bo@example.com], subject: 'Welcome',
+                 'X-Campaign' => 'spring') { |f| f.text { render plain: 'Hi' } }
+          end
+        end
+
+        stub_request(:any, /posthog/)
+        PostHog.init(api_key: 'phc_test', secret_key: 'phs_test', test_mode: true)
+        UserMailer.welcome.deliver_now
+        sent = ActionMailer::Base.deliveries.first
+        p [ActionMailer::Base.deliveries.size, sent.to, sent['X-Campaign'].to_s, sent.attachments.size,
+           WebMock::RequestRegistry.instance.requested_signatures.hash.keys.count { |r| r.uri.path.include?("/messaging/") }]
+      RUBY
+
+      expect(output.strip).to eq('[1, ["ana@example.com", "bo@example.com"], "spring", 1, 0]')
+    end
+
     it 'boots without Action Mailer and loads none of the delivery method' do
       output = run_app(<<~RUBY)
         require 'rails'
