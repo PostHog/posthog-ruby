@@ -9,8 +9,12 @@ require 'active_job'
 $LOAD_PATH.unshift File.expand_path('../../../posthog-rails/lib', __dir__)
 require 'posthog/rails'
 
-initializer = PostHog::Rails::Railtie.initializers.find { |i| i.name == 'posthog.action_mailer' }
-PostHog::Rails::Railtie.instance.instance_exec(nil, &initializer.block)
+require 'posthog/rails/delivery_method'
+
+# What the Railtie's Action Mailer load hook does, done once on Action Mailer itself. Registering the hook here would
+# run it on the stand-in classes other specs pass to run_load_hooks. 'a Rails app' below boots the Railtie's own hook.
+ActionMailer::Base.prepend PostHog::Rails::MailerExtensions
+ActionMailer::Base.add_delivery_method :posthog, PostHog::Rails::DeliveryMethod
 
 class ShippingMailer < ActionMailer::Base
   self.delivery_method = :posthog
