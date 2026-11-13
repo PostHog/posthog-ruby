@@ -769,6 +769,15 @@ module PostHog
                )).to have_been_made.twice
       end
 
+      it 'takes a marker at the edges of the name/version every SDK accepts' do
+        integration = "#{'a1-' * 13}a/#{'3.21.0-rc.1+Build.7'.ljust(40, 'x')}"
+
+        send_code(integration: integration)
+
+        expect(a_request(:post, send_url).with(headers: { 'X-PostHog-Integration' => integration }))
+          .to have_been_made.twice
+      end
+
       it 'sends no marker without the option' do
         send_template
 
@@ -777,10 +786,13 @@ module PostHog
       end
 
       it 'refuses a marker outside name/version before any request' do
-        ['action-mailer', 'Action-Mailer/1.0', 'action mailer/1.0', 'action-mailer/1.0 beta', "#{'a' * 41}/1.0", 7]
-          .each do |integration|
-            expect { send_code(integration: integration) }.to raise_error(ArgumentError, /integration must be/)
-          end
+        [
+          'action-mailer', 'Action-Mailer/1.0', 'action mailer/1.0', "#{'a' * 41}/1.0", 7,
+          'action-mailer/', 'action-mailer/1.0 beta', 'action-mailer/1.0/x', 'action-mailer/1_0',
+          "action-mailer/#{'1' * 41}"
+        ].each do |integration|
+          expect { send_code(integration: integration) }.to raise_error(ArgumentError, /integration must be/)
+        end
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
     end
