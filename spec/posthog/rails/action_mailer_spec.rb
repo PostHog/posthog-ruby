@@ -92,6 +92,10 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
     end
   end
 
+  def invoice_mail
+    shipped_mail.tap { |mail| mail.attachments['invoice.pdf'] = "%PDF-1.4\n" }
+  end
+
   def deliver(mail)
     mail.delivery_method(described_class, settings)
     mail.deliver
@@ -217,6 +221,17 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
 
         expect(refusal_of(mail)).to eq('unsupported_header')
       end
+    end
+
+    it 'refuses click tracking without open tracking, which PostHog would refuse after the uploads' do
+      mail = invoice_mail
+      mail['X-PostHog-Track-Opens'] = 'false'
+      mail['X-PostHog-Track-Clicks'] = 'true'
+
+      expect { deliver(mail) }.to raise_error(PostHog::Rails::UnsupportedMailError, /needs open tracking/) { |error|
+        expect(error.refusal).to eq('unsupported_header')
+      }
+      expect(a_request(:any, %r{/messaging/|files\.example\.com})).not_to have_been_made
     end
 
     it '06 names mail from its mailer and action, made safe for a template key' do
@@ -554,10 +569,6 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
           expect(error.cause).to be_a(PostHog::EmailError)
         }
       end
-    end
-
-    def invoice_mail
-      shipped_mail.tap { |mail| mail.attachments['invoice.pdf'] = "%PDF-1.4\n" }
     end
 
     it 'raises a permanent DeliveryError when the upload quota is used up' do

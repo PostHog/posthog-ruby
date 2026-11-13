@@ -61,11 +61,22 @@ module PostHog
           template_key: template_key(options[:template_key], derived_template_key),
           **content(mail),
           **options.slice(:distinct_id, :idempotency_key, :sensitive),
-          tracking: (options.slice(*TRACKING) unless options.slice(*TRACKING).empty?)
+          tracking: tracking(options.slice(*TRACKING))
         }.compact
       end
 
       private
+
+      def tracking(switches)
+        return if switches.empty?
+
+        if switches[:clicks] && switches[:opens] == false
+          refuse('unsupported_header', 'X-PostHog-Track-Clicks: true needs open tracking, so it can\'t go with ' \
+                                       'X-PostHog-Track-Opens: false')
+        end
+
+        switches
+      end
 
       def posthog_options(mail)
         mail.header.fields.each_with_object({}) do |field, options|
