@@ -2537,6 +2537,29 @@ module PostHog
       end
     end
 
+    it 'clamps month and year lookbacks after every step' do
+      [
+        [[2025, 3, 31], '1m', [2025, 2, 28]],
+        [[2025, 5, 31], '1m', [2025, 4, 30]],
+        [[2024, 3, 31], '1m', [2024, 2, 29]],
+        [[2025, 3, 31], '2m', [2025, 1, 28]],
+        [[2025, 3, 31], '13m', [2024, 2, 28]],
+        [[2025, 12, 31], '10m', [2025, 2, 28]],
+        [[2019, 1, 29], '12m', [2018, 1, 28]],
+        [[2019, 1, 29], '1y', [2018, 1, 29]],
+        [[2025, 3, 31], '0m', [2025, 3, 31]],
+        [[2024, 2, 29], '1y', [2023, 2, 28]],
+        [[2024, 2, 29], '4y', [2020, 2, 28]],
+        [[2024, 2, 29], '0y', [2024, 2, 29]]
+      ].each do |now, value, expected|
+        Timecop.freeze(Time.gm(*now, 12, 0, 0)) do
+          expect(
+            FeatureFlagsPoller.relative_date_parse_for_feature_flag_matching(value)
+          ).to eq(DateTime.new(*expected, 12, 0, 0, Rational(0, 24))), "#{value} from #{now.join('-')}"
+        end
+      end
+    end
+
     it 'test year parsing' do
       Timecop.freeze(Time.gm(2020, 1, 1, 12, 1, 20, 134_000, 0)) do
         expect(
