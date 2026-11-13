@@ -211,6 +211,26 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(mail)).to eq('invalid_template_key')
     end
 
+    it 'sends an explicit template key of 256 characters and refuses a longer one' do
+      longest = shipped_mail
+      longest['X-PostHog-Template-Key'] = 'k' * 256
+      too_long = shipped_mail
+      too_long['X-PostHog-Template-Key'] = 'k' * 257
+
+      expect(refusal_of(too_long)).to eq('invalid_template_key')
+      deliver(longest)
+
+      expect(sent_body['template_key']).to eq('k' * 256)
+    end
+
+    it 'cuts a derived template key to the 256 characters PostHog accepts' do
+      mailer = Class.new(Admin::UserMailer) { self.mailer_name = 'm' * 300 }
+
+      mailer.welcome_email.deliver_now
+
+      expect(sent_body['template_key']).to eq('m' * 256)
+    end
+
     it '09 refuses more than one To address' do
       mail = shipped_mail
       mail.to = ['ana@example.com', 'bo@example.com']

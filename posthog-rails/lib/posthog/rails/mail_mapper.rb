@@ -10,7 +10,8 @@ module PostHog
     # @api private
     class MailMapper
       INTEGRATION_NAME = 'action-mailer'
-      TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
+      MAX_TEMPLATE_KEY = 256
+      TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,#{MAX_TEMPLATE_KEY}}\z/
       MAPPED_HEADERS = %w[from to cc bcc reply-to subject].freeze
       IGNORED_HEADERS = %w[message-id date mime-version x-mailer return-path sender content-type
                            content-transfer-encoding].freeze
@@ -27,8 +28,8 @@ module PostHog
       }.freeze
       TEMPLATE_HEADER = 'x-posthog-template-id'
       NORMAL_PRIORITY = { 'x-priority' => /\A3\b/, 'priority' => /\Anormal\z/i, 'importance' => /\Anormal\z/i }.freeze
-      private_constant :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS, :TEMPLATE_HEADER,
-                       :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS, :ATTACHMENT_CHARSETS,
+      private_constant :MAX_TEMPLATE_KEY, :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS,
+                       :TEMPLATE_HEADER, :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS, :ATTACHMENT_CHARSETS,
                        :BODY_PARAMETERS, :ATTACHMENT_PARAMETERS
 
       # @param default_template_key [String, nil] The key for mail that sets none and has no mailer name.
@@ -114,14 +115,14 @@ module PostHog
           return explicit if TEMPLATE_KEY_PATTERN.match?(explicit)
 
           refuse('invalid_template_key', 'X-PostHog-Template-Key can only have letters, digits, hyphens and ' \
-                                         'underscores, at most 400')
+                                         "underscores, at most #{MAX_TEMPLATE_KEY}")
         end
 
         sanitized(derived) || @default_template_key || INTEGRATION_NAME
       end
 
       def sanitized(key)
-        key = key.to_s.gsub(/[^a-zA-Z0-9_-]+/, '-').gsub(/\A-+|-+\z/, '')[0, 400]
+        key = key.to_s.gsub(/[^a-zA-Z0-9_-]+/, '-').gsub(/\A-+|-+\z/, '')[0, MAX_TEMPLATE_KEY]
         key unless key.empty?
       end
 
