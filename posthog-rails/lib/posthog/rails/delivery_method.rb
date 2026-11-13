@@ -39,7 +39,7 @@ module PostHog
         mail.message_id = result.id
         result
       rescue UnsupportedMailError, DeliveryError => e
-        # Mail drops the error when the mailer turns raise_delivery_errors off, so this line is all that is left of it.
+        # Mail's deliver drops the error when the mailer turns raise_delivery_errors off; this line keeps a trace of it.
         PostHog::Logging.logger.error("PostHog did not send an email: #{e.message}") unless mail.raise_delivery_errors
         raise
       end

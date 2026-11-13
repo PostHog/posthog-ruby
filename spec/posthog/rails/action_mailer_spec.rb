@@ -421,6 +421,28 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       expect(refusal_of(mail)).to eq('unsupported_part')
     end
 
+    it 'refuses text and HTML sections of a mixed message even when an alternative holds them' do
+      mail = Mail.new do
+        from 'Shop <shop@example.com>'
+        to 'ana@example.com'
+        subject 'Your order shipped'
+      end
+      mail.content_type = 'multipart/alternative'
+      sections = Mail::Part.new(content_type: 'multipart/mixed')
+      sections.add_part(Mail::Part.new(content_type: 'text/plain; charset=UTF-8', body: 'Read the notes below.'))
+      sections.add_part(Mail::Part.new(content_type: 'text/html; charset=UTF-8', body: '<p>Notes</p>'))
+      mail.add_part(sections)
+
+      expect(refusal_of(mail)).to eq('unsupported_part')
+    end
+
+    it 'names the MIME type of a related image that has no filename' do
+      mail = related_mail
+      mail.add_part(Mail::Part.new(content_type: 'image/png', content_id: '<logo>', body: "\x89PNG\r\n\x1A\n".b))
+
+      expect { deliver(mail) }.to raise_error(PostHog::Rails::UnsupportedMailError, %r{can't send image/png})
+    end
+
     it 'sends a text alternative to HTML that refers to its own inline image' do
       mail = Mail.new do
         from 'Shop <shop@example.com>'
@@ -536,18 +558,45 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       end
     end
 
-    # DeliveryError#retryable? repeats the rule PostHog::Emails retries by, which the SDK keeps private.
-    it 'judges every failure retryable exactly as the SDK does' do
-      statuses = [nil, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]
-      codes = %w[network_error idempotency_key_in_flight quota_limited upload_quota_exceeded throttled
-                 attachment_upload_failed delivery_unavailable server_error invalid_input]
-      emails = PostHog.emails
-      statuses.product(codes).each do |status, code|
-        error = PostHog::EmailError.new(code: code, message: 'No.', status_code: status)
-
-        expect(PostHog::Rails::DeliveryError.new(error).retryable?).to eq(emails.__send__(:retryable?, error)),
-                                                                       "#{status.inspect} #{code}"
+    # DeliveryError#retryable? repeats the rule PostHog::Emails retries by. Each failure goes to a client that
+    # doesn't retry, to read the error, and to one that retries once, to see whether the SDK sends again.
+    it 'calls a failure retryable exactly when the SDK would retry it' do
+      once = PostHog.client
+      retrying = PostHog::Client.new(api_key: API_KEY, secret_key: 'phs_test', test_mode: true,
+                                     email_request_max_retries: 1)
+      allow(retrying.emails).to receive(:sleep)
+      codes = %w[idempotency_key_in_flight quota_limited upload_quota_exceeded throttled attachment_upload_failed
+                 delivery_unavailable server_error invalid_input]
+      failures = [400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504].product(codes).map do |status, code|
+        { status: status, body: JSON.generate(code: code, detail: 'No.') }
       end
+      accepted = { status: 202, body: JSON.generate(message_id: message_id) }
+
+      (failures + [Errno::ECONNREFUSED]).each do |failure|
+        answer = lambda do
+          stub = stub_request(:post, send_url)
+          failure.is_a?(Hash) ? stub.to_return(failure, accepted) : stub.to_raise(failure).then.to_return(accepted)
+        end
+        PostHog.client = once
+        answer.call
+        error = nil
+        expect { deliver(shipped_mail) }.to raise_error(PostHog::Rails::DeliveryError) { |raised| error = raised }
+
+        PostHog.client = retrying
+        WebMock::RequestRegistry.instance.reset!
+        answer.call
+        begin
+          deliver(shipped_mail)
+        rescue PostHog::Rails::DeliveryError
+          nil
+        end
+        attempts = WebMock::RequestRegistry.instance.times_executed(WebMock::RequestPattern.new(:post, send_url))
+        expect(error.retryable?).to eq(attempts == 2), "#{failure.inspect}: sent #{attempts} times"
+        WebMock::RequestRegistry.instance.reset!
+      end
+    ensure
+      PostHog.client = once
+      retrying&.shutdown
     end
 
     it 'raises a retryable DeliveryError when PostHog could not be reached' do

@@ -127,44 +127,45 @@ module PostHog
       end
 
       def content(mail)
-        bodies, files = sorted_parts(mail)
-        content = bodies.each_with_object({}) do |part, by_kind|
+        bodies = []
+        files = []
+        sort_part(mail, bodies, files, [])
+        content = bodies.each_with_object({}) do |(part, _), by_kind|
           check_parameters(part, BODY_PARAMETERS)
           kind = body_kind(part)
           refuse('unsupported_part', "PostHog sends one HTML and one text body, so it can't send #{part.mime_type}") if
             kind.nil? || by_kind.key?(kind)
           by_kind[kind] = part.decoded
         end
+        check_alternatives(bodies.map(&:last))
         files.empty? ? content : content.merge(attachments: files.map { |file| attachment(file) })
       end
 
-      # Splits the message into its bodies and its files. PostHog sends an HTML and a text body as alternatives of
-      # each other, so two bodies must share their nearest multipart/alternative.
-      def sorted_parts(mail)
-        bodies = []
-        files = []
-        sort_part(mail, bodies, files, alternative: nil)
-        groups = bodies.map(&:last)
-        if groups.size > 1 && (groups.uniq.size > 1 || groups.include?(nil))
-          refuse('unsupported_part', "PostHog sends an HTML and a text body as alternatives, so it can't send " \
-                                     'bodies that are sections of one message')
-        end
-        [bodies.map(&:first), files]
-      end
-
-      def sort_part(part, bodies, files, alternative:)
+      # Collects each body with the containers above it, and each file.
+      def sort_part(part, bodies, files, containers)
         attached = attached?(part)
-        return attached ? files << part : bodies << [part, alternative] unless part.multipart?
+        return attached ? files << part : bodies << [part, containers] unless part.multipart?
 
         if attached || !CONTAINERS.include?(part.mime_type)
           refuse('unsupported_part', "PostHog can't send a #{part.mime_type} part as it was built")
         end
 
-        alternative = part if part.mime_type == 'multipart/alternative'
         part.parts.each do |child|
           check_part_headers(child)
-          sort_part(child, bodies, files, alternative: alternative)
+          sort_part(child, bodies, files, [*containers, part])
         end
+      end
+
+      # PostHog sends an HTML and a text body as alternatives of each other, so the nearest container they share
+      # must be a multipart/alternative.
+      def check_alternatives(paths)
+        return if paths.size < 2
+
+        shared = paths.reduce { |left, right| left.take_while.with_index { |container, i| container.equal?(right[i]) } }
+        return if shared.last&.mime_type == 'multipart/alternative'
+
+        refuse('unsupported_part', "PostHog sends an HTML and a text body as alternatives, so it can't send " \
+                                   'bodies that are sections of one message')
       end
 
       def check_part_headers(part)
