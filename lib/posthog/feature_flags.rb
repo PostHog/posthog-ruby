@@ -548,15 +548,39 @@ module PostHog
       when 'w'
         parsed_dt = parsed_dt.prev_day(number * 7)
       when 'm'
-        parsed_dt = parsed_dt.prev_month(number)
+        parsed_dt = subtract_months(parsed_dt, number)
       when 'y'
-        parsed_dt = parsed_dt.prev_year(number)
+        parsed_dt = subtract_years(parsed_dt, number)
       else
         return nil
       end
 
       parsed_dt
     end
+
+    # Steps back one month at a time and clamps the day after every step, as the
+    # SDK spec requires: March 31 minus two months is January 28. A single
+    # prev_month(2) clamps once and lands on January 31.
+    def self.subtract_months(date_time, months)
+      steps = 0
+      # Every month has at least 28 days, so once the day is 28 or less no step
+      # can clamp it again and the rest can be done in one jump.
+      while steps < months && date_time.day > 28
+        date_time = date_time.prev_month
+        steps += 1
+      end
+      date_time.prev_month(months - steps)
+    end
+    private_class_method :subtract_months
+
+    # Years work the same way. Only February 29 can clamp, and only on the first
+    # step, so one step followed by a single jump matches stepping every year.
+    def self.subtract_years(date_time, years)
+      return date_time if years.zero?
+
+      date_time.prev_year.prev_year(years - 1)
+    end
+    private_class_method :subtract_years
 
     # Parse a single semver numeric identifier, rejecting empty, non-digit, or
     # leading-zero values per semver 2.0.0 §2. `reason` names the owner of the value:

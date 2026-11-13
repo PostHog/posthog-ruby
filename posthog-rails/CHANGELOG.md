@@ -1,5 +1,52 @@
 # posthog-rails
 
+## 3.26.3
+
+### Patch Changes
+
+- Updated dependencies [b2551f0]
+  - posthog-ruby@3.34.0
+
+## 3.26.2
+
+### Patch Changes
+
+- Updated dependencies [20a9a33]
+  - posthog-ruby@3.33.0
+
+## 3.26.1
+
+### Patch Changes
+
+- Updated dependencies [1e29b54]
+  - posthog-ruby@3.32.2
+
+## 3.26.0
+
+### Minor Changes
+
+- 9262fee: Excluded exceptions now also match subclasses of a listed class and any exception whose cause chain contains one, for both `excluded_exceptions` and the built-in defaults. For example an error raised while rescuing `ActiveRecord::RecordNotFound` is no longer captured. ActiveJob captures now respect the exclusion list too.
+
+## 3.25.0
+
+### Minor Changes
+
+- ec26ab8: Add an explicitly loaded Sidekiq integration with reporting policies for every failed attempt, terminal failure notifications, or dead-queue failures. The integration owns automatic job error reporting to prevent duplicate Rails and Active Job events. Requires Rails 7.1+ and Sidekiq 7.0.3+; older versions warn and keep existing reporting.
+
+## 3.24.0
+
+### Minor Changes
+
+- ceb36ce: Add a private controller capture_exception helper with filtered request metadata, configured user identity, explicit argument precedence, and the existing exception capture pipeline. Manual reports work independently of automatic exception capture without initializing an unavailable client.
+- 60ad7a7: Add opt-in `report_active_job_retries` reporting for Active Job retry failures, reusing job identity, filtered arguments, and core exception deduplication. The option defaults to false and requires `auto_instrument_active_job`. Retry reports support Rails 5.2 and honor exception exclusions across the serialized cause chain without changing terminal reporting.
+- 6469130: Capture terminating Rails runner exceptions before SDK shutdown when automatic exception capture is enabled. Preserve exit status and error output, report deliberate nonzero exits as fatal runner failures, skip successful exits and signal termination, and respect exception exclusions and existing capture hooks without creating an uninitialized client. Retain the original Rails-reported error for inline conversions and preserve reporter identity and serialized context.
+
+## 3.23.0
+
+### Minor Changes
+
+- 1ab206e: Add opt-in structured logs for controller, SQL, Active Job, and Action Mailer notifications through the existing logs pipeline. Notification records use allowlisted metadata, filtered parameter payloads, and the same severity threshold, scrubbing hook, rate cap, and context correlation as forwarded logs. Controller records reuse Rails' already-filtered parameters without rerunning custom filters. Job argument filtering preserves native Rails custom-filter key/value semantics, honors argument logging opt-outs, and omits mail delivery job arguments. Unsafe or oversized trees are redacted instead of exporting partial data. Empty parameter-filter lists redact keyed job payloads, and unencodable JSON payloads are redacted without dropping lifecycle records. Rescued Active Job enqueue errors are logged at error severity, and suppressed notification records skip parameter processing. Retry waits accept durations and are logged in seconds; error-bearing retry notifications report failed attempts at error severity even when retries remain.
+
 ## 3.22.0
 
 ### Minor Changes

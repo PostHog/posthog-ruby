@@ -50,8 +50,7 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
   let(:stored) { {} }
   let(:shipped_body) do
     { 'to' => 'ana@example.com', 'from' => 'Shop <shop@example.com>', 'subject' => 'Your order shipped',
-      'html' => '<p>On its way.</p>', 'text' => 'On its way.', 'template_key' => 'action-mailer',
-      'capture_engagement' => true }
+      'html' => '<p>On its way.</p>', 'text' => 'On its way.', 'template_key' => 'action-mailer' }
   end
 
   before do
