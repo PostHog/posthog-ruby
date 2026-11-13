@@ -189,9 +189,34 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
       deliver(mail)
 
       expect(sent_body).to eq(shipped_body.merge('template_key' => 'order-shipped', 'distinct_id' => 'user_42',
-                                                 'capture_engagement' => false))
+                                                 'tracking' => { 'engagement' => false }))
       expect(sent_request.headers['Idempotency-Key']).to eq('order-981-shipped')
       expect(sent_request.headers.keys.grep(/distinct|template|engagement/i)).to be_empty
+    end
+
+    it 'sends the tracking and sensitivity the reserved headers choose, and never capture_engagement' do
+      mail = shipped_mail
+      mail['X-PostHog-Track-Opens'] = 'true'
+      mail['X-PostHog-Track-Clicks'] = 'false'
+      mail['X-PostHog-Capture-Engagement'] = 'true'
+      mail['X-PostHog-Sensitive'] = 'true'
+
+      deliver(mail)
+
+      expect(sent_body).to eq(shipped_body.merge(
+                                'tracking' => { 'opens' => true, 'clicks' => false, 'engagement' => true },
+                                'sensitive' => true
+                              ))
+      expect(sent_request.headers.keys.grep(/track|sensitive|engagement/i)).to be_empty
+    end
+
+    %w[X-PostHog-Track-Opens X-PostHog-Track-Clicks X-PostHog-Capture-Engagement X-PostHog-Sensitive].each do |header|
+      it "refuses #{header} other than true or false" do
+        mail = shipped_mail
+        mail[header] = 'yes'
+
+        expect(refusal_of(mail)).to eq('unsupported_header')
+      end
     end
 
     it '06 names mail from its mailer and action, made safe for a template key' do

@@ -9,10 +9,17 @@ module PostHog
     # The `:posthog` Action Mailer delivery method. It sends each mail as one PostHog email, through the client that
     # `PostHog.init` made, and sets the mail's `message_id` to PostHog's message ID.
     #
-    # A mail's `X-PostHog-Capture-Engagement` header, `true` or `false`, decides whether PostHog captures the email's
-    # engagement events (sent, delivered, opened, clicked, bounced) as events on the recipient's person. It defaults to
-    # `true`. Turning it off doesn't change the email: PostHog still adds its open pixel to count opens. It never
-    # rewrites the email's links, so it counts no clicks.
+    # A mail's reserved headers set the send's options, and are never sent. Each of these takes `true` or `false`, and
+    # PostHog decides when the mail leaves it out:
+    # - `X-PostHog-Track-Opens`: whether PostHog adds its open pixel to count opens;
+    # - `X-PostHog-Track-Clicks`: whether PostHog rewrites the links to count clicks. Off by default for a sensitive
+    #   mail, and it needs open tracking;
+    # - `X-PostHog-Capture-Engagement`: whether PostHog captures the email's engagement events (sent, delivered,
+    #   opened, clicked, bounced) as events on the recipient's person;
+    # - `X-PostHog-Sensitive`: `true` for mail with login links, reset tokens or codes. PostHog leaves its links
+    #   unchanged unless `X-PostHog-Track-Clicks` is `true`, its subject off engagement events, and its content out of
+    #   logs. Left out, PostHog takes the setting of the template whose key matches, and treats the mail as sensitive
+    #   when none matches.
     #
     # @example config/environments/production.rb
     #   config.action_mailer.delivery_method = :posthog

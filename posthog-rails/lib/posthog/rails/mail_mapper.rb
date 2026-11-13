@@ -24,11 +24,17 @@ module PostHog
         'x-posthog-distinct-id' => :distinct_id,
         'x-posthog-template-key' => :template_key,
         'x-posthog-idempotency-key' => :idempotency_key,
-        'x-posthog-capture-engagement' => :capture_engagement
+        'x-posthog-sensitive' => :sensitive,
+        'x-posthog-track-opens' => :opens,
+        'x-posthog-track-clicks' => :clicks,
+        'x-posthog-capture-engagement' => :engagement
       }.freeze
+      SWITCHES = %i[sensitive opens clicks engagement].freeze
+      TRACKING = %i[opens clicks engagement].freeze
       TEMPLATE_HEADER = 'x-posthog-template-id'
       NORMAL_PRIORITY = { 'x-priority' => /\A3\b/, 'priority' => /\Anormal\z/i, 'importance' => /\Anormal\z/i }.freeze
       private_constant :MAX_TEMPLATE_KEY, :TEMPLATE_KEY_PATTERN, :MAPPED_HEADERS, :IGNORED_HEADERS, :OPTION_HEADERS,
+                       :SWITCHES, :TRACKING,
                        :TEMPLATE_HEADER, :NORMAL_PRIORITY, :CONTAINERS, :PART_HEADERS, :ATTACHMENT_CHARSETS,
                        :BODY_PARAMETERS, :ATTACHMENT_PARAMETERS
 
@@ -54,7 +60,8 @@ module PostHog
           subject: mail.subject,
           template_key: template_key(options[:template_key], derived_template_key),
           **content(mail),
-          **options.slice(:distinct_id, :idempotency_key, :capture_engagement)
+          **options.slice(:distinct_id, :idempotency_key, :sensitive),
+          tracking: (options.slice(*TRACKING) unless options.slice(*TRACKING).empty?)
         }.compact
       end
 
@@ -67,7 +74,8 @@ module PostHog
           next if MAPPED_HEADERS.include?(name) || IGNORED_HEADERS.include?(name)
           next if NORMAL_PRIORITY.key?(name) && NORMAL_PRIORITY[name].match?(value.strip)
 
-          options[OPTION_HEADERS.fetch(name) { refuse_header(name, field.name) }] = option_value(name, value)
+          option = OPTION_HEADERS.fetch(name) { refuse_header(name, field.name) }
+          options[option] = SWITCHES.include?(option) ? switch(field.name, value) : value
         end
       end
 
@@ -79,11 +87,10 @@ module PostHog
         refuse('unsupported_header', "PostHog can't send the #{header} header")
       end
 
-      def option_value(name, value)
-        return value unless name == 'x-posthog-capture-engagement'
+      def switch(header, value)
         return value == 'true' if %w[true false].include?(value)
 
-        refuse('unsupported_header', 'X-PostHog-Capture-Engagement must be true or false')
+        refuse('unsupported_header', "#{header} must be true or false")
       end
 
       def single_recipient(mail)
