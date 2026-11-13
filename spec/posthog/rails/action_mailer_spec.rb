@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'open3'
+require 'tmpdir'
 require 'logger'
 require 'rails'
 require 'action_mailer'
@@ -581,8 +582,13 @@ RSpec.describe PostHog::Rails::DeliveryMethod do
   end
 
   describe 'a Rails app' do
+    # Runs each app from a directory of its own, so the files Rails writes when it boots, such as
+    # tmp/local_secret.txt, never land in the checkout.
     def run_app(script)
-      stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', '-Iposthog-rails/lib', '-e', script)
+      paths = %w[lib posthog-rails/lib].map { |path| "-I#{File.expand_path("../../../#{path}", __dir__)}" }
+      stdout, stderr, status = Dir.mktmpdir do |root|
+        Open3.capture3(RbConfig.ruby, *paths, '-e', script, chdir: root)
+      end
       expect(status).to be_success, "#{stdout}\n#{stderr}"
       stdout
     end
