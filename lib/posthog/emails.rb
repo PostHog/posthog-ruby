@@ -97,7 +97,7 @@ module PostHog
                         "project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'
     TEMPLATE_FIELDS = %i[template_data].freeze
-    CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments capture_engagement].freeze
+    CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments sensitive tracking capture_engagement].freeze
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
@@ -157,8 +157,22 @@ module PostHog
     #     line or wrapped at 60, 64 or 76 characters. PostHog can't fetch a file from a path or URL;
     #   - +content_type+ [String] the MIME type, optional. Without it, the type follows the file name;
     #   - +content_id+ [String] optional: shows the file inline where `html` has `<img src="cid:...">` with this ID.
-    # @param capture_engagement [Boolean] Code form: whether PostHog captures the email's opens and clicks as events
-    #   of the recipient. Defaults to +true+. A project whose admin turned engagement capture off captures nothing.
+    # @param sensitive [Boolean] Code form: +true+ when the email carries login links, reset tokens or codes. A
+    #   sensitive email keeps its links unchanged unless +tracking+ turns clicks on, leaves its subject off engagement
+    #   events, and keeps its content out of logs. Left out, the email takes the setting of the template made in
+    #   PostHog whose key matches +template_key+, and is sensitive when no template matches. Sent only when you set
+    #   it, and needs a PostHog version that takes it.
+    # @param tracking [Boolean, Hash] Code form: what PostHog tracks for the email. Left out, PostHog counts opens and
+    #   captures engagement events, and tracks clicks only when the email isn't sensitive. +true+ turns on opens,
+    #   clicks and engagement events, even for a sensitive email. +false+ turns them all off: the email has no open
+    #   pixel and no rewritten links, and PostHog captures no engagement events for it. A Hash such as
+    #   +{ clicks: true }+ sets +:opens+ (default +true+), +:clicks+ (default: on unless the email is sensitive) and
+    #   +:engagement+ (default +true+) one by one. Turn clicks on for a sensitive email only when its links are safe to
+    #   rewrite. Click tracking needs open tracking. A project whose admin turned engagement capture off captures
+    #   nothing, whatever the send says. Sent only when you set it, and needs a PostHog version that takes it.
+    # @param capture_engagement [Boolean] Deprecated: use +tracking: { engagement: false }+ instead. Code form:
+    #   whether PostHog captures the email's engagement events. It still works, but a send can't set both. Sent
+    #   only when you set it.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -178,12 +192,13 @@ module PostHog
     # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
-      reply_to: nil, cc: nil, bcc: nil, attachments: nil, capture_engagement: nil, distinct_id: nil,
-      idempotency_key: nil, max_retries: nil
+      reply_to: nil, cc: nil, bcc: nil, attachments: nil, sensitive: nil, tracking: nil, capture_engagement: nil,
+      distinct_id: nil, idempotency_key: nil, max_retries: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
-        cc: cc, bcc: bcc, attachments: attachments, capture_engagement: capture_engagement
+        cc: cc, bcc: bcc, attachments: attachments, sensitive: sensitive, tracking: tracking,
+        capture_engagement: capture_engagement
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
@@ -337,8 +352,8 @@ module PostHog
       %i[html text from].each do |name|
         raise ArgumentError, "#{name} must be a string." if fields.key?(name) && !fields[name].is_a?(String)
       end
-      unless [nil, true, false].include?(fields[:capture_engagement])
-        raise ArgumentError, 'capture_engagement must be true or false.'
+      %i[capture_engagement sensitive].each do |name|
+        raise ArgumentError, "#{name} must be true or false." unless [nil, true, false].include?(fields[name])
       end
 
       code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
@@ -347,8 +362,21 @@ module PostHog
         list = fields.key?(name) ? addresses(name, fields[name]) : []
         code[name] = list unless list.empty?
       end
-      code[:capture_engagement] = fields.fetch(:capture_engagement, true)
+      code[:capture_engagement] = fields[:capture_engagement] if fields.key?(:capture_engagement)
+      code[:sensitive] = fields[:sensitive] if fields.key?(:sensitive)
+      code[:tracking] = tracking(fields[:tracking]) if fields.key?(:tracking)
       code
+    end
+
+    def tracking(value)
+      return value if [true, false].include?(value)
+      raise ArgumentError, 'tracking must be true, false or a Hash such as { clicks: true }.' unless value.is_a?(Hash)
+
+      kinds = value.compact
+      kinds.each do |kind, on|
+        raise ArgumentError, "tracking[#{kind.inspect}] must be true or false." unless [true, false].include?(on)
+      end
+      kinds
     end
 
     def refuse_fields(fields, allowed:, form:, other_form:, why:)

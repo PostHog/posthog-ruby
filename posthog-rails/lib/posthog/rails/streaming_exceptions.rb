@@ -79,12 +79,13 @@ module PostHog
       private
 
       def capture_streaming_exception(exception, source, env = nil)
-        properties = env ? build_properties(ActionDispatch::Request.new(env), env) : {}
+        context = ExceptionContext.new(ActionDispatch::Request.new(env)) if env
+        properties = context ? context.properties : {}
         properties['$exception_source'] = source
         properties['$exception_level'] = 'error'
         PostHog.capture_exception(
           exception,
-          env ? extract_distinct_id(env) : nil,
+          context&.distinct_id,
           properties,
           mechanism: { 'type' => 'middleware', 'handled' => false }
         )

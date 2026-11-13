@@ -1,5 +1,17 @@
 # posthog-ruby
 
+## 3.33.0
+
+### Minor Changes
+
+- 20a9a33: A send with your own content now takes `sensitive:` and `tracking:`. Pass `sensitive: true` when the email carries login links, reset tokens or codes: PostHog then keeps its links unchanged unless `tracking:` turns clicks on, leaves its subject off engagement events, and keeps its content out of logs. Left out, the email takes the setting of the template made in PostHog whose key matches `template_key`, and is sensitive when no template matches. `tracking:` chooses what PostHog tracks for the email. Left out, PostHog counts opens and captures engagement events, and tracks clicks only when the email isn't sensitive. `true` turns on opens, clicks and engagement events, and `false` turns them all off. A Hash such as `{ clicks: true }` sets `:opens`, `:clicks` and `:engagement` one by one. `capture_engagement:` is deprecated in favor of `tracking: { engagement: false }`; it still works, but a send can't set both. The client now sends it only when you set it; PostHog already reads a missing value as on. The new fields need PostHog's API support, which is rolling out: until then, PostHog refuses a send that sets them.
+
+## 3.32.2
+
+### Patch Changes
+
+- 1e29b54: Relative date filters in local flag evaluation now clamp the day after every month or year step, as the SDK spec requires. `2m` on March 31 resolves to January 28 instead of January 31, and `4y` on February 29, 2024 to February 28, 2020.
+
 ## 3.32.1
 
 ### Patch Changes
