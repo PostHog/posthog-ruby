@@ -769,6 +769,15 @@ module PostHog
                )).to have_been_made.twice
       end
 
+      it 'takes a marker at the edges of the name/version every SDK accepts' do
+        integration = "#{'a1-' * 13}a/#{'3.21.0-rc.1+Build.7'.ljust(40, 'x')}"
+
+        send_code(integration: integration)
+
+        expect(a_request(:post, send_url).with(headers: { 'X-PostHog-Integration' => integration }))
+          .to have_been_made.twice
+      end
+
       it 'sends no marker without the option' do
         send_template
 
