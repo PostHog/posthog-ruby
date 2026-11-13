@@ -1,5 +1,78 @@
 # posthog-ruby
 
+## 3.32.1
+
+### Patch Changes
+
+- 38a14da: Remove unstable numeric suffixes from Rails-generated template method names in exception frames when the name matches the template source path. Preserve filenames, line numbers, source context, frame classification, cause chains, and duplicate capture prevention.
+
+## 3.32.0
+
+### Minor Changes
+
+- d309582: A `tools/call` that names a tool the server never registered now sends `$mcp_unknown_tool` instead of a failed `$mcp_tool_call`; the client gets the same error as before. A call that echoes a conversation handle keeps it on the event.
+
+## 3.31.0
+
+### Minor Changes
+
+- 3be40e8: `PostHog::MCP` tool definitions now match what directory reviews expect. The `get_more_tools` virtual tool declares `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint` as `false`, because a call records data. The injected `context` argument has a shorter description that asks for a few words by role. The injected `llm_model` argument is optional. This changes your published tool definitions; if your server is listed in the ChatGPT or Claude directories, those platforms may re-review the updated tools.
+
+## 3.30.3
+
+### Patch Changes
+
+- eb7216a: `PostHog::MCP` now sends `$mcp_initialize` only for a client's `initialize` request. A session's first `tools/call`, listing or resource read without an `initialize` (stateless HTTP or a lone call) no longer emits one, so fewer `$mcp_initialize` events will arrive.
+
+## 3.30.2
+
+### Patch Changes
+
+- 2cad6bc: Exclude client-only flag definitions from local evaluation warnings on API and shared-cache loads, while preserving local evaluation and warning again if their runtime changes back.
+
+## 3.30.1
+
+### Patch Changes
+
+- ff00d29: Reworded the descriptions of the injected `conversation_id` and `llm_model` arguments and the `get_more_tools` virtual tool so they describe the field instead of instructing the model. This changes your published tool definitions; if your server is listed in the ChatGPT or Claude directories, those platforms may re-review the updated tools.
+
+## 3.30.0
+
+### Minor Changes
+
+- f71d774: The new `client.emails` sends transactional email from your Ruby code and reads each email's delivery status.
+  
+  ```ruby
+  posthog = PostHog::Client.new(api_key: 'phc_...', secret_key: 'phs_...')
+  
+  result = posthog.emails.send(
+    to: 'user@example.com',
+    distinct_id: 'user_123',
+    template_key: 'password-reset',
+    subject: 'Reset your password',
+    html: rendered_html
+  )
+  
+  # 'delivered', 'bounced', ...
+  status = posthog.emails.get(result.id).status
+  ```
+  
+  You can also send a template made in PostHog by its `template_id:`.
+  
+  You need a project secret API key, the kind that starts with `phs_`. Create one under **Project secret API keys** in your project settings. Set its **Transactional email** scope to Write to send emails, or to Read for a key that only reads statuses. Pass it to the client as `secret_key`. Set `app_host` to your PostHog app URL when you self-host PostHog or send through a reverse proxy.
+  
+  PostHog records each email's delivery, opens and clicks on the person with that `distinct_id`. It groups every email with the same `template_key`, so you see their metrics and logs in one place. The SDK retries a request that hits a network error, a rate limit or an outage twice by default. Every send carries an idempotency key, so a retry never sends the email twice. Pass your own `idempotency_key`, such as `welcome:user_123`, and your job runner's retries are safe too.
+  
+  A send with your own content also takes `from:`, `reply_to:` and `capture_engagement: false`. Set `migrated_from` on the client to tell PostHog which email provider you moved from. A failed call raises a `PostHog::EmailError` with PostHog's `code` and the HTTP `status_code`.
+  
+  Docs: [Send transactional emails with Ruby](https://posthog.com/docs/workflows/transactional-emails/ruby) and the [transactional email overview](https://posthog.com/docs/workflows/transactional-emails).
+
+## 3.29.1
+
+### Patch Changes
+
+- aa3fcf9: Prevent concurrent local feature flag lookups from failing with hash iteration errors, and avoid modifying the groups and properties supplied to flag evaluation.
+
 ## 3.29.0
 
 ### Minor Changes

@@ -66,10 +66,14 @@ module PostHog
         event['event_type'] == EventType::MCP_TOOLS_CALL
       end
 
+      def unknown_tool?(event)
+        event['event_type'] == EventType::MCP_UNKNOWN_TOOL
+      end
+
       def add_common_properties(event, properties)
         if present(event['resource_name'])
           properties[Property::RESOURCE_NAME] = event['resource_name']
-          properties[Property::TOOL_NAME] = event['resource_name'] if tool_call?(event)
+          properties[Property::TOOL_NAME] = event['resource_name'] if tool_call?(event) || unknown_tool?(event)
         end
         if present(event['tool_description']) && tool_call?(event)
           properties[Property::TOOL_DESCRIPTION] =

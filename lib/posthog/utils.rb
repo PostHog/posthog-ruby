@@ -23,6 +23,14 @@ module PostHog
       hash.replace symbolize_keys hash
     end
 
+    def normalize_flag_evaluation_inputs(groups, person_properties, group_properties)
+      [
+        symbolize_keys(groups || {}),
+        symbolize_keys(person_properties || {}),
+        symbolize_keys(group_properties || {}).transform_values { |properties| symbolize_keys(properties) }
+      ]
+    end
+
     # public: Return a new hash with keys as strings
     #
     def stringify_keys(hash)
