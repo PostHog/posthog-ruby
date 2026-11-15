@@ -22,11 +22,11 @@ jobs:
             dockerfile: sdk_compliance_adapter/Dockerfile
           - mode: sync
             dockerfile: sdk_compliance_adapter/Dockerfile.sync
-    uses: PostHog/posthog-sdk-test-harness/.github/workflows/test-sdk-action.yml@75fb00092c6045daef60c30acc10ac83afefbfe9
+    uses: PostHog/posthog-sdk-test-harness/.github/workflows/test-sdk-action.yml@003d4162421193b458bbaa93fbb7bb0d0104bc3b
     with:
       adapter-dockerfile: ${{ matrix.dockerfile }}
       adapter-context: "."
-      test-harness-version: "1.0.0"
+      test-harness-version: "1.31.1"
       report-name: sdk-compliance-ruby-${{ matrix.mode }}
       sdk-type: server
       continue-on-error: true

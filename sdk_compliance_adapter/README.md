@@ -11,33 +11,50 @@ An explicit UUID is forwarded to `capture`. Timestamp strings are parsed into
 `Time` objects; UTC conversion and serialization remain SDK-owned. Compression
 uses the SDK's gzip default unless `enable_compression` is supplied at init.
 
+For sync `/capture`, HTTP 200 and `success: true` mean the native invocation
+completed, not that delivery succeeded. `delivered` preserves the SDK's boolean
+return value, including false after a terminal response or exhausted retries.
+Errors remain visible in `/state` and mock traffic; raised exceptions still
+produce HTTP 500. Async capture continues to acknowledge queue acceptance and
+does not return `delivered`.
+
 Flags use `evaluate_flags(..., flag_keys: [key]).get_flag(key)`, not the deprecated
 `get_feature_flag` API. The SDK owns response parsing, retries and the real
 `$feature_flag_called` event. No local-evaluation secret is configured, so the
-remote profile evaluates on each action. Omitted `disable_geoip` remains omitted;
-explicit values are forwarded.
+remote profile evaluates on each action. Omitted `disable_geoip` remains omitted
+when calling the SDK; explicit values are forwarded. The native SDK serializes
+omitted/nil as `geoip_disable: false`, preserving the flags endpoint's existing
+effective default rather than changing GeoIP lookup behavior.
 
 ## Inventory and interpretation
 
-CI uses harness **1.0.0**, server wire format, sequential execution, and separate
+CI uses harness **1.31.1**, server wire format, sequential execution, and separate
 async/sync artifacts. Each profile selects the unchanged **47** definitions:
 30 V0 capture and 17 feature flags. Assertion failures remain advisory; a
 separate inventory check requires both complete reports. V1, dedicated AI and
 non-gzip codecs are unsupported and are not advertised.
 
-Local harness 1.0.0 results with Ruby 3.4.7 and SDK 3.23.6:
+Local harness 1.31.1 results on OrbStack with the Ruby 3.3 adapter image and SDK
+3.34.1:
 
-| Profile | Selected | Passed | Failed |
+| Profile | Selected | Before | After |
 | --- | ---: | ---: | ---: |
-| async | 47 | 46 | 1 |
-| sync | 47 | 45 | 2 |
+| async | 47 | 46 passed / 1 failed | 47 passed / 0 failed |
+| sync | 47 | 39 passed / 8 failed | 46 passed / 1 failed |
 
-Both profiles expose
-`feature_flags.request_payload.disable_geoip_omitted_defaults_to_false`: the
-native SDK omits `geoip_disable`, while this definition requires literal false.
-Explicit false propagation passes. The adapter does not override this default.
+Six sync retry/error definitions previously aborted on adapter HTTP 500 because
+native capture correctly returned false for unsuccessful delivery. They now
+complete their wire assertions without changing SDK retry or delivery behavior.
 
-Sync additionally fails `capture.batch_format.multiple_events_batched_together`
+Both profiles now pass
+`feature_flags.request_payload.disable_geoip_omitted_defaults_to_false`: native
+serialization explicitly carries the effective value required by the canonical
+[GeoIP contract](https://github.com/PostHog/sdk-specs/blob/69681224f9e03e553e7e37e428dcb09c58b61f65/openspec/specs/capture/spec.md#requirement-client-level-geoip-control-with-per-call-override).
+The [flags endpoint](https://github.com/PostHog/posthog/blob/ba1d628545b337816ba39df67e59726f099159c8/rust/feature-flags/src/handler/properties.rs#L20)
+already treats omitted/null as false. No public signature or effective privacy
+default changed, and the adapter does not supply a default option.
+
+Sync still fails `capture.batch_format.multiple_events_batched_together`
 (five requests rather than one). Sync does not accumulate a multi-event batch,
 so this definition and
 `capture.deduplication.preserves_uuid_and_timestamp_on_batch_retry` are not
@@ -46,8 +63,8 @@ a retried single-event request. Both definitions still execute without filtering
 the other 28 capture definitions exercise supported synchronous behavior.
 
 The new UTC override case and SDK-generated UUID presence/uniqueness definitions
-pass in both profiles. These results certify neither every Ruby version nor the
-Docker runtime until CI runs.
+pass in both profiles. These local results do not certify every Ruby version or
+hosted CI.
 
 `/state` retains diagnostic limitations: transport observation covers capture
 requests, not flags HTTP retries; capture counts exclude automatic flag-access
@@ -68,4 +85,10 @@ SDK_MODE=sync docker compose -f sdk_compliance_adapter/docker-compose.yml up --b
 
 For a native launch, unset `STUB` (it disables SDK HTTP), set `RUBYLIB=lib`, and
 run `ruby sdk_compliance_adapter/adapter.rb` with the desired `PORT` and
-`SDK_MODE`. Point harness 1.0.0 at that listener and an available local mock port.
+`SDK_MODE`. Point harness 1.31.1 at that listener and an available local mock port.
+
+## Local legacy contract correction (unreleased)
+
+The adapter declares `synchronous_capture` only for sync mode; async retains the default queued profile. The locally patched, **unreleased** v1 harness replaces only the incompatible single-batch assertion with positive per-event immediate delivery and no extra request on flush. Both profiles passed **47/47** locally with that patched harness, retaining the full inventory. These are not results for published 1.31.1, whose results are shown above.
+
+The specs corrections must land first, then the harness release inputs must pin the resulting specs commit. The reviewed harness must be published before a subsequent real-version image/workflow pin update can make CI consume the correction. This branch upgrades the pins only to already published 1.31.1 and does not claim hosted CI is fully passing.

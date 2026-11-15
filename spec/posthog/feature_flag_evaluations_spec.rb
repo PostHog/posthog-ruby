@@ -674,12 +674,15 @@ module PostHog
     end
 
     describe 'disable_geoip' do
-      it 'forwards disable_geoip: as geoip_disable in the /flags request body' do
-        stub_flags(flags_response)
-        client.evaluate_flags('user-1', disable_geoip: true)
-        expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).with(
-          body: hash_including(geoip_disable: true)
-        )
+      { 'omitted' => {}, 'nil' => { disable_geoip: nil }, 'false' => { disable_geoip: false },
+        'true' => { disable_geoip: true } }.each do |input, options|
+        it "serializes #{input} GeoIP input with the existing effective backend default" do
+          stub_flags(flags_response)
+          client.evaluate_flags('user-1', **options)
+          expect(WebMock).to have_requested(:post, FLAGS_ENDPOINT).with(
+            body: hash_including(geoip_disable: options[:disable_geoip] == true)
+          )
+        end
       end
     end
 
