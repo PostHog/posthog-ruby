@@ -784,11 +784,14 @@ module PostHog
 
             metadata = ff.metadata
             reason = ff.reason
+            enabled = ff.enabled ? true : false
+            # nil marks no evaluated value; retain the record only for failure diagnostics.
+            enabled = nil if ff.failed == true
             records[key_str] = FeatureFlagEvaluations::EvaluatedFlagRecord.new(
               key: key_str,
-              enabled: ff.enabled ? true : false,
-              variant: ff.variant,
-              payload: FeatureFlagResult.parse_payload(ff.payload),
+              enabled: enabled,
+              variant: ff.failed == true ? nil : ff.variant,
+              payload: ff.failed == true ? nil : FeatureFlagResult.parse_payload(ff.payload),
               id: metadata&.id,
               version: metadata&.version,
               reason: reason ? (reason.description || reason.code) : nil,
@@ -813,7 +816,7 @@ module PostHog
         errors_while_computing: errors_while_computing,
         quota_limited: quota_limited,
         minimal_flag_called_events: minimal_flag_called_events,
-        unresolved_flags: unresolved_flags.reject { |key, _reason| records.key?(key) }
+        unresolved_flags: unresolved_flags.reject { |key, _reason| records.key?(key) && !records[key].enabled.nil? }
       )
     end
 

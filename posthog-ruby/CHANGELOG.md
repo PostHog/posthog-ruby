@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.34.1
+
+### Patch Changes
+
+- 26a4a18: Treat failed feature flag records as unevaluated, report evaluation failure diagnostics, and preserve successful local values and payloads when remote fallback fails.
+
 ## 3.34.0
 
 ### Minor Changes
