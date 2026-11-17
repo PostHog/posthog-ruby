@@ -29,7 +29,7 @@ effective default rather than changing GeoIP lookup behavior.
 ## Inventory and interpretation
 
 CI uses published harness **1.32.0**, server wire format, sequential execution, and separate
-async/sync artifacts. Each profile selects the unchanged **47** definitions:
+async/sync artifacts. Each profile selects **47** definitions:
 30 V0 capture and 17 feature flags. Assertion failures remain advisory; a
 separate inventory check requires both complete reports. V1, dedicated AI and
 non-gzip codecs are unsupported and are not advertised.
@@ -37,10 +37,12 @@ non-gzip codecs are unsupported and are not advertised.
 The adapter declares `synchronous_capture` only for sync mode. Published harness
 1.32.0 uses that capability to check five distinct events delivered immediately
 in five requests, one event per request, with unique UUIDs and no extra request
-on flush. Async retains the queued multi-event batching assertion under the same
-case ID, `capture.batch_format.multiple_events_batched_together`. Neither profile
-filters out definitions. The batch retry case inspects a retried single-event
-request in sync mode, not multi-event batching.
+on flush under
+`capture.batch_format.synchronous_capture_delivers_each_event_immediately`.
+Async retains `capture.batch_format.multiple_events_batched_together`.
+The published harness selects between these cases using `synchronous_capture`;
+the SDK workflow adds no filtering. The batch retry case inspects a retried
+single-event request in sync mode, not multi-event batching.
 
 Sync retry/error cases inspect wire traffic even when native capture returns
 false for unsuccessful delivery. The adapter does not change SDK retry or
