@@ -363,8 +363,12 @@ jobs:
       - name: Wait for ${{ matrix.package.name }} to be available
         if: steps.detect-version.outputs.has-new-version == 'true'
         working-directory: ${{ matrix.package.path }}
-        # RubyGems' full index can take longer than the 5-minute default to update
-        run: gem exec rubygems-await --timeout 900 ${{ matrix.package.name }}-*.gem
+        # RubyGems' full index can take longer than the 5-minute default to update.
+        # rubygems-await 0.5.4 crashes on its compact index check with Bundler 4.1+,
+        # so activate an older Bundler before loading it.
+        run: |
+          gem install --no-document rubygems-await -v 0.5.4
+          ruby -e 'gem "bundler", "< 4.1"; load Gem.bin_path("rubygems-await", "rubygems-await")' -- --timeout 900 ${{ matrix.package.name }}-*.gem
 
       - name: Tag ${{ matrix.package.name }}
         if: steps.detect-version.outputs.has-new-version == 'true'
