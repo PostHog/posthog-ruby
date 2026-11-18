@@ -243,7 +243,7 @@ class ComplianceServer
         sdk_name: "posthog-ruby-#{@mode}",
         sdk_version: PostHog::VERSION,
         adapter_version: '1.0.0',
-        capabilities: %w[capture_v0 encoding_gzip]
+        capabilities: %w[capture_v0 encoding_gzip] + (@mode == 'sync' ? ['synchronous_capture'] : [])
       }
     ]
   end
@@ -295,9 +295,14 @@ class ComplianceServer
     attrs[:timestamp] = Time.iso8601(data['timestamp']) if data['timestamp']
 
     Thread.current[:sdk_compliance_uuid] = nil
-    if client.capture(attrs)
+    captured = client.capture(attrs)
+    if @mode == 'sync' || captured
       SDKComplianceAdapter.state.increment_captured(pending: @mode != 'sync')
-      [200, { success: true, uuid: Thread.current[:sdk_compliance_uuid] }]
+      # Sync capture returns delivery status, not queue acceptance. A completed invocation
+      # lets the harness inspect transport failures; do not present it as successful delivery.
+      result = { success: true, uuid: Thread.current[:sdk_compliance_uuid] }
+      result[:delivered] = captured if @mode == 'sync'
+      [200, result]
     else
       [500, { error: 'capture was not queued' }]
     end

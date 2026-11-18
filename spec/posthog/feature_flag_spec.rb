@@ -429,7 +429,7 @@ module PostHog
           'group_properties' => {},
           'person_properties' => { 'region' => 'USA',
                                    'email' => 'a@b.com' },
-          'token' => 'testsecret'
+          'geoip_disable' => false, 'token' => 'testsecret'
         }
       )
 
@@ -446,7 +446,7 @@ module PostHog
           'groups' => {},
           'group_properties' => {},
           'person_properties' => { 'doesnt_matter' => '1' },
-          'token' => 'testsecret'
+          'geoip_disable' => false, 'token' => 'testsecret'
         }
       )
 
@@ -5185,7 +5185,7 @@ module PostHog
 
       # Add the exact stub for the `/flags` endpoint as recommended in the error
       stub_request(:post, 'https://us.i.posthog.com/flags/?v=2').with(
-        body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"region":"USA"},"group_properties":{},"token":"testsecret"}', # rubocop:disable Layout/LineLength
+        body: '{"distinct_id":"distinct_id","groups":{},"person_properties":{"region":"USA"},"group_properties":{},"geoip_disable":false,"token":"testsecret"}', # rubocop:disable Layout/LineLength
         headers: {
           'Accept' => '*/*',
           'Accept-Encoding' => 'gzip;q=1.0,deflate;q=0.6,identity;q=0.3',

@@ -2079,7 +2079,7 @@ module PostHog
               'company' => { '$group_key' => 'id:5', 'x' => 'y' },
               'instance' => { '$group_key' => 'app.posthog.com' }
             },
-            'person_properties' => { 'x1' => 'y1' }, 'token' => 'testsecret'
+            'person_properties' => { 'x1' => 'y1' }, 'geoip_disable' => false, 'token' => 'testsecret'
           }
         )
 
@@ -2103,7 +2103,7 @@ module PostHog
               'instance' => { '$group_key' => 'app.posthog.com' }
             },
             'person_properties' => { 'distinct_id' => 'override' },
-            'token' => 'testsecret'
+            'geoip_disable' => false, 'token' => 'testsecret'
           }
         )
         WebMock.reset_executed_requests!
@@ -2113,7 +2113,7 @@ module PostHog
         assert_requested :post, flags_endpoint, times: 1
         expect(WebMock).to have_requested(:post, flags_endpoint).with(
           body: { 'distinct_id' => 'some_id', 'groups' => {}, 'group_properties' => {},
-                  'person_properties' => {}, 'token' => 'testsecret' }
+                  'person_properties' => {}, 'geoip_disable' => false, 'token' => 'testsecret' }
         )
         WebMock.reset_executed_requests!
 
@@ -2125,7 +2125,7 @@ module PostHog
             'groups' => { 'company' => 'id:5' },
             'group_properties' => { 'company' => { '$group_key' => 'id:5' } },
             'person_properties' => {},
-            'token' => 'testsecret'
+            'geoip_disable' => false, 'token' => 'testsecret'
           }
         )
         WebMock.reset_executed_requests!
@@ -2140,7 +2140,7 @@ module PostHog
         assert_requested :post, flags_endpoint, times: 1
         expect(WebMock).to have_requested(:post, flags_endpoint).with(
           body: { 'distinct_id' => 'some_id', 'groups' => {}, 'group_properties' => {},
-                  'person_properties' => {}, 'token' => 'testsecret' }
+                  'person_properties' => {}, 'geoip_disable' => false, 'token' => 'testsecret' }
         )
         WebMock.reset_executed_requests!
 
@@ -2148,7 +2148,7 @@ module PostHog
         assert_requested :post, flags_endpoint, times: 1
         expect(WebMock).to have_requested(:post, flags_endpoint).with(
           body: { 'distinct_id' => 'some_id', 'groups' => {}, 'group_properties' => {},
-                  'person_properties' => {}, 'token' => 'testsecret' }
+                  'person_properties' => {}, 'geoip_disable' => false, 'token' => 'testsecret' }
         )
         WebMock.reset_executed_requests!
       end

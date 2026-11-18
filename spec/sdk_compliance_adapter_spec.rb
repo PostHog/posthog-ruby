@@ -32,7 +32,11 @@ RSpec.describe ComplianceServer do
       end
 
       it 'identifies the profile without changing SDK wire attribution' do
-        expect(server.send(:health).last[:sdk_name]).to eq("posthog-ruby-#{mode}")
+        health = server.send(:health).last
+        expect(health[:sdk_name]).to eq("posthog-ruby-#{mode}")
+        expect(health[:capabilities]).to eq(
+          %w[capture_v0 encoding_gzip] + (mode == 'sync' ? ['synchronous_capture'] : [])
+        )
         request(server, '/capture', distinct_id: 'user', event: 'example')
         request(server, '/flush')
         expect(batches.first['batch'].first['properties']['$lib']).to eq('posthog-ruby')
@@ -49,6 +53,26 @@ RSpec.describe ComplianceServer do
         request(server, '/flush')
         expect(batches.first['batch'].first['uuid']).to eq(result[:uuid])
         expect(SDKComplianceAdapter.state.snapshot).to include(total_events_captured: 1, pending_events: 0)
+      end
+
+      it 'distinguishes completed invocation from synchronous delivery' do
+        status, result = request(server, '/capture', distinct_id: 'user', event: 'example')
+        expect(status).to eq(200)
+        expect(result[:success]).to be(true)
+        if mode == 'sync'
+          expect(result[:delivered]).to be(true)
+        else
+          expect(result).not_to have_key(:delivered)
+        end
+      end
+
+      it 'preserves capture exceptions as adapter errors' do
+        allow(SDKComplianceAdapter.state.client).to receive(:capture).and_raise('unexpected capture failure')
+        expect(request(server, '/capture', distinct_id: 'user', event: 'example'))
+          .to eq([500, { error: 'unexpected capture failure' }])
+        expect(SDKComplianceAdapter.state.snapshot).to include(
+          total_events_captured: 0, last_error: 'unexpected capture failure'
+        )
       end
 
       it 'generates distinct UUIDs across captures and forwards a supplied UUID unchanged' do
@@ -92,17 +116,71 @@ RSpec.describe ComplianceServer do
           end
           data = { key: 'example', distinct_id: 'user' }
           data[:disable_geoip] = disable_geoip unless disable_geoip.nil?
+          options = {
+            groups: {}, person_properties: {}, group_properties: {}, only_evaluate_locally: false,
+            flag_keys: ['example']
+          }
+          options[:disable_geoip] = disable_geoip unless disable_geoip.nil?
+          expect(SDKComplianceAdapter.state.client).to receive(:evaluate_flags)
+            .with('user', **options).and_call_original
           expect(request(server, '/get_feature_flag', data)).to eq([200, { success: true, value: 'variant' }])
           expect(flag_requests.first['flag_keys_to_evaluate']).to eq(['example'])
-          if disable_geoip.nil?
-            expect(flag_requests.first).not_to have_key('geoip_disable')
-          else
-            expect(flag_requests.first['geoip_disable']).to eq(disable_geoip)
-          end
+          expect(flag_requests.first['geoip_disable']).to eq(disable_geoip == true)
           expect(batches.flat_map { |batch| batch['batch'].map { |event| event['event'] } })
             .to eq(['$feature_flag_called'])
         end
       end
+    end
+  end
+
+  it 'does not reinterpret an async enqueue failure as a completed capture' do
+    server = described_class.new(mode: 'async')
+    request(server, '/init', api_key: 'test-key', host: host)
+    allow(SDKComplianceAdapter.state.client).to receive(:capture).and_return(false)
+    expect(request(server, '/capture', distinct_id: 'user', event: 'example'))
+      .to eq([500, { error: 'capture was not queued' }])
+    expect(SDKComplianceAdapter.state.snapshot[:total_events_captured]).to eq(0)
+  end
+
+  context 'with synchronous delivery failures' do
+    let(:server) { described_class.new(mode: 'sync') }
+
+    [400, 401, 403, 413, 503].each do |status_code|
+      it "acknowledges invocation without claiming delivery after HTTP #{status_code}" do
+        request(server, '/init', api_key: 'test-key', host: host, max_retries: 0)
+        stub_request(:post, "#{host}/batch/").to_return(
+          status: status_code, body: JSON.generate(error: 'delivery failed')
+        )
+
+        status, result = request(server, '/capture', distinct_id: 'user', event: 'example')
+        expect(status).to eq(200)
+        expect(result).to include(success: true, delivered: false)
+        expect(result[:uuid]).to match(/\A[0-9a-f-]{36}\z/)
+        expect(SDKComplianceAdapter.state.snapshot).to include(
+          total_events_captured: 1, total_events_sent: 0, pending_events: 0,
+          last_error: 'delivery failed', requests_made: [include(status_code: status_code, retry_attempt: 0)]
+        )
+        expect(a_request(:post, "#{host}/batch/")).to have_been_made.once
+      end
+    end
+
+    it 'preserves the native retry budget before acknowledging failed delivery' do
+      request(server, '/init', api_key: 'test-key', host: host, max_retries: 2)
+      stub_request(:post, "#{host}/batch/").to_return(status: 503, body: '{"error":"unavailable"}')
+
+      expect(request(server, '/capture', distinct_id: 'user', event: 'example').last)
+        .to include(success: true, delivered: false)
+      expect(SDKComplianceAdapter.state.snapshot).to include(
+        total_retries: 2, total_events_sent: 0, last_error: 'unavailable'
+      )
+      expect(a_request(:post, "#{host}/batch/")).to have_been_made.times(3)
+    end
+
+    it 'sends each event immediately rather than emulating queued batching' do
+      request(server, '/init', api_key: 'test-key', host: host, flush_at: 100, flush_interval_ms: 60_000)
+      2.times { request(server, '/capture', distinct_id: 'user', event: 'example') }
+      expect(batches.map { |batch| batch['batch'].length }).to eq([1, 1])
+      expect(request(server, '/flush').last[:events_flushed]).to eq(0)
     end
   end
 
