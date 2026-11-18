@@ -71,9 +71,9 @@ module PostHog
     #     of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
 
-    SEND_PATH = '/api/projects/@current/messaging/send/email/'
-    UPLOADS_PATH = '/api/projects/@current/messaging/attachments/uploads/'
-    STATUS_PATH = '/api/projects/@current/messaging/emails/%<message_id>s/'
+    SEND_PATH = '/api/messaging/send/email/'
+    UPLOADS_PATH = '/api/messaging/attachments/uploads/'
+    STATUS_PATH = '/api/messaging/emails/%<message_id>s/'
     US_APP_HOST = 'https://us.posthog.com'
     EU_APP_HOST = 'https://eu.posthog.com'
     CLOUD_APP_HOSTS = {
