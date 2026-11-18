@@ -44,7 +44,7 @@ module PostHog
       /x
       US_SSN_PATTERN = /\b\d{3}[ .-]\d{2}[ .-]\d{4}\b/
       CREDIT_CARD_CANDIDATE_PATTERN = %r{\b\d(?:[ ./-]?\d){12,}\b}
-      DIGIT_GROUP_PATTERN = /\d+/
+      SEPARATED_DIGIT_GROUP_PATTERN = /(\D*)(\d+)/
       PHONE_NANP_PATTERN = %r{(?<![\w+])(?:\+?1[ ./-]?)?(?:\(\d{3}\)[ ./-]?|\d{3}[ ./-])\d{3}[ ./-]\d{4}(?!\w)}
       PHONE_INTL_PATTERN = %r{(?<!\w)\+\d{1,3}(?:[ ./()-]{0,2}\d){7,13}(?!\w)}
 
@@ -140,32 +140,32 @@ module PostHog
 
       # Within a card candidate, redact every run of whole separator-delimited
       # digit groups whose joined digits are 13-19 long and pass Luhn.
+      #
+      # Splits into `[separator, digits]` pairs rather than asking each match
+      # for its offset: `MatchData#begin` inside `scan` recounts characters from
+      # the start of the string, which made this pass quadratic.
       def redact_card_in_match(text)
-        groups = []
-        text.scan(DIGIT_GROUP_PATTERN) do
-          groups << [Regexp.last_match[0], Regexp.last_match.begin(0), Regexp.last_match.end(0)]
-        end
+        groups = text.scan(SEPARATED_DIGIT_GROUP_PATTERN)
         output = +''
-        cursor = 0
         first = 0
         while first < groups.length
           digits = +''
           matched_last = -1
           (first...groups.length).each do |last|
-            digits << groups[last][0]
+            digits << groups[last][1]
             break if digits.length > 19
 
             matched_last = last if digits.length >= 13 && passes_luhn?(digits)
           end
           if matched_last >= 0
-            output << text[cursor...groups[first][1]] << REDACTED_VALUE
-            cursor = groups[matched_last][2]
+            output << groups[first][0] << REDACTED_VALUE
             first = matched_last + 1
           else
+            output << groups[first][0] << groups[first][1]
             first += 1
           end
         end
-        output << text[cursor..]
+        output
       end
 
       # Redact structured personal identifiers (emails, IPs, cards, US SSNs,
@@ -196,17 +196,61 @@ module PostHog
         end
       end
 
+      # {sanitize_captured_value} within truncation's depth and breadth limits,
+      # so the cost follows what is captured rather than what the caller sent.
+      # {Truncation.normalize} of the result equals it of a full sanitize.
+      def sanitize_limited_value(value, remaining_depth = Truncation::MAX_DEPTH)
+        case value
+        when Array
+          return '[Array]' if remaining_depth <= 0
+
+          limited = value.first(Truncation::MAX_BREADTH).map { |item| sanitize_limited_value(item, remaining_depth - 1) }
+          value.length > Truncation::MAX_BREADTH ? limited << '[MaxProperties ~]' : limited
+        when Hash
+          return '[Object]' if remaining_depth <= 0
+
+          limited = value.first(Truncation::MAX_BREADTH).to_h do |key, nested|
+            [key.to_s, redact_key?(key) ? REDACTED_VALUE : sanitize_limited_value(nested, remaining_depth - 1)]
+          end
+          limited['...'] = '[MaxProperties ~]' if value.length > Truncation::MAX_BREADTH
+          limited
+        else sanitize_captured_value(value)
+        end
+      end
+
       # Sanitize an event's response, parameters, intent and error. Returns a
       # new shallow copy; does not mutate the input.
       def sanitize_event(event)
         result = event.dup
         result['response'] = sanitize_response(result['response']) unless result['response'].nil?
-        result['parameters'] = sanitize_captured_value(result['parameters']) unless result['parameters'].nil?
-        unless result['user_intent'].nil?
-          result['user_intent'] = redact_pii(sanitize_captured_value(result['user_intent']))
-        end
+        result['parameters'] = sanitize_limited_value(result['parameters']) unless result['parameters'].nil?
+        result['user_intent'] = sanitize_intent(result['user_intent']) unless result['user_intent'].nil?
         result['error'] = sanitize_exception_values(result['error']) unless result['error'].nil?
         result
+      end
+
+      # The credential pass is linear and sees the whole intent: a private key
+      # block or a long word is judged on its full length. The personal-data
+      # passes are not, so they scan a head chosen to give the same kept text.
+      def sanitize_intent(intent)
+        return sanitize_captured_value(intent) unless intent.is_a?(String)
+
+        redact_pii_head(sanitize_string(intent), Truncation::MAX_USER_INTENT_LENGTH)
+      end
+
+      # Cutting the text changes at most the last ~1.5K characters a scan
+      # returns: a match reaches back at most an email's 345 characters, and a
+      # redaction grows a match at most from 3 characters to 10. So a head whose scan returns more
+      # than twice `keep` gives the same first `keep` characters as the full
+      # text. Otherwise the head grows to 40x `keep`, which no run of
+      # redactions can shrink below `keep`: each leaves 10 characters of at
+      # most 345.
+      def redact_pii_head(text, keep)
+        head = text[0, 4 * keep]
+        redacted = redact_pii(head)
+        return redacted if head.length == text.length || redacted.length > 2 * keep
+
+        redact_pii(text[0, 40 * keep])
       end
 
       def sanitize_exception_values(error)
@@ -340,32 +384,17 @@ module PostHog
       # dropping the SDK-injected arguments (they surface as dedicated properties).
       def build_captured_mcp_parameters(request)
         request = stringify_keys(request)
-        return { 'request' => sanitize_captured_value(request) } unless request.is_a?(Hash)
-
-        captured = {}
-        %w[id jsonrpc method].each do |key|
-          captured[key] = sanitize_captured_value(request[key]) if request.key?(key)
-        end
-        captured['params'] = build_captured_params(request['params']) if request.key?('params')
-        { 'request' => captured }
+        sanitize_limited_value('request' => request.is_a?(Hash) ? captured_request_fields(request) : request)
       end
 
-      def build_captured_params(params)
-        return sanitize_captured_value(params) unless params.is_a?(Hash)
-
-        params.to_h do |key, value|
-          [key, key == 'arguments' ? build_captured_arguments(value) : sanitize_captured_value(value)]
+      def captured_request_fields(request)
+        captured = request.slice('id', 'jsonrpc', 'method')
+        params = request['params']
+        if params.is_a?(Hash) && params['arguments'].is_a?(Hash)
+          params = params.merge('arguments' => params['arguments'].except(*INJECTED_ARGUMENT_NAMES))
         end
-      end
-
-      def build_captured_arguments(arguments)
-        return sanitize_captured_value(arguments) unless arguments.is_a?(Hash)
-
-        arguments.each_with_object({}) do |(key, value), captured|
-          next if INJECTED_ARGUMENT_NAMES.include?(key)
-
-          captured[key] = sanitize_captured_value(value)
-        end
+        captured['params'] = params if request.key?('params')
+        captured
       end
 
       # Last-resort credential detection for bare words.
