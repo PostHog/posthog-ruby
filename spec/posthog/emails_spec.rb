@@ -5,10 +5,10 @@ require 'spec_helper'
 
 module PostHog
   describe Emails do
-    let(:send_url) { 'https://us.posthog.com/api/projects/@current/messaging/send/email/' }
+    let(:send_url) { 'https://us.posthog.com/api/messaging/send/email/' }
     let(:template_id) { '0190f6d2-7c1e-7b3a-9f5e-1c2d3e4f5a6b' }
     let(:message_id) { '01a18356-c56c-0001-e494-7666bc915188' }
-    let(:status_url) { "https://us.posthog.com/api/projects/@current/messaging/emails/#{message_id}/" }
+    let(:status_url) { "https://us.posthog.com/api/messaging/emails/#{message_id}/" }
     let(:uuid_v4) { /\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/ }
     let(:options) { { api_key: API_KEY, secret_key: ' phs_test ', test_mode: true } }
     let(:client) { Client.new(options) }
@@ -258,7 +258,7 @@ module PostHog
       before { fake_posthog }
 
       def fake_posthog(app: 'https://us.posthog.com', storage: 'https://files.example.com/team')
-        routes = "#{app}/api/projects/@current/messaging"
+        routes = "#{app}/api/messaging"
         stub_request(:post, "#{routes}/attachments/uploads/").to_return { |request| plan_uploads(request, storage) }
         stub_request(:put, %r{/team/\h{64}\?}).to_return { |request| store(request) }
         stub_request(:post, "#{routes}/send/email/").to_return { |request| accept_send(request) }
@@ -801,7 +801,7 @@ module PostHog
     describe 'client setup' do
       it 'maps an EU ingestion host to the EU app host' do
         options[:host] = 'https://eu.i.posthog.com/'
-        stub_request(:post, 'https://eu.posthog.com/api/projects/@current/messaging/send/email/').to_return(accept)
+        stub_request(:post, 'https://eu.posthog.com/api/messaging/send/email/').to_return(accept)
 
         expect(send_template.id).to eq('msg_1')
       end
@@ -818,7 +818,7 @@ module PostHog
 
       it 'sends to app_host when the client sets it' do
         options.merge!(host: 'https://proxy.example.com', app_host: 'https://posthog.example.com/')
-        stub_request(:post, 'https://posthog.example.com/api/projects/@current/messaging/send/email/').to_return(accept)
+        stub_request(:post, 'https://posthog.example.com/api/messaging/send/email/').to_return(accept)
 
         expect(send_template.id).to eq('msg_1')
       end
