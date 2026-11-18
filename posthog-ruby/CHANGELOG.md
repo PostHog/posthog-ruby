@@ -1,5 +1,11 @@
 # posthog-ruby
 
+## 3.34.3
+
+### Patch Changes
+
+- 455e226: Send transactional emails, attachment uploads, and email status requests through `/api/messaging/` instead of the `/api/projects/@current/messaging/` alias. Needs PostHog Cloud, or a self-hosted PostHog from 2026-11-18 or later. Older self-hosted versions answer these calls with a 404.
+
 ## 3.34.2
 
 ### Patch Changes
