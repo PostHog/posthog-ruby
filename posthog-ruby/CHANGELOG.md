@@ -1,11 +1,5 @@
 # posthog-ruby
 
-## 3.34.2
-
-### Patch Changes
-
-- 53cdca9: Explicitly serialize the existing false GeoIP default in remote feature flag requests, while preserving per-call overrides.
-
 ## 3.34.1
 
 ### Patch Changes
