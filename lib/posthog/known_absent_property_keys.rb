@@ -41,7 +41,12 @@ module PostHog
         end
 
         group_property_keys_known_absent.each do |group_type, keys|
-          groups[group_type.to_s] = validate_keys(keys, "#{GROUP_FIELD}[#{group_type}]")
+          field = "#{GROUP_FIELD}[#{group_type}]"
+          # A String and a Symbol can name the same group type, so their keys are merged before the limit check.
+          merged = (groups[group_type.to_s] || []) + validate_keys(keys, field)
+          raise ArgumentError, "#{field} allows at most #{MAX_KEYS} keys, got #{merged.size}" if merged.size > MAX_KEYS
+
+          groups[group_type.to_s] = merged
         end
       end
 

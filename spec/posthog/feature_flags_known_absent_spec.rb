@@ -218,10 +218,14 @@ module PostHog
 
       it 'fall back to /flags with the listed keys' do
         c = local_client(flag('multi', person('plan', 'not_icontains_multi', ['pro'])))
+        stub_request(:post, flags_endpoint).to_return(
+          status: 200,
+          body: { flags: { 'multi' => { key: 'multi', enabled: true, variant: nil, metadata: { id: 1 } } } }.to_json
+        )
 
         snapshot = c.evaluate_flags('user-1', flag_keys: ['multi'], person_property_keys_known_absent: ['plan'])
 
-        expect(snapshot.get_flag('remote-flag')).to be(true)
+        expect(snapshot.get_flag('multi')).to be(true)
         expect(flags_request_body['person_property_keys_known_absent']).to eq(['plan'])
       end
     end
@@ -365,6 +369,17 @@ module PostHog
         )
 
         expect(known_absent.group_keys(:project)).to eq(Set['tier'])
+      end
+
+      it 'merges String and Symbol names for the same group type before the limit check' do
+        known_absent = KnownAbsentPropertyKeys.build(nil, { organization: ['tier'], 'organization' => ['region'] })
+
+        expect(known_absent.group_keys(:organization)).to eq(Set['tier', 'region'])
+        expect(known_absent.request_fields)
+          .to eq(group_property_keys_known_absent: { 'organization' => %w[tier region] })
+        too_many = { organization: Array.new(600, 'tier'), 'organization' => Array.new(401, 'region') }
+        expect { KnownAbsentPropertyKeys.build(nil, too_many) }
+          .to raise_error(ArgumentError, /allows at most 1000 keys, got 1001/)
       end
 
       it 'rejects inputs of the wrong type' do
