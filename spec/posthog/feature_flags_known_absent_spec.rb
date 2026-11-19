@@ -354,6 +354,14 @@ module PostHog
         expect(WebMock).not_to have_requested(:post, flags_endpoint)
       end
 
+      it 'rejects more than 1000 person keys for an empty flag scope' do
+        c = local_client(flag('needs-region', person('region', 'exact', 'eu')))
+
+        expect do
+          c.evaluate_flags('user-1', flag_keys: [], person_property_keys_known_absent: too_many)
+        end.to raise_error(ArgumentError, /person_property_keys_known_absent allows at most 1000 keys/)
+      end
+
       it 'rejects more than 1000 keys for one group type' do
         c = local_client(flag('needs-region', person('region', 'exact', 'eu')))
 

@@ -736,14 +736,15 @@ module PostHog
 
       return FeatureFlagEvaluations.new(host: host, distinct_id: distinct_id, flags: {}, groups: groups) if @disabled
 
+      known_absent = KnownAbsentPropertyKeys.build(person_property_keys_known_absent,
+                                                   group_property_keys_known_absent)
+
       if flag_keys && flag_keys.empty?
         return FeatureFlagEvaluations.new(
           host: host, distinct_id: distinct_id, flags: {}, groups: groups, disable_geoip: disable_geoip
         )
       end
 
-      known_absent = KnownAbsentPropertyKeys.build(person_property_keys_known_absent,
-                                                   group_property_keys_known_absent)
       groups, person_properties, group_properties = add_local_person_and_group_properties(
         groups, person_properties, group_properties
       )
