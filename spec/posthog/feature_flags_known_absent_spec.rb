@@ -386,6 +386,7 @@ module PostHog
         expect { KnownAbsentPropertyKeys.build('plan', nil) }.to raise_error(ArgumentError)
         expect { KnownAbsentPropertyKeys.build(nil, ['tier']) }.to raise_error(ArgumentError)
         expect { KnownAbsentPropertyKeys.build([1], nil) }.to raise_error(ArgumentError)
+        expect { KnownAbsentPropertyKeys.build(nil, { 1 => ['tier'] }) }.to raise_error(ArgumentError)
       end
     end
   end
