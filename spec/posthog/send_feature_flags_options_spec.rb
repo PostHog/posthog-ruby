@@ -83,6 +83,20 @@ describe PostHog::SendFeatureFlagsOptions do
       expect(options.group_properties).to eq({})
     end
 
+    it 'reads known-absent property keys and round-trips them through to_h' do
+      hash = {
+        'person_property_keys_known_absent' => ['plan'],
+        group_property_keys_known_absent: { company: ['tier'] }
+      }
+      options = PostHog::SendFeatureFlagsOptions.from_hash(hash)
+      expect(options.person_property_keys_known_absent).to eq(['plan'])
+      expect(options.group_property_keys_known_absent).to eq({ company: ['tier'] })
+      expect(options.to_h).to include(
+        person_property_keys_known_absent: ['plan'],
+        group_property_keys_known_absent: { company: ['tier'] }
+      )
+    end
+
     it 'returns nil for non-hash input' do
       expect(PostHog::SendFeatureFlagsOptions.from_hash('not a hash')).to be_nil
       expect(PostHog::SendFeatureFlagsOptions.from_hash(nil)).to be_nil

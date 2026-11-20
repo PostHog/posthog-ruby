@@ -28,14 +28,14 @@ effective default rather than changing GeoIP lookup behavior.
 
 ## Inventory and interpretation
 
-CI uses published harness **1.32.0**, server wire format, sequential execution, and separate
+CI uses published harness **1.34.0**, server wire format, sequential execution, and separate
 async/sync artifacts. Each profile selects **47** definitions:
 30 V0 capture and 17 feature flags. Assertion failures remain advisory; a
 separate inventory check requires both complete reports. V1, dedicated AI and
 non-gzip codecs are unsupported and are not advertised.
 
 The adapter declares `synchronous_capture` only for sync mode. Published harness
-1.32.0 uses that capability to check five distinct events delivered immediately
+1.34.0 uses that capability to check five distinct events delivered immediately
 in five requests, one event per request, with unique UUIDs and no extra request
 on flush under
 `capture.batch_format.synchronous_capture_delivers_each_event_immediately`.
@@ -55,9 +55,9 @@ already treats omitted/null as false. No public signature or effective privacy
 default changed, and the adapter does not supply a default option.
 
 The reusable workflow is pinned to release commit
-`dde638562d33572b5c8ac3a2eafc98b92ffa2261`, whose release inputs pin specs commit
+`574c029da75e96d55c11a54d942a6df983a58ea2`, whose release inputs pin specs commit
 `53e9bc16d14f973809f80049864866d5b6d9bdff`. The published V1 image digest is
-`sha256:7eb6c62e2241ddd48a2dfb326652e7933cd2fe26e0ffcad98cd385d603b4eb82`.
+`sha256:43f75861fbcf5bc6c3d35511caa2be2d55274054c6071ebeb943aca0bcd0633a`.
 Actual async and sync reports must each show 47/47 passing to establish compliance;
 a green advisory job or inventory check alone does not prove this.
 
@@ -80,4 +80,4 @@ SDK_MODE=sync docker compose -f sdk_compliance_adapter/docker-compose.yml up --b
 
 For a native launch, unset `STUB` (it disables SDK HTTP), set `RUBYLIB=lib`, and
 run `ruby sdk_compliance_adapter/adapter.rb` with the desired `PORT` and
-`SDK_MODE`. Point harness 1.32.0 at that listener and an available local mock port.
+`SDK_MODE`. Point harness 1.34.0 at that listener and an available local mock port.
