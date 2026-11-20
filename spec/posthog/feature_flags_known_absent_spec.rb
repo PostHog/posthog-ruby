@@ -247,6 +247,32 @@ module PostHog
 
         expect(snapshot.get_flag('no-plan-cohort')).to be(true)
       end
+
+      [false, true].each do |negation|
+        it "check operator support before the known-absent table with negation #{negation}" do
+          range_cohorts = {
+            '8' => { type: 'AND', values: [{ type: 'AND', values: [
+              { key: 'plan', operator: 'not_between', value: [1, 2], type: 'person', negation: negation }
+            ] }] }
+          }
+          c = local_client(flag('range-cohort', { key: 'id', value: 8, type: 'cohort' }), cohorts: range_cohorts)
+          stub_request(:post, flags_endpoint).to_return(
+            status: 200,
+            body: { flags: { 'range-cohort' => { key: 'range-cohort', enabled: true, variant: nil,
+                                                 metadata: { id: 1 } } } }.to_json
+          )
+
+          local = c.evaluate_flags('user-1', flag_keys: ['range-cohort'], only_evaluate_locally: true,
+                                             person_property_keys_known_absent: ['plan'])
+          expect(local.get_flag('range-cohort')).to be_nil
+          expect(local.unresolved_flags).to eq('range-cohort' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+
+          remote = c.evaluate_flags('user-1', flag_keys: ['range-cohort'],
+                                              person_property_keys_known_absent: ['plan'])
+          expect(remote.get_flag('range-cohort')).to be(true)
+          expect(flags_request_body['person_property_keys_known_absent']).to eq(['plan'])
+        end
+      end
     end
 
     it 'applies to flag dependencies' do
