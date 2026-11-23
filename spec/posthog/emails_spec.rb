@@ -1102,6 +1102,146 @@ module PostHog
       end
     end
 
+    describe 'scheduled sends' do
+      let(:due) { '2026-12-01T08:00:00.123Z' }
+
+      def schedule(scheduled_at = due, **extra)
+        accept('msg_1', status: 'scheduled', scheduled_at: scheduled_at, **extra)
+      end
+
+      it 'sends the time in UTC on both forms and returns it confirmed' do
+        stub_request(:post, send_url).to_return(schedule, schedule('2026-12-01T08:00:00.123000+00:00'))
+
+        template = send_template(scheduled_at: Time.new(2026, 12, 1, 9, 0, 0.123r, '+01:00'))
+        code = send_code(scheduled_at: '2026-12-01T10:00:00.123+02:00')
+
+        [template, code].each do |result|
+          expect(result).to have_attributes(id: 'msg_1', status: 'scheduled',
+                                            scheduled_at: Time.utc(2026, 12, 1, 8, 0, 0.123r))
+        end
+        expect(sent_bodies.map { |body| body['scheduled_at'] }).to eq([due, due])
+      end
+
+      it 'takes a Rails time with zone and a DateTime' do
+        stub_request(:post, send_url).to_return(schedule)
+
+        send_template(scheduled_at: Time.utc(2026, 12, 1, 8, 0, 0.123r).in_time_zone('America/New_York'))
+        send_template(scheduled_at: DateTime.new(2026, 12, 1, 9, 0, 0.123r, '+01:00'))
+
+        expect(sent_bodies.map { |body| body['scheduled_at'] }).to eq([due, due])
+      end
+
+      it 'rounds a finer time up to the next millisecond, so the email never goes out early' do
+        stub_request(:post, send_url).to_return(schedule('2026-12-01T08:00:00.124Z'))
+
+        send_template(scheduled_at: Time.new(2026, 12, 1, 9, 0, 0.1230001r, '+01:00'))
+        send_code(scheduled_at: '2026-12-01T10:00:00.1230000001+02:00')
+        send_code(scheduled_at: '2026-12-01T08:00:00.124000Z')
+
+        expect(sent_bodies.map { |body| body['scheduled_at'] }).to all(eq('2026-12-01T08:00:00.124Z'))
+      end
+
+      it 'sends the same time on every retry' do
+        stub_request(:post, send_url).to_return({ status: 503 }, schedule('2026-12-01T08:00:00.124Z'))
+
+        result = send_template(scheduled_at: Time.utc(2026, 12, 1, 8, 0, 0.1230001r))
+
+        expect(result.status).to eq('scheduled')
+        expect(a_request(:post, send_url).with(body: hash_including(scheduled_at: '2026-12-01T08:00:00.124Z')))
+          .to have_been_made.twice
+      end
+
+      it 'refuses a time without an offset before any request' do
+        ['2026-12-01T09:00:00', '2026-12-01 09:00:00Z', '2026-12-01', '2026-02-30T09:00:00Z', 'tomorrow',
+         Date.new(2026, 12, 1), 1_764_576_000].each do |scheduled_at|
+          expect { send_template(scheduled_at: scheduled_at) }.to raise_error(ArgumentError, /scheduled_at/)
+        end
+        expect(a_request(:any, %r{/messaging/|amazonaws})).not_to have_been_made
+      end
+
+      it 'sends no scheduled_at and returns queued when the caller sets none' do
+        stub_request(:post, send_url).to_return(accept)
+
+        expect(send_template(scheduled_at: nil)).to have_attributes(status: 'queued', scheduled_at: nil)
+        expect(sent_bodies.first).not_to have_key('scheduled_at')
+      end
+
+      it 'schedules on PostHog Cloud EU' do
+        options[:host] = 'https://eu.i.posthog.com'
+        stub_request(:post, 'https://eu.posthog.com/api/messaging/send/email/').to_return(schedule)
+
+        expect(send_template(scheduled_at: due).status).to eq('scheduled')
+      end
+
+      it 'refuses a host that is not PostHog Cloud before any request, because it could send at once' do
+        stub_request(:any, //)
+        options.merge!(host: 'https://proxy.example.com', app_host: 'https://posthog.example.com')
+
+        attachments = [{ filename: 'a.txt', content: 'hi'.b }]
+        expect { send_code(scheduled_at: due, attachments: attachments) }.to raise_error(EmailError) { |error|
+          expect([error.code, error.name, error.field])
+            .to eq(%w[scheduling_requires_cloud validation_error scheduled_at])
+          expect(error.message).to include('https://posthog.example.com')
+        }
+        expect(a_request(:any, %r{/messaging/|amazonaws})).not_to have_been_made
+      end
+
+      it 'returns an email whose time had passed as queued now' do
+        stub_request(:post, send_url).to_return(accept('msg_1', status: 'queued', scheduled_at: nil))
+
+        expect(send_template(scheduled_at: due)).to have_attributes(id: 'msg_1', status: 'queued', scheduled_at: nil)
+      end
+
+      it 'returns a replay of the same key with its original time' do
+        stub_request(:post, send_url).to_return(schedule(replayed: true))
+
+        expect(send_template(scheduled_at: due, idempotency_key: 'welcome:user_123'))
+          .to have_attributes(replayed: true, status: 'scheduled', scheduled_at: Time.utc(2026, 12, 1, 8, 0, 0.123r))
+      end
+
+      {
+        'without scheduled_at' => { message_id: 'msg_1' },
+        'queued without scheduled_at' => { message_id: 'msg_1', status: 'queued' },
+        'with another time' => { message_id: 'msg_1', status: 'scheduled', scheduled_at: '2026-12-01T08:00:00.124Z' },
+        'queued with a time' => { message_id: 'msg_1', status: 'queued', scheduled_at: '2026-12-01T08:00:00.123Z' },
+        'scheduled without a time' => { message_id: 'msg_1', status: 'scheduled', scheduled_at: nil }
+      }.each do |answer, body|
+        it "raises schedule_not_confirmed with the message ID on an acceptance #{answer}, and never retries it" do
+          stub_request(:post, send_url).to_return(status: 202, body: JSON.generate(body))
+
+          expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
+            expect([error.code, error.message_id, error.status_code, error.field])
+              .to eq(['schedule_not_confirmed', 'msg_1', 202, 'scheduled_at'])
+            expect(error.message).to include('msg_1')
+            expect(error.fix).to include("emails.get('msg_1')")
+          }
+          expect(a_request(:post, send_url)).to have_been_made.once
+        end
+      end
+
+      it 'warns against a new send when the client chose the key, and not when the caller did' do
+        stub_request(:post, send_url).to_return(accept)
+
+        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
+          expect(error.fix).to include("Don't send it again")
+        }
+        expect { send_template(scheduled_at: due, idempotency_key: 'welcome:user_123') }
+          .to raise_error(EmailError) { |error| expect(error.fix).to include('same idempotency_key') }
+      end
+
+      it 'surfaces a refused time and never sends without it' do
+        stub_request(:post, send_url).to_return(
+          refuse(400, 'invalid_input', detail: 'scheduled_at is more than 7 days ahead.', attr: 'scheduled_at')
+        )
+
+        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
+          expect([error.code, error.field, error.status_code, error.message_id])
+            .to eq(['invalid_input', 'scheduled_at', 400, nil])
+        }
+        expect(sent_bodies.map { |body| body['scheduled_at'] }).to eq([due])
+      end
+    end
+
     describe '#get' do
       let(:record) do
         { id: message_id, status: 'bounced', created_at: '2026-10-28T16:27:44.364000Z',
@@ -1121,13 +1261,13 @@ module PostHog
                          status_url).with(headers: { 'Authorization' => 'Bearer phs_test' })).to have_been_made.once
       end
 
-      it 'passes a status it does not know through' do
-        stub_request(:get, status_url).to_return(status: 200,
-                                                 body: JSON.generate(record.merge(
-                                                                       status: 'archived', reason: nil
-                                                                     )))
+      %w[scheduled archived].each do |status|
+        it "passes the #{status} status through" do
+          stub_request(:get, status_url).to_return(status: 200,
+                                                   body: JSON.generate(record.merge(status: status, reason: nil)))
 
-        expect(emails.get(message_id)).to have_attributes(status: 'archived', reason: nil)
+          expect(emails.get(message_id)).to have_attributes(status: status, reason: nil)
+        end
       end
 
       it 'does not retry an unknown message ID' do

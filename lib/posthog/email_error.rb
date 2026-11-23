@@ -23,9 +23,13 @@ module PostHog
     attr_reader :field
     # @return [Float, nil] How long PostHog asked the client to wait before it sends again, in seconds.
     attr_reader :retry_after
+    # @return [String, nil] The message ID of an email PostHog accepted although the call failed, such as an email
+    #   whose `schedule_not_confirmed` means it may go out at another time. Read its status with {Emails#get}.
+    attr_reader :message_id
 
     # @api private
-    def initialize(code:, message:, status_code: nil, why: nil, fix: nil, docs_url: nil, field: nil, retry_after: nil)
+    def initialize(code:, message:, status_code: nil, why: nil, fix: nil, docs_url: nil, field: nil, retry_after: nil,
+                   message_id: nil)
       super(message)
       @name = self.class.name_for(status_code, code)
       @code = code
@@ -35,13 +39,15 @@ module PostHog
       @docs_url = docs_url
       @field = field
       @retry_after = retry_after
+      @message_id = message_id
     end
 
     SDK_ERROR_NAMES = {
       'network_error' => 'service_unavailable',
       'invalid_attachment' => 'validation_error',
       'too_many_attachments' => 'validation_error',
-      'message_too_large' => 'validation_error'
+      'message_too_large' => 'validation_error',
+      'scheduling_requires_cloud' => 'validation_error'
     }.freeze
     private_constant :SDK_ERROR_NAMES
 
