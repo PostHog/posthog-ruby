@@ -7,6 +7,10 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    ignore:
+      # commander 6 requires Ruby 3.1, but Dependabot resolves with the gemspec's Ruby 3.0 floor.
+      - dependency-name: "commander"
+        update-types: ["version-update:semver-major"]
     groups:
       bundler-dependencies:
         patterns:
