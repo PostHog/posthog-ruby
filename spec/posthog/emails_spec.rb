@@ -980,10 +980,16 @@ module PostHog
         {
           'a string other than TRANSACTIONAL' => ->(_) { 'newsletter' },
           'a plain Hash instead of MessageCategory' => ->(base) { base },
+          'a BasicObject category' => ->(_) { BasicObject.new },
           'a non-string category key' => ->(base) { Emails::MessageCategory.new(**base, key: :newsletter) },
+          'a BasicObject category key' => ->(base) { Emails::MessageCategory.new(**base, key: BasicObject.new) },
           'an unknown category type' => ->(base) { Emails::MessageCategory.new(**base, type: 'promotional') },
+          'a BasicObject category type' => ->(base) { Emails::MessageCategory.new(**base, type: BasicObject.new) },
           'a nil category name' => ->(base) { Emails::MessageCategory.new(**base, name: nil) },
-          'a non-string category description' => ->(base) { Emails::MessageCategory.new(**base, description: 1) }
+          'a BasicObject category name' => ->(base) { Emails::MessageCategory.new(**base, name: BasicObject.new) },
+          'a non-string category description' => ->(base) { Emails::MessageCategory.new(**base, description: 1) },
+          'a BasicObject category description' =>
+            ->(base) { Emails::MessageCategory.new(**base, description: BasicObject.new) }
         }.each do |label, build_category|
           it "refuses #{label} before any request" do
             expect { send_code(category: build_category.call(newsletter)) }.to raise_error(ArgumentError, /\Acategory/)

@@ -451,12 +451,14 @@ module PostHog
     end
 
     def category_payload(category)
-      return TRANSACTIONAL if category.is_a?(String) && TRANSACTIONAL.eql?(encode_utf8(category, 'category'))
-      unless category.is_a?(MessageCategory)
-        raise ArgumentError, 'category must be PostHog::Emails::TRANSACTIONAL or a PostHog::Emails::MessageCategory.'
+      case category
+      when String
+        return TRANSACTIONAL if TRANSACTIONAL.eql?(encode_utf8(category, 'category'))
+      when MessageCategory
+        return normalize_category(category).compact
       end
 
-      normalize_category(category).compact
+      raise ArgumentError, 'category must be PostHog::Emails::TRANSACTIONAL or a PostHog::Emails::MessageCategory.'
     end
 
     def normalize_category(category)
@@ -464,26 +466,30 @@ module PostHog
 
       key = encode_utf8(category.key, 'category key')
       name = encode_utf8(category.name, 'category name')
-      type = category.type.is_a?(String) ? encode_utf8(category.type, 'category type') : nil
+      type = case category.type
+             when String then encode_utf8(category.type, 'category type')
+             end
       raise ArgumentError, "category type must be 'marketing' or 'transactional'." unless category_type?(type)
 
       { key: key, type: type, name: name, description: normalize_category_description(category.description) }
     end
 
     def normalize_category_description(description)
-      return nil if description.nil?
-      raise ArgumentError, 'category description must be a string.' unless description.is_a?(String)
-
-      encode_utf8(description, 'category description')
+      case description
+      when nil then nil
+      when String then encode_utf8(description, 'category description')
+      else raise ArgumentError, 'category description must be a string.'
+      end
     end
 
     def encode_utf8(value, field)
-      utf8 = transcode_utf8(String.new(value))
+      plain = String.new(value)
+      utf8 = transcode_utf8(plain)
       raise ArgumentError, "#{field} must be valid UTF-8." unless utf8.valid_encoding?
 
       utf8
     rescue Encoding::ConverterNotFoundError
-      raise ArgumentError, "#{field} encoding #{value.encoding.name} cannot be transcoded to UTF-8."
+      raise ArgumentError, "#{field} encoding #{plain.encoding.name} cannot be transcoded to UTF-8."
     rescue EncodingError
       raise ArgumentError, "#{field} must be valid UTF-8."
     end
