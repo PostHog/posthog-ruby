@@ -466,16 +466,17 @@ module PostHog
     end
 
     def normalize_category(category)
-      raise ArgumentError, 'category key and name must be strings.' unless [category.key, category.name].all?(String)
+      raw_key, raw_type, raw_name, raw_description = Struct.instance_method(:to_a).bind_call(category)
+      raise ArgumentError, 'category key and name must be strings.' unless [raw_key, raw_name].all?(String)
 
-      key = encode_utf8(category.key, 'category key')
-      name = encode_utf8(category.name, 'category name')
-      type = case category.type
-             when String then encode_utf8(category.type, 'category type')
+      key = encode_utf8(raw_key, 'category key')
+      name = encode_utf8(raw_name, 'category name')
+      type = case raw_type
+             when String then encode_utf8(raw_type, 'category type')
              end
       raise ArgumentError, "category type must be 'marketing' or 'transactional'." unless category_type?(type)
 
-      { key: key, type: type, name: name, description: normalize_category_description(category.description) }
+      { key: key, type: type, name: name, description: normalize_category_description(raw_description) }
     end
 
     def normalize_category_description(description)

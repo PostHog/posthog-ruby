@@ -367,6 +367,39 @@ module PostHog
         )
       end
 
+      it 'snapshots a mutable MessageCategory once before validating and normalizing it' do
+        stub_request(:post, send_url).to_return(accept)
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        category = Emails::MessageCategory.new(
+          key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly news'
+        )
+        mutated = false
+        trace = TracePoint.new(:c_return) do |tp|
+          next unless tp.defined_class == String && tp.method_id == :initialize && tp.self == 'newsletter'
+
+          tp.disable
+          mutated = true
+          category.key = 'receipts'
+          category.type = 'transactional'
+          category.name = 'Receipts'
+          category.description = 'Order receipts'
+        end
+
+        result = trace.enable { send_code(category: category, html: html) }
+
+        expect(mutated).to be(true)
+        expect(result.id).to eq('msg_1')
+        expect(sent_bodies.first.slice('html', 'category')).to eq(
+          'html' => html,
+          'category' => {
+            'key' => 'newsletter',
+            'type' => 'marketing',
+            'name' => 'Newsletter',
+            'description' => 'Monthly news'
+          }
+        )
+      end
+
       it 'sends a transactional MessageCategory and the TRANSACTIONAL sentinel on the wire' do
         stub_request(:post, send_url).to_return(accept)
 
