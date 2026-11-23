@@ -67,12 +67,15 @@ module PostHog
     #   @return [Boolean] Whether PostHog had already accepted this idempotency key and returned the first result.
     # @!attribute [r] warnings
     #   @return [Array<Warning>]
-    # @!attribute [r] status
-    #   @return [String] `scheduled` when the email waits for its +scheduled_at+, `queued` when it goes out now.
     # @!attribute [r] scheduled_at
     #   @return [Time, nil] When a scheduled email goes out, in UTC. +nil+ for an email that goes out now, also when
     #     its +scheduled_at+ had already passed when PostHog accepted it.
-    SendResult = Struct.new(:id, :replayed, :warnings, :status, :scheduled_at, keyword_init: true)
+    SendResult = Struct.new(:id, :replayed, :warnings, :scheduled_at, keyword_init: true) do
+      # @return [String] `scheduled` when the email waits for its {#scheduled_at}, `queued` when it goes out now.
+      def status
+        scheduled_at.nil? ? 'queued' : 'scheduled'
+      end
+    end
 
     # A warning PostHog returned with a queued email.
     Warning = Struct.new(:code, :message, :fix, keyword_init: true)
@@ -106,7 +109,10 @@ module PostHog
     IDEMPOTENCY_KEY_PATTERN = /\A[\x21-\x7e]{1,255}\z/
     TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
     HEADER_TOKEN_PATTERN = /\A[\x21-\x7e]+\z/
-    SCHEDULED_AT_PATTERN = /\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:\d{2})\z/
+    SCHEDULED_AT_PATTERN = /
+      \A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?
+      (?:Z|([+-]\d{2}):?(\d{2}))\z
+    /x
     SCHEDULED_AT_NEEDED = 'scheduled_at must be a Time, or an ISO 8601 time with an offset, such as ' \
                           '2026-12-01T09:00:00Z or 2026-12-01T10:00:00+01:00, so no email was sent.'
     JSON_CONTENT = { 'Content-Type' => 'application/json' }.freeze
@@ -216,7 +222,8 @@ module PostHog
     #   With +scheduled_at+, {EmailError#code} is `scheduling_requires_cloud` before any request when the client's
     #   app host isn't PostHog Cloud US or EU, such as a self-hosted PostHog, a reverse proxy or a custom domain, which
     #   could send the email at once. It is `schedule_not_confirmed` when PostHog accepted the email without confirming
-    #   its time, so it may go out at another time: {EmailError#message_id} names the email to read with {#get}.
+    #   its time: the email exists and may go out at another time, and {EmailError#message_id} names it. Read it with
+    #   {#get} before you send again.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -245,16 +252,14 @@ module PostHog
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
 
-      result = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+      call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
         check_schedulable if due
         upload(files, secret_key, max_retries || @max_retries) unless files.empty?
         uri = URI(@app_host + SEND_PATH)
         with_retries(max_retries || @max_retries) do
-          parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due, idempotency_key)
+          parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due)
         end
       end
-      result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-      result
     end
 
     # Reads what happened to an email that {#send} queued, for 30 days after the send.
@@ -355,45 +360,46 @@ module PostHog
       value.is_a?(String) && !value.strip.empty?
     end
 
-    # The time in whole milliseconds since the epoch, rounded up so the email never goes out early.
     def scheduled_time(value)
       return nil if value.nil?
 
       instant = case value
-                when DateTime then (value - DateTime.new(1970, 1, 1)) * 86_400
-                when Time then value.to_r
+                when DateTime then Time.at((value - DateTime.new(1970, 1, 1)) * 86_400)
+                when Time then Time.at(value.to_r)
                 when String then offset_time(value)
                 end
       raise ArgumentError, SCHEDULED_AT_NEEDED if instant.nil?
 
-      (instant * 1000).ceil
+      instant.utc.ceil(3)
     end
 
-    # The exact instant of an ISO 8601 time with an explicit offset, or nil for anything else. A time without an offset
-    # would otherwise take the zone of whoever reads it.
     def offset_time(value)
       parts = SCHEDULED_AT_PATTERN.match(value)
       return nil if parts.nil?
 
-      year, month, day, hour, minute, second, fraction, offset = parts.captures
-      return nil unless Date.valid_date?(year.to_i, month.to_i, day.to_i) && hour.to_i <= 23 && minute.to_i <= 59
-      return nil unless second.to_i <= 59 && (offset == 'Z' || (offset[1, 2].to_i <= 23 && offset[4, 2].to_i <= 59))
+      year, month, day, hour, minute, second, fraction, offset_hours, offset_minutes = parts.captures
+      return nil unless Date.valid_date?(year.to_i, month.to_i, day.to_i, Date::GREGORIAN)
+      return nil unless hour.to_i <= 23 && minute.to_i <= 59 && second.to_i <= 59
+      return nil unless offset_hours.to_s[1, 2].to_i <= 23 && offset_minutes.to_i <= 59
 
       seconds = second.to_i + (fraction ? Rational(fraction.to_i, 10**fraction.size) : 0)
-      Time.new(year.to_i, month.to_i, day.to_i, hour.to_i, minute.to_i, seconds, offset == 'Z' ? '+00:00' : offset).to_r
+      offset = offset_hours ? "#{offset_hours}:#{offset_minutes}" : '+00:00'
+      Time.new(year.to_i, month.to_i, day.to_i, hour.to_i, minute.to_i, seconds, offset)
     end
 
-    def wire_time(milliseconds)
-      Time.at(Rational(milliseconds, 1000)).utc.strftime('%Y-%m-%dT%H:%M:%S.%LZ')
+    def wire_time(time)
+      time.strftime('%Y-%m-%dT%H:%M:%S.%LZ')
     end
 
     def check_schedulable
       return if SCHEDULING_APP_HOSTS.include?(@app_host)
 
+      uri = URI(@app_host)
+      host = uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"
       raise EmailError.new(
         code: 'scheduling_requires_cloud', field: 'scheduled_at',
         message: 'Only PostHog Cloud (us.posthog.com or eu.posthog.com) schedules emails, and this client sends ' \
-                 "email to #{@app_host}, so no email was sent.",
+                 "email to #{host}, so no email was sent.",
         why: "A PostHog that doesn't schedule emails would send this one at once.",
         fix: "Send without scheduled_at, or set app_host to PostHog Cloud's app host. A reverse proxy or custom " \
              "domain can't schedule emails yet."
@@ -676,7 +682,7 @@ module PostHog
       nil
     end
 
-    def parse_send_reply((status, payload, retry_after), due, idempotency_key)
+    def parse_send_reply((status, payload, retry_after), due)
       fields = payload.is_a?(Hash) ? payload : {}
       raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
 
@@ -686,39 +692,32 @@ module PostHog
                              status_code: status)
       end
 
-      result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
-                              status: 'queued', scheduled_at: nil)
-      return result if due.nil? || sends_now?(fields)
-      raise schedule_not_confirmed(id, status, idempotency_key) unless confirms?(fields, due)
+      found = warnings(fields['warnings'])
+      found.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+      result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: found, scheduled_at: nil)
+      return result if due.nil? || time_had_passed?(fields)
+      raise schedule_not_confirmed(id, status) unless confirms?(fields, due)
 
-      result.status = 'scheduled'
-      result.scheduled_at = Time.at(Rational(due, 1000)).utc
+      result.scheduled_at = due
       result
     end
 
-    # PostHog answers so when the time had passed at acceptance: the email goes out now.
-    def sends_now?(fields)
+    def time_had_passed?(fields)
       fields['status'] == 'queued' && fields.key?('scheduled_at') && fields['scheduled_at'].nil?
     end
 
     def confirms?(fields, due)
       answered = fields['scheduled_at']
-      instant = fields['status'] == 'scheduled' && answered.is_a?(String) && offset_time(answered)
-      instant ? (instant * 1000).ceil == due : false
+      fields['status'] == 'scheduled' && answered.is_a?(String) && offset_time(answered) == due
     end
 
-    def schedule_not_confirmed(message_id, status, idempotency_key)
-      again = if idempotency_key
-                'Sending it again with the same idempotency_key returns the same answer.'
-              else
-                "Don't send it again: the client chose this send's idempotency_key, so a new send queues a second " \
-                  'email.'
-              end
+    def schedule_not_confirmed(message_id, status)
       EmailError.new(
         code: 'schedule_not_confirmed', status_code: status, field: 'scheduled_at', message_id: message_id,
         message: "PostHog accepted email #{message_id} without confirming its scheduled_at, so it may go out at " \
                  'another time.',
-        fix: "Read what happened to the email with emails.get('#{message_id}'). #{again}"
+        fix: "Read what happened to the email with emails.get('#{message_id}') before you send it again: a send " \
+             'with another idempotency_key makes a second email.'
       )
     end
 

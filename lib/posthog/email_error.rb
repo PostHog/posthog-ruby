@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 module PostHog
-  # PostHog did not queue the email, or the client could not tell whether it did.
+  # PostHog did not queue the email, or the client could not tell whether it did. An error with a {#message_id}
+  # is the exception: PostHog accepted that email, which may still go out, so read it with {Emails#get} before you
+  # send again.
   #
   # Branch on {#code}, PostHog's stable error code, or on {#name}, a coarse category of the failure.
   # The message never contains the secret key or the request body.
