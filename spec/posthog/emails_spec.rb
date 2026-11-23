@@ -288,7 +288,7 @@ module PostHog
       end
 
       it 'sends a marketing MessageCategory with its description, omitting nil and keeping empty strings' do
-        categories, filed = serve_categories
+        stub_request(:post, send_url).to_return(accept)
         html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
 
         with_desc = send_code(
@@ -309,22 +309,39 @@ module PostHog
         )
 
         expect([with_desc.id, without_desc.id, empty_desc.id]).to eq(%w[msg_1 msg_1 msg_1])
-        expect(filed).to eq(%w[newsletter announcements updates])
-        expect(sent_bodies.map { |body| body['category'] }).to eq([
-                                                                    { 'key' => 'newsletter', 'type' => 'marketing',
-                                                                      'name' => 'Newsletter',
-                                                                      'description' => 'Monthly product news' },
-                                                                    { 'key' => 'announcements', 'type' => 'marketing',
-                                                                      'name' => 'Announcements' },
-                                                                    { 'key' => 'updates', 'type' => 'marketing',
-                                                                      'name' => 'Updates', 'description' => '' }
-                                                                  ])
-        expect(categories['newsletter']).to eq('key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter',
-                                               'description' => 'Monthly product news')
+        expect(sent_bodies.map { |body| body.slice('html', 'category') }).to eq([
+                                                                                  {
+                                                                                    'html' => html,
+                                                                                    'category' => {
+                                                                                      'key' => 'newsletter',
+                                                                                      'type' => 'marketing',
+                                                                                      'name' => 'Newsletter',
+                                                                                      'description' =>
+                                                                                        'Monthly product news'
+                                                                                    }
+                                                                                  },
+                                                                                  {
+                                                                                    'html' => html,
+                                                                                    'category' => {
+                                                                                      'key' => 'announcements',
+                                                                                      'type' => 'marketing',
+                                                                                      'name' => 'Announcements'
+                                                                                    }
+                                                                                  },
+                                                                                  {
+                                                                                    'html' => html,
+                                                                                    'category' => {
+                                                                                      'key' => 'updates',
+                                                                                      'type' => 'marketing',
+                                                                                      'name' => 'Updates',
+                                                                                      'description' => ''
+                                                                                    }
+                                                                                  }
+                                                                                ])
       end
 
       it 'normalizes valid UTF-16LE category strings to UTF-8 on the wire' do
-        _, filed = serve_categories
+        stub_request(:post, send_url).to_return(accept)
         html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
         utf16_category = Emails::MessageCategory.new(
           key: 'newsletter'.encode(Encoding::UTF_16LE),
@@ -333,20 +350,30 @@ module PostHog
           description: 'Monthly product news'.encode(Encoding::UTF_16LE)
         )
 
-        send_code(category: 'transactional'.encode(Encoding::UTF_16LE))
-        send_code(category: utf16_category, html: html)
+        transactional = send_code(category: 'transactional'.encode(Encoding::UTF_16LE))
+        marketing = send_code(category: utf16_category, html: html)
 
-        expect(filed).to eq([nil, 'newsletter'])
-        expect(sent_bodies.map { |body| body['category'] }).to eq([
-                                                                    'transactional',
-                                                                    { 'key' => 'newsletter', 'type' => 'marketing',
-                                                                      'name' => 'Newsletter',
-                                                                      'description' => 'Monthly product news' }
-                                                                  ])
+        expect([transactional.id, marketing.id]).to eq(%w[msg_1 msg_1])
+        expect(sent_bodies.map { |body| body.slice('html', 'category') }).to eq([
+                                                                                  {
+                                                                                    'html' => '<p>Reset</p>',
+                                                                                    'category' => 'transactional'
+                                                                                  },
+                                                                                  {
+                                                                                    'html' => html,
+                                                                                    'category' => {
+                                                                                      'key' => 'newsletter',
+                                                                                      'type' => 'marketing',
+                                                                                      'name' => 'Newsletter',
+                                                                                      'description' =>
+                                                                                        'Monthly product news'
+                                                                                    }
+                                                                                  }
+                                                                                ])
       end
 
       it 'accepts valid UTF-8 bytes tagged as ASCII-8BIT on category fields' do
-        _, filed = serve_categories
+        stub_request(:post, send_url).to_return(accept)
         html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
         binary_category = Emails::MessageCategory.new(
           key: 'cafe-news'.b,
@@ -358,9 +385,10 @@ module PostHog
         result = send_code(category: binary_category, html: html)
 
         expect(result.id).to eq('msg_1')
-        expect(filed).to eq(['cafe-news'])
-        expect(sent_bodies.first['category']).to eq(
-          'key' => 'cafe-news', 'type' => 'marketing', 'name' => 'Café', 'description' => 'Café updates'
+        expect(sent_bodies.first.slice('html', 'category')).to eq(
+          'html' => html,
+          'category' => { 'key' => 'cafe-news', 'type' => 'marketing',
+                          'name' => 'Café', 'description' => 'Café updates' }
         )
       end
 
@@ -372,6 +400,11 @@ module PostHog
 
         expect(filed).to eq(['receipts', nil])
         expect(categories).to eq('receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' })
+        expect(sent_bodies.map { |body| body['category'] }).to eq([
+                                                                    { 'key' => 'receipts', 'type' => 'transactional',
+                                                                      'name' => 'Receipts' },
+                                                                    'transactional'
+                                                                  ])
       end
 
       context 'with a template_key that names a template in a transactional category' do
@@ -398,6 +431,7 @@ module PostHog
             .to raise_error(EmailError) do |error|
               expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
             end
+          expect(sent_bodies.first['category']).to eq('transactional')
           expect(filed).to be_empty
         end
       end
@@ -530,6 +564,24 @@ module PostHog
         send_code(**overrides)
       rescue EmailError => e
         e
+      end
+
+      it 'sends a transactional MessageCategory alongside copies and attachments' do
+        category = Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts')
+
+        result = send_code(
+          category: category,
+          cc: 'finance@example.com',
+          attachments: [{ filename: 'receipt.pdf', content: pdf }]
+        )
+
+        expect(result.id).to eq('msg_1')
+        expect(bucket[pdf_sha256]).to eq(pdf)
+        expect(outbox.first).to include(
+          'category' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' },
+          'cc' => ['finance@example.com'],
+          'attachments' => [hash_including('filename' => 'receipt.pdf', 'sha256' => pdf_sha256)]
+        )
       end
 
       it 'sends cc and bcc as lists' do
@@ -967,13 +1019,20 @@ module PostHog
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
         newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
         malformed_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
+        case_insensitive = Class.new(String) do
+          def ==(other)
+            other.is_a?(String) && casecmp?(other)
+          end
+        end
         [
           'newsletter', newsletter, "\xFF".b, malformed_utf8,
+          case_insensitive.new('TRANSACTIONAL'),
           Emails::MessageCategory.new(**newsletter, key: :newsletter),
           Emails::MessageCategory.new(**newsletter, key: "\xFF".b),
           Emails::MessageCategory.new(**newsletter, name: malformed_utf8),
           Emails::MessageCategory.new(**newsletter, type: 'promotional'),
           Emails::MessageCategory.new(**newsletter, type: "\xFF".b),
+          Emails::MessageCategory.new(**newsletter, type: case_insensitive.new('MARKETING')),
           Emails::MessageCategory.new(**newsletter, name: nil),
           Emails::MessageCategory.new(**newsletter, description: 1),
           Emails::MessageCategory.new(**newsletter, description: "\xFF".b),
