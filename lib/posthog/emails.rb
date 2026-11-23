@@ -216,15 +216,15 @@ module PostHog
     #   the email follows the transactional category of the template that `template_key` names, or is transactional
     #   with no category; when categories are disabled for the project, it is queued as transactional with no category.
     #   A marketing email skips recipients who opted out of its category or of all marketing, can't have copies
-    #   (`copies_not_allowed`), can't combine attachments with workflows that can defer delivery (`workflow_can_wait`),
-    #   and needs a clickable `<a href="{{ unsubscribe_url }}">` link in its `html` (or `{{ unsubscribe_url }}` in its
-    #   `text` when it has no `html`). PostHog refuses a send with `categories_not_enabled` when code-send categories
-    #   are unavailable for the project (and HTTP 400 on an older PostHog server); `category_mismatch` when the type
-    #   differs from the existing category's, or when `template_key` names a template in another transactional category
-    #   (including {TRANSACTIONAL} for a template in a category); `marketing_template` when `template_key` names a
-    #   template in a marketing category, because a template made in PostHog is transactional; `too_many_categories`
-    #   when the project can't take another category; `unsubscribe_link_required`; `copies_not_allowed`;
-    #   `workflow_can_wait`; or `recipient_opted_out`.
+    #   (`copies_not_allowed`), can't carry attachments (`workflow_can_wait`, because marketing sending limits can hold
+    #   delivery), and needs a clickable `<a href="{{ unsubscribe_url }}">` link in its `html` (or
+    #   `{{ unsubscribe_url }}` in its `text` when it has no `html`). PostHog refuses a send with
+    #   `categories_not_enabled` when code-send categories are unavailable for the project (and HTTP 400 on an older
+    #   PostHog server); `category_mismatch` when the type differs from the existing category's, or when `template_key`
+    #   names a template in another transactional category (including {TRANSACTIONAL} for a template in a category);
+    #   `marketing_template` when `template_key` names a template in a marketing category, because a template made in
+    #   PostHog is transactional; `too_many_categories` when the project can't take another category;
+    #   `unsubscribe_link_required`; `copies_not_allowed`; `workflow_can_wait`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already

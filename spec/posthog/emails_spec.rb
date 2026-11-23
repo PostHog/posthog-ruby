@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'English'
+require 'nokogiri'
 require 'spec_helper'
 
 module PostHog
@@ -30,9 +31,13 @@ module PostHog
     end
 
     def sent_bodies
+      sent_raw_bodies.map { |raw| JSON.parse(raw) }
+    end
+
+    def sent_raw_bodies
       bodies = []
       expect(a_request(:post, send_url).with do |request|
-        bodies << JSON.parse(request.body)
+        bodies << request.body
       end).to have_been_made.at_least_once
       bodies
     end
@@ -50,9 +55,9 @@ module PostHog
       if html.empty?
         body['text'].to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
       else
-        without_comments = html.gsub(/<!--.*?-->/m, '')
-        unsub = '\{\{\s*unsubscribe_url\s*\}\}'
-        without_comments.match?(/<a\b[^>]*\bhref\s*=\s*(?:"[^"]*#{unsub}[^"]*"|'[^']*#{unsub}[^']*')/im)
+        Nokogiri::HTML::DocumentFragment.parse(html).css('a[href]').any? do |link|
+          link['href'].to_s.strip.match?(/\A\{\{\s*unsubscribe_url\s*\}\}(?:#.*)?\z/)
+        end
       end
     end
 
@@ -60,8 +65,8 @@ module PostHog
       filed = []
       stub_request(:post, send_url).to_return do |request|
         body = JSON.parse(request.body)
-        if body.key?('category')
-          category = body['category']
+        category = body['category']
+        unless category.nil?
           valid = category == 'transactional' || valid_category_object?(category)
           next refuse(400, 'invalid_input') unless valid
         end
@@ -81,9 +86,10 @@ module PostHog
           next refuse(400, 'category_mismatch') if existing && existing['type'] != category['type']
 
           if category['type'] == 'marketing'
+            next refuse(400, 'unsubscribe_link_required') unless clickable_unsubscribe_link?(body)
+
             has_copies = !Array(body['cc']).empty? || !Array(body['bcc']).empty?
             next refuse(400, 'copies_not_allowed') if has_copies
-            next refuse(400, 'unsubscribe_link_required') unless clickable_unsubscribe_link?(body)
           end
 
           categories[category['key']] ||= category
@@ -357,9 +363,15 @@ module PostHog
           _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
 
           send_code(template_key: 'order-receipt')
+          send_code(template_key: 'order-receipt', category: nil)
 
-          expect(filed).to eq(['receipts'])
-          expect(sent_bodies.first).not_to have_key('category')
+          expect(filed).to eq(%w[receipts receipts])
+          raw_bodies = sent_raw_bodies
+          expect(raw_bodies.length).to eq(2)
+          raw_bodies.each do |raw|
+            expect(raw).not_to include('"category"')
+            expect(JSON.parse(raw)).not_to have_key('category')
+          end
         end
 
         it 'refuses TRANSACTIONAL with category_mismatch' do
