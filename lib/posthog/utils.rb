@@ -70,9 +70,9 @@ module PostHog
     def datetime_in_iso8601(datetime)
       case datetime
       when Time
-        time_in_iso8601 datetime
+        time_in_iso8601 datetime.getutc
       when DateTime
-        time_in_iso8601 datetime.to_time
+        datetime.new_offset(0).strftime('%Y-%m-%dT%H:%M:%S.%LZ')
       when Date
         date_in_iso8601 datetime
       else

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
 
 module PostHog
   describe Utils do
@@ -43,6 +44,60 @@ module PostHog
       (1..5).each { |i| array << i }
 
       expect(array).to eq([3, 4, 5])
+    end
+  end
+
+  describe '.datetime_in_iso8601' do
+    it 'converts a DateTime with an offset to UTC with 3 truncated fractional digits' do
+      value = DateTime.new(2026, 11, 23, 10, 30, 15.123999r, '+05:30')
+
+      expect(PostHog::Utils.datetime_in_iso8601(value)).to eq('2026-11-23T05:00:15.123Z')
+    end
+
+    it 'converts a Time with an offset to UTC' do
+      value = Time.new(2026, 11, 23, 10, 30, 15.123456r, '+05:30')
+
+      expect(PostHog::Utils.datetime_in_iso8601(value)).to eq('2026-11-23T05:00:15.123Z')
+    end
+
+    it 'converts a TimeWithZone to UTC' do
+      value = Time.new(2026, 11, 23, 10, 30, 15.123456r, '+05:30').in_time_zone('Asia/Kolkata')
+
+      expect(PostHog::Utils.datetime_in_iso8601(value)).to eq('2026-11-23T05:00:15.123Z')
+    end
+
+    it 'writes UTC DateTime and Time values with Z' do
+      expect(PostHog::Utils.datetime_in_iso8601(DateTime.new(2013, 1, 1))).to eq('2013-01-01T00:00:00.000Z')
+      expect(PostHog::Utils.datetime_in_iso8601(Time.utc(2013))).to eq('2013-01-01T00:00:00.000Z')
+    end
+
+    it 'keeps a Date as a calendar date' do
+      expect(PostHog::Utils.datetime_in_iso8601(Date.new(2026, 11, 23))).to eq('2026-11-23')
+    end
+
+    {
+      'plain Ruby' => '',
+      'ActiveSupport' => "require 'active_support/all'\n"
+    }.each do |label, preamble|
+      it "writes the same UTC string under #{label} regardless of the process TZ" do
+        script = <<~RUBY
+          require 'date'
+          #{preamble}require 'posthog'
+          values = [
+            DateTime.new(2026, 11, 23, 10, 30, 15.123456r, '+05:30'),
+            Time.new(2026, 11, 23, 10, 30, 15.123456r, '+05:30')
+          ]
+          puts values.map { |value| PostHog::Utils.datetime_in_iso8601(value) }.join(',')
+        RUBY
+
+        %w[UTC America/New_York Asia/Tokyo].each do |tz|
+          stdout, stderr, status = Open3.capture3({ 'TZ' => tz }, RbConfig.ruby, '-Ilib', '-e', script)
+
+          expect(status).to be_success, stderr
+          expect(stderr).not_to include('DEPRECATION WARNING')
+          expect(stdout.strip).to eq('2026-11-23T05:00:15.123Z,2026-11-23T05:00:15.123Z')
+        end
+      end
     end
   end
 
