@@ -98,6 +98,11 @@ RSpec.describe 'Action Cable exception capture' do
     )
   end
 
+  def captured_event
+    expect(client.queued_messages).to be_positive
+    client.dequeue_last_message
+  end
+
   def expect_original_error(&block)
     expect(&block).to(raise_error { |raised| expect(raised).to equal(error) })
   end
@@ -113,7 +118,7 @@ RSpec.describe 'Action Cable exception capture' do
         expect(context_class.current).to equal(outer)
       end
       expect(client.queued_messages).to eq(1)
-      event = client.dequeue_last_message
+      event = captured_event
       expect(event[:distinct_id]).to eq('browser-user')
       expect(event[:properties]).to include(
         '$session_id' => 'browser-session', '$request_path' => '/cable',
@@ -139,7 +144,7 @@ RSpec.describe 'Action Cable exception capture' do
         end
       end
       expect(client.queued_messages).to eq(1)
-      properties = client.dequeue_last_message[:properties]
+      properties = captured_event[:properties]
       expect(properties).to include(
         '$exception_source' => 'rails.action_cable', '$action_cable_operation' => operation,
         '$channel_class' => 'PostHogCableChannel', '$connection_class' => 'PostHogCableConnection',
@@ -164,7 +169,7 @@ RSpec.describe 'Action Cable exception capture' do
     socket_channel = channel_class.new(connection, 'id', payload)
     channel_class.failure = error
     expect_original_error { socket_channel.perform_action(payload.merge('action' => 'speak')) }
-    properties = client.dequeue_last_message[:properties]
+    properties = captured_event[:properties]
     expected = { 'password' => '[FILTERED]', 'credential' => '[FILTERED]',
                  'nested' => [{ 'secret' => '[FILTERED]', 'pin' => '[CABLE FILTERED]', 'visible' => 'ok' }] }
     aggregate_failures do
@@ -183,7 +188,7 @@ RSpec.describe 'Action Cable exception capture' do
     channel_class.failure = error
     socket_channel = channel_class.new(connection, 'id', 'pin' => '1234')
     expect_original_error { socket_channel.perform_action('action' => 'speak', 'pin' => '5678') }
-    properties = client.dequeue_last_message[:properties]
+    properties = captured_event[:properties]
     aggregate_failures do
       expect(properties['$channel_params']['pin']).to eq('4321')
       expect(properties['$action_data']['pin']).to eq('8765')
@@ -195,7 +200,7 @@ RSpec.describe 'Action Cable exception capture' do
     allow(Rails).to receive(:application).and_return(nil)
     channel_class.failure = error
     expect_original_error { channel.perform_action('action' => 'speak', 'credential' => 'private') }
-    expect(client.dequeue_last_message[:properties]['$action_data']['credential']).to eq('[FILTERED]')
+    expect(captured_event[:properties]['$action_data']['credential']).to eq('[FILTERED]')
 
     allow(connection).to receive(:config).and_return(Object.new)
     app_filter = ->(key, value) { value.replace('[APP FILTERED]') if key == 'pin' }
@@ -204,7 +209,7 @@ RSpec.describe 'Action Cable exception capture' do
     )
     channel_class.failure = RuntimeError.new('next failure')
     expect { channel.perform_action('action' => 'speak', 'pin' => '1234') }.to raise_error('next failure')
-    expect(client.dequeue_last_message[:properties]['$action_data']['pin']).to eq('[APP FILTERED]')
+    expect(captured_event[:properties]['$action_data']['pin']).to eq('[APP FILTERED]')
   end
 
   describe 'subscription command dispatch' do
@@ -236,7 +241,7 @@ RSpec.describe 'Action Cable exception capture' do
         end
         expect(seen).to eq([error])
         expect(client.queued_messages).to eq(1)
-        event = client.dequeue_last_message
+        event = captured_event
         expect(event[:event]).to eq('handled cable error')
         expect(event[:distinct_id]).to eq('browser-user')
         expect(event[:properties]).to include('$session_id' => 'browser-session', '$request_path' => '/cable')
@@ -259,7 +264,7 @@ RSpec.describe 'Action Cable exception capture' do
       channel_class.failure = error
       execute('message', 'action' => 'speak', 'password' => 'private')
       expect(client.queued_messages).to eq(1)
-      event = client.dequeue_last_message
+      event = captured_event
       expect(event[:distinct_id]).to eq('browser-user')
       expect(event[:properties]).to include('$channel_class' => 'PostHogCableChannel', '$action' => 'speak',
                                             '$action_cable_operation' => 'action', '$session_id' => 'browser-session')
@@ -273,7 +278,7 @@ RSpec.describe 'Action Cable exception capture' do
       execute('subscribe')
       channel_class.failure = error
       execute('message', 'action' => 'speak')
-      event = client.dequeue_last_message
+      event = captured_event
       expect(event[:distinct_id]).to eq('signed-in')
       expect(event[:properties]['$session_id']).to eq('browser-session')
     end
@@ -309,7 +314,7 @@ RSpec.describe 'Action Cable exception capture' do
       2.times { proceed << true }
       results.each(&:value)
       expect(client.queued_messages).to eq(1)
-      event = client.dequeue_last_message
+      event = captured_event
       expect(event[:distinct_id]).to eq('escaping')
       expect(event[:properties]['$action']).to eq('speak')
       expect(context_class.current).to be_nil
@@ -329,7 +334,7 @@ RSpec.describe 'Action Cable exception capture' do
       )
       expect(seen).to eq([error])
       expect(client.queued_messages).to eq(1)
-      event = client.dequeue_last_message
+      event = captured_event
       expect(event[:properties]['$exception_list'].first).to include('value' => 'handler failed')
       expect(event[:properties]['$exception_list'].first['mechanism']).to include('handled' => false)
       expect(context_class.current).to be_nil
@@ -360,7 +365,7 @@ RSpec.describe 'Action Cable exception capture' do
       execute('subscribe')
       channel_class.failure = error
       execute('message', 'action' => 'speak')
-      client.dequeue_last_message
+      captured_event
       channel_class.failure = nil
       expect(execute('message', 'action' => 'speak')).to eq(:spoken)
       expect(client.queued_messages).to eq(0)
@@ -430,12 +435,12 @@ RSpec.describe 'Action Cable exception capture' do
     env['action_controller.instance'] = double(current_user: double(id: 'authenticated'))
     channel_class.failure = error
     expect_original_error { channel.perform_action('action' => 'speak') }
-    expect(client.dequeue_last_message[:distinct_id]).to eq('authenticated')
+    expect(captured_event[:distinct_id]).to eq('authenticated')
     PostHog::Rails.config.capture_user_context = false
     PostHog::Rails.config.use_tracing_headers = false
     channel_class.failure = RuntimeError.new('again')
     expect { channel.perform_action('action' => 'speak') }.to raise_error('again')
-    event = client.dequeue_last_message
+    event = captured_event
     expect(event[:distinct_id]).not_to eq('browser-user')
     expect(event[:properties]).not_to have_key('$session_id')
   end
@@ -448,19 +453,19 @@ RSpec.describe 'Action Cable exception capture' do
     PostHog::Rails.config.current_user_resolver = ->(_controller) { raise 'controller required' }
     channel_class.failure = error
     expect_original_error { channel.perform_action('action' => 'speak') }
-    expect(client.dequeue_last_message[:distinct_id]).to eq('connection-user')
+    expect(captured_event[:distinct_id]).to eq('connection-user')
 
     PostHog::Rails.config.capture_user_context = false
     channel_class.failure = RuntimeError.new('next action')
     expect { channel.perform_action('action' => 'speak') }.to raise_error('next action')
-    expect(client.dequeue_last_message[:distinct_id]).to eq('browser-user')
+    expect(captured_event[:distinct_id]).to eq('browser-user')
   end
 
   it 'falls back to headers when the connection current_user method raises' do
     connection_class.class_eval { def current_user = raise('user unavailable') }
     channel_class.failure = error
     expect_original_error { channel.perform_action('action' => 'speak') }
-    expect(client.dequeue_last_message[:distinct_id]).to eq('browser-user')
+    expect(captured_event[:distinct_id]).to eq('browser-user')
   end
 
   it 'uses default current_user IDs and falls back when reading the user ID fails' do
@@ -468,7 +473,7 @@ RSpec.describe 'Action Cable exception capture' do
     connection.current_user = Struct.new(:id).new('signed-in')
     channel_class.failure = error
     expect_original_error { channel.perform_action('action' => 'speak') }
-    expect(client.dequeue_last_message[:distinct_id]).to eq('signed-in')
+    expect(captured_event[:distinct_id]).to eq('signed-in')
 
     user = Object.new
     def user.id
@@ -478,7 +483,7 @@ RSpec.describe 'Action Cable exception capture' do
     channel_class.failure = RuntimeError.new('next failure')
     expect { channel.perform_action('action' => 'speak') }.to raise_error('next failure')
     expect(client.queued_messages).to eq(1)
-    expect(client.dequeue_last_message[:distinct_id]).to eq('browser-user')
+    expect(captured_event[:distinct_id]).to eq('browser-user')
   end
 
   it 'does not duplicate captures when a channel failure escapes connection close' do
@@ -486,7 +491,7 @@ RSpec.describe 'Action Cable exception capture' do
     allow(connection.subscriptions).to receive(:unsubscribe_from_all) { channel.unsubscribe_from_channel }
     expect_original_error { connection.send(:handle_close) }
     expect(client.queued_messages).to eq(1)
-    expect(client.dequeue_last_message[:properties]['$channel_class']).to eq('PostHogCableChannel')
+    expect(captured_event[:properties]['$channel_class']).to eq('PostHogCableChannel')
   end
 
   it 'keeps different socket actions isolated, including test connections without env' do
@@ -496,8 +501,8 @@ RSpec.describe 'Action Cable exception capture' do
     [first_connection, missing_env_connection].each do |socket|
       channel_class.new(socket, '').perform_action('action' => 'speak')
     end
-    first = client.dequeue_last_message
-    second = client.dequeue_last_message
+    first = captured_event
+    second = captured_event
     expect(first[:distinct_id]).to eq('browser-user')
     expect(second[:distinct_id]).not_to eq('browser-user')
     expect(second[:properties]).not_to have_key('$session_id')
@@ -510,7 +515,7 @@ RSpec.describe 'Action Cable exception capture' do
     expect_original_error do
       channel_class.new(socket, '', 'password' => 'private').perform_action('action' => 'speak')
     end
-    event = client.dequeue_last_message
+    event = captured_event
     expect(event[:properties]['$channel_params']['password']).to eq('[FILTERED]')
     expect(event[:properties]['$process_person_profile']).to be(false)
     expect(event[:properties]).not_to have_key('$session_id')
@@ -549,7 +554,7 @@ RSpec.describe 'Action Cable exception capture' do
     expect(6.times.map { results.pop }).to contain_exactly(
       'first', 'second', 'socket action failed', 'socket action failed', 'worker', 'worker'
     )
-    expect(2.times.map { client.dequeue_last_message[:distinct_id] }).to match_array(%w[first second])
+    expect(2.times.map { captured_event[:distinct_id] }).to match_array(%w[first second])
     expect(context_class.current).to be_nil
   end
 

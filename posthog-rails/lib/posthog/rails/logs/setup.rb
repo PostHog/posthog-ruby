@@ -5,6 +5,7 @@ require 'posthog/logging'
 require 'posthog/rails/configuration'
 require 'posthog/rails/logs/appender'
 require 'posthog/rails/logs/rate_limiter'
+require 'posthog/rails/logs/notifications'
 
 module PostHog
   module Rails
@@ -68,6 +69,8 @@ module PostHog
               rate_limiter: build_rate_limiter(config),
               before_send: config.logs_before_send
             )
+            Notifications.install(@appender) if config.logs_enabled
+            @appender
           rescue StandardError => e
             warn_once("Failed to initialize PostHog Logs: #{e.message}")
             nil
@@ -78,6 +81,7 @@ module PostHog
           # @param timeout [Numeric] Max seconds to spend; see {SHUTDOWN_TIMEOUT_SECONDS}.
           # @return [void]
           def shutdown(timeout: SHUTDOWN_TIMEOUT_SECONDS)
+            Notifications.reset
             @provider&.shutdown(timeout: timeout)
           rescue StandardError => e
             logger.warn("Error shutting down PostHog Logs: #{e.message}")
@@ -102,6 +106,7 @@ module PostHog
           #
           # @return [void]
           def reset
+            Notifications.reset
             @installed = false
             @provider = nil
             @appender = nil

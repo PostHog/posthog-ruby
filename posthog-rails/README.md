@@ -23,6 +23,26 @@ Existing canonical attributes take precedence. Missing IDs stay absent. Spans ke
 
 See the [Rails trace context guide](https://posthog.com/docs/libraries/ruby-on-rails#trace-context) for setup, middleware order, and trust limits. The bridge does not replace the application's provider, exporter, or sampler. Optional Rails log forwarding uses the same request context.
 
+## Rails runner exceptions
+
+`auto_capture_exceptions` also captures terminating `rails runner` failures as fatal, unhandled exceptions with source `rails.runner`. Exception exclusions and `before_send` still apply. When Rails reports the failure, its existing error-reporter identity and serialized context are preserved, including for inline errors that Rails converts into a failing exit. Capture runs before the existing SDK shutdown drains its queue. Deliberate nonzero exits (for example, `exit 23`) count as fatal runner failures, with their exit status preserved. Normal completion, successful exits, and signal termination (including Ctrl-C/SIGINT and SIGTERM) are not reported.
+
+Only initialized, enabled clients are used. Delivery is best-effort through the normal transport. Failures before runner hooks load, immediate process termination (`exit!`), and forced termination that bypasses Ruby exit hooks cannot be captured. No separate runner-code or command-line argument properties are added; exception messages and stack source context still follow the normal exception pipeline.
+
+## Controller exception reporting
+
+Controllers and API controllers gain a private `capture_exception(exception, distinct_id = nil, additional_properties = {}, flags: nil, mechanism: nil)` helper. Existing controller helpers with that name are not replaced. It returns the core capture result (`true`, `false`, or `nil`) and is not a controller action.
+
+The existing `PostHog.capture_exception` API remains available. This helper keeps configured-user resolution, controller/action and filtered parameters local to an explicit exception-reporting call rather than adding them to every event through `RequestContext`.
+
+Manual reports do not require `auto_capture_exceptions` and do not apply automatic exception exclusions. They retain the core manual handled-exception defaults and duplicate prevention. Missing or disabled clients no-op without initializing a client.
+
+These remain plain manual captures: the default mechanism is `generic` with `handled: true`, and the helper does not add `$exception_source`. Adding Rails context does not introduce a new automatic capture boundary.
+
+Explicit identity wins over the configured current user, then request identity. Explicit properties win over inferred request properties. The helper respects `capture_user_context`, current-user resolution settings, and `use_tracing_headers`. Request parameters use Rails `filter_parameters`; automatically derived URLs omit queries and fragments. Explicit properties and exception messages are not parameter-filtered. Unavailable or malformed enrichment is omitted without dropping the original report or replacing application exceptions. Request context is not retained after the request.
+
+Manual reports use already-parsed Rails parameter/body caches, with query/path parameters as fallback. The helper does not proactively parse uncached bodies; richer body collection is outside this helper. Rails may independently parse or log bodies before an action runs; the helper does not suppress framework-owned diagnostics. A response status is included only when already known, including after a controller has performed its response; the default pre-response status is not inferred.
+
 ## Streaming exceptions
 
 With `auto_capture_exceptions` enabled (default `false`), errors reported by ActionController::Live and ActionView streaming templates are captured through the existing exception pipeline, respecting excluded exceptions and duplicate prevention. Rails logging and streaming completion behavior are unchanged.
@@ -31,9 +51,36 @@ Live reporters rebuild context from their controller's own filtered request data
 
 ## Active Job context
 
+`config.report_active_job_retries = true` additionally reports failures when Active Job schedules a retry. It defaults to `false` and requires `auto_instrument_active_job`. Retry reports use the same effective identity and filtered job properties as terminal errors; discarded or otherwise rescued failures are not added. Retry reports honor default and configured `excluded_exceptions` by exact, case-sensitive Ruby class name across the serialized cause chain (up to 50 entries, with cycles visited once). Excluded failures still schedule their retries. This option also works on Rails 5.2, which does not emit retry notifications. Existing terminal reporting is unchanged. Core exception deduplication still applies, including when the same exception object is raised again. New retry reports use level `error`, source `rails.active_job`, and mechanism `task` with `handled: true` because the Active Job retry handler consumes the failure and reschedules the job. Terminal failures that escape job execution remain unhandled and retain their existing metadata.
+
 Set `config.auto_instrument_active_job = true` to copy the current session and distinct IDs into queued Active Job data. Each job runs with its saved IDs in a fresh context. Request properties are excluded. The context is restored after success, an error, or a retry. Older jobs without saved IDs run with empty context.
 
 The existing job distinct ID extractor takes precedence over the saved ID. Rescue, discard, and terminal retry handlers keep this effective context, including when they enqueue child jobs. Integer and finite floating-point distinct IDs are stored as strings in job snapshots; session IDs must be strings. Events, optional logs, and application OpenTelemetry spans use the shared job context. Register `PostHog::ContextSpanProcessor` for child spans as described in the trace context guide. An existing job span receives IDs only when its public `messaging.system` is `active_job` and `messaging.message.id` matches the current job ID. Other active spans stay unchanged. This transfers PostHog IDs; it does not transfer a distributed trace or configure a tracing provider.
+
+## Sidekiq retry reporting (optional)
+
+On Rails 7.1 or later with Sidekiq 7.0.3 or later, explicitly load and install the integration in an initializer:
+
+```ruby
+require 'posthog/rails/sidekiq'
+
+Sidekiq.configure_server do |config|
+  PostHog::Rails::Sidekiq.install(config, error_reporting: :exhausted)
+end
+```
+
+Initialize the PostHog client with `PostHog.init` as usual. Installation is independent of Rails' `auto_capture_exceptions` option. There is no Sidekiq setting on `PostHog::Rails::Configuration`, and the optional integration is not loaded by the general Rails integration. Leaving it uninstalled keeps existing reporting unchanged.
+
+The required `error_reporting:` argument accepts:
+- `:all` reports each failed Sidekiq attempt once through Sidekiq's error handler.
+- `:exhausted` reports Sidekiq's terminal failure notifications through its death handler. This includes exhausted retries, early kills, jobs with `retry: false`, and terminal failures with `dead: false`.
+- `:dead` reports only terminal failures sent to Sidekiq's dead queue. It skips `retry: false`, `dead: false`, and discarded jobs. `retry: 0` can still send a failed job to the dead queue.
+
+Sidekiq 7.0.3+ labels its Rails 7.1+ error reports with `job.sidekiq`, distinguishing Sidekiq failures from unrelated Rails reports. These policies follow Sidekiq's callbacks, not a comparison of retry counts. In Sidekiq 8.1+, deliberate discards also emit a terminal failure notification and are included in `:exhausted`. Earlier versions do not notify death handlers for these discards.
+
+The installed Sidekiq integration owns automatic error reporting for its jobs. Rails wrapper reports and Active Job captures defer to the selected Sidekiq policy instead of sending separate events. Active Job identity, session, filtered job properties, and correlation IDs from an active span are retained when available. Tracing remains optional and spans are not kept open for deferred reporting. When nested Active Jobs propagate the same exception, its first reporting job owns the deferred context; a newly raised wrapper exception retains its own job context. Other Rails error subscribers and Sidekiq handlers remain active. Manual exception captures and explicit application Rails error reports are not filtered by this policy. Inside an installed job scope, the Sidekiq policy also takes precedence over `report_active_job_retries`. Active Job still schedules retries for failures it consumes; these do not invoke Sidekiq error/death callbacks.
+
+The integration does not change retry scheduling, dead-queue storage, or shutdown handling. Native Sidekiq job arguments are not collected, and Sidekiq infrastructure errors without a job are not captured by these hooks. Sidekiq remains an optional application dependency. Unsupported Rails or Sidekiq versions log a warning and keep the existing reporting paths. Install at boot, not while jobs are running. Reinstalling on the same server configuration updates the policy without adding duplicate handlers.
 
 ## Action Cable exceptions
 
@@ -101,6 +148,48 @@ configuration needed.
 what your app logs. Setting it below the Rails logger level (e.g. `:debug`
 with an `:info` app) does not make Rails or ActiveRecord generate extra
 output — only records the app actually produces are forwarded.
+
+Structured notification logs are separately opt-in with `config.logs_notifications`
+(default `[]`), selecting `:action_controller`, `:active_record`, `:active_job`,
+and/or `:action_mailer`. Components register lazily without loading optional Rails
+packages. `logs_enabled` remains the master gate; notification records share the
+forwarding threshold, rate cap, hook, correlation, and shutdown pipeline. Set
+`logs_forward_rails_logger` to `false` to collect notifications without also
+forwarding generic logger lines. SQL records use debug severity; successful
+controller/job/mailer records use info, controller 4xx responses warn, and failures
+error. Error-bearing retry notifications also use error severity: they describe a
+failed attempt, not necessarily terminal job failure. `rails.job.retry_wait` is
+reported in seconds, including waits supplied as `ActiveSupport::Duration`.
+These records do not create spans or collect timings.
+
+Notification bodies are fixed descriptions with allowlisted event metadata.
+`rails.params` serializes Rails' already-filtered controller notification parameters
+without applying filters again. `rails.job.arguments` applies the application's
+`filter_parameters` to copied original key/value types before JSON normalization.
+Unkeyed job arguments are redacted; jobs with `log_arguments = false` and Action
+Mailer delivery jobs omit arguments entirely. Unsupported, cyclic, or oversized
+parameter trees are wholly redacted rather than partially truncated. Unencodable
+or oversized JSON payloads are replaced with a redaction marker without dropping
+the lifecycle record. An empty `filter_parameters` list redacts keyed job payloads
+rather than exporting them unfiltered.
+SQL statements/binds, cookies/headers, and mail recipients/subject/content are not
+collected. Review configured parameter filters and use `logs_before_send` for
+additional scrubbing. Job completion records reuse saved/effective job identity
+only when the existing `auto_instrument_active_job` integration is enabled; logging
+alone does not enable job context propagation or exception capture.
+
+To exercise real controller and inline job notifications against your project:
+
+```bash
+POSTHOG_API_KEY='<project_api_key>' POSTHOG_HOST='https://us.i.posthog.com' \
+  BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle exec ruby examples/rails_notification_logs.rb
+```
+
+Run from the repository root after installing the OpenTelemetry bundle. The example
+checks outgoing record counts and filtering, then prints a unique run ID to find
+its eight analytics events and eleven records in PostHog Logs. Controller responses
+exercise info, warn, and error severity; the hook drops the 418 controller record.
+SQL and mailer notifications are not exercised by this example.
 
 Known limitations of the broadcast approach:
 

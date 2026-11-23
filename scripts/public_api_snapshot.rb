@@ -77,6 +77,7 @@ module PublicApiSnapshot
     add_load_path(RAILS_LIB_DIR)
     require 'rails'
     require 'posthog-rails'
+    require 'posthog/rails/sidekiq'
   end
 
   def add_load_path(path)

@@ -10,6 +10,7 @@ module PostHog
   # Error values:
   #   ERRORS_WHILE_COMPUTING: Server returned errorsWhileComputingFlags=true
   #   FLAG_MISSING: Requested flag not in API response
+  #   EVALUATION_FAILED: Requested flag failed evaluation and has no successful fallback
   #   LOCAL_EVALUATION_INCONCLUSIVE: Flag has a loaded local definition but local evaluation could not resolve it
   #   QUOTA_LIMITED: Rate/quota limit exceeded
   #   TIMEOUT: Request timed out
@@ -22,6 +23,7 @@ module PostHog
   class FeatureFlagError
     ERRORS_WHILE_COMPUTING = 'errors_while_computing_flags'
     FLAG_MISSING = 'flag_missing'
+    EVALUATION_FAILED = 'evaluation_failed'
     LOCAL_EVALUATION_INCONCLUSIVE = 'local_evaluation_inconclusive'
     QUOTA_LIMITED = 'quota_limited'
     TIMEOUT = 'timeout'

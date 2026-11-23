@@ -1,5 +1,41 @@
 # posthog-ruby
 
+## 3.34.3
+
+### Patch Changes
+
+- 455e226: Send transactional emails, attachment uploads, and email status requests through `/api/messaging/` instead of the `/api/projects/@current/messaging/` alias. Needs PostHog Cloud, or a self-hosted PostHog from 2026-11-18 or later. Older self-hosted versions answer these calls with a 404.
+
+## 3.34.2
+
+### Patch Changes
+
+- c5bedb3: Explicitly serialize the existing false GeoIP default in remote feature flag requests, while preserving per-call overrides.
+
+## 3.34.1
+
+### Patch Changes
+
+- 26a4a18: Treat failed feature flag records as unevaluated, report evaluation failure diagnostics, and preserve successful local values and payloads when remote fallback fails.
+
+## 3.34.0
+
+### Minor Changes
+
+- b2551f0: `client.emails.send` with `template_key:` takes `cc:`, `bcc:` and `attachments:`. `cc` and `bcc` take one address or a list. Each attachment is a Hash with `filename`, `content`, and an optional `content_type` and `content_id` (`content_id` shows the file inline). Pass the file's bytes as `content`, such as `File.binread('invoice.pdf')` or a list of byte values; any other String is taken as the file encoded as Base64, on one line or wrapped at 60, 64 or 76 characters. An email carries at most 10 files and 40 MB after Base64 encoding, about 29 MB of files; the subject and bodies count towards the 40 MB as PostHog counts them, the HTML twice when there is no text, because PostHog derives the text from it. The client hashes each file, uploads the files PostHog doesn't have yet straight to PostHog's file storage, and then sends the email with the files' SHA-256 hashes; a file the project sent before uploads nothing again. A file the client can't send raises `PostHog::EmailError` before any request, with code `invalid_attachment`, `too_many_attachments` or `message_too_large`. An upload that file storage refuses raises `attachment_upload_failed`, and a PostHog without the upload route for the project answers `not_found` on `attachments`; either way no email is sent. Files go to storage only over https, unless `app_host` is an http URL for local development: an upload URL without https raises `api_error` on the file's field, such as `attachments__0`, before any file goes out.
+
+## 3.33.0
+
+### Minor Changes
+
+- 20a9a33: A send with your own content now takes `sensitive:` and `tracking:`. Pass `sensitive: true` when the email carries login links, reset tokens or codes: PostHog then keeps its links unchanged unless `tracking:` turns clicks on, leaves its subject off engagement events, and keeps its content out of logs. Left out, the email takes the setting of the template made in PostHog whose key matches `template_key`, and is sensitive when no template matches. `tracking:` chooses what PostHog tracks for the email. Left out, PostHog counts opens and captures engagement events, and tracks clicks only when the email isn't sensitive. `true` turns on opens, clicks and engagement events, and `false` turns them all off. A Hash such as `{ clicks: true }` sets `:opens`, `:clicks` and `:engagement` one by one. `capture_engagement:` is deprecated in favor of `tracking: { engagement: false }`; it still works, but a send can't set both. The client now sends it only when you set it; PostHog already reads a missing value as on. The new fields need PostHog's API support, which is rolling out: until then, PostHog refuses a send that sets them.
+
+## 3.32.2
+
+### Patch Changes
+
+- 1e29b54: Relative date filters in local flag evaluation now clamp the day after every month or year step, as the SDK spec requires. `2m` on March 31 resolves to January 28 instead of January 31, and `4y` on February 29, 2024 to February 28, 2020.
+
 ## 3.32.1
 
 ### Patch Changes

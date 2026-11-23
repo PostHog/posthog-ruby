@@ -19,7 +19,10 @@ module PostHog
       # @return [void]
       def report(error, handled:, severity:, context:, source: nil)
         return unless PostHog::Rails.config&.auto_capture_exceptions
-        return unless PostHog::Rails.config&.should_capture_exception?(error)
+
+        runner_report = !handled && source == 'application.runner.railties'
+        return unless runner_report || PostHog::Rails.config&.should_capture_exception?(error)
+        return if defined?(PostHog::Rails::Sidekiq) && Sidekiq.suppress_rails_report?(error, source)
 
         if defined?(::Sidekiq::JobRetry::Handled) && error.is_a?(::Sidekiq::JobRetry::Handled)
           error = error.cause || error
@@ -43,6 +46,12 @@ module PostHog
           end
         end
 
+        # Keep the reporter's object and serialized context until terminal capture.
+        if runner_report
+          Thread.current[:posthog_rails_runner_report] = [error, distinct_id, properties]
+          return
+        end
+
         PostHog.capture_exception(
           error,
           distinct_id,
@@ -52,6 +61,27 @@ module PostHog
       rescue StandardError => e
         PostHog::Logging.logger.error("Failed to report error via subscriber: #{e.message}")
         PostHog::Logging.logger.error("Backtrace: #{e.backtrace&.first(5)&.join("\n")}")
+      end
+
+      def self.take_runner_report(exception)
+        report = Thread.current[:posthog_rails_runner_report]
+        Thread.current[:posthog_rails_runner_report] = nil
+        return report if report && report.first.equal?(exception)
+
+        # Rails also converts inline errors when --skip-executor prevents a report.
+        # Only its command conversion may replace the terminal exception.
+        return unless exception.is_a?(SystemExit) && exception.status == 1
+
+        original = exception.cause
+        return unless original.is_a?(NameError) || original.is_a?(SyntaxError)
+        return unless defined?(::Rails::Command::RunnerCommand)
+
+        # Inline eval shares Rails' filename, so also check the caller beyond exit.
+        location = exception.backtrace_locations&.find { |frame| frame.base_label != 'exit' }
+        return unless location&.base_label == 'perform'
+        return unless location.path == ::Rails::Command::RunnerCommand.instance_method(:perform).source_location.first
+
+        report && report.first.equal?(original) ? report : [original, nil, {}]
       end
     end
   end

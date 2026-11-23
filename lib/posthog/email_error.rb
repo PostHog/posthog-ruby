@@ -11,7 +11,7 @@ module PostHog
     attr_reader :name
     # @return [String] PostHog's error code, such as `quota_limited`, or an SDK code such as `network_error`.
     attr_reader :code
-    # @return [Integer, nil] The HTTP status, when PostHog answered.
+    # @return [Integer, nil] The HTTP status, when PostHog answered, or file storage's for `attachment_upload_failed`.
     attr_reader :status_code
     # @return [String, nil] Why PostHog refused the email.
     attr_reader :why
@@ -37,10 +37,19 @@ module PostHog
       @retry_after = retry_after
     end
 
+    SDK_ERROR_NAMES = {
+      'network_error' => 'service_unavailable',
+      'invalid_attachment' => 'validation_error',
+      'too_many_attachments' => 'validation_error',
+      'message_too_large' => 'validation_error'
+    }.freeze
+    private_constant :SDK_ERROR_NAMES
+
     # @api private
     def self.name_for(status_code, code)
+      return status_code.to_i >= 500 ? 'service_unavailable' : 'application_error' if code == 'attachment_upload_failed'
       return 'missing_api_key' if code == 'missing_secret_key' || status_code == 401
-      return code == 'network_error' ? 'service_unavailable' : 'application_error' if status_code.nil?
+      return SDK_ERROR_NAMES.fetch(code, 'application_error') if status_code.nil?
 
       case status_code
       when 400 then 'validation_error'

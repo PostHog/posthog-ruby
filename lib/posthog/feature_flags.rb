@@ -203,7 +203,8 @@ module PostHog
         group_properties: group_properties
       }
       request_data[:flag_keys_to_evaluate] = flag_keys if flag_keys && !flag_keys.empty?
-      request_data[:geoip_disable] = disable_geoip unless disable_geoip.nil?
+      # The flags endpoint treats an omitted/null value as false; serialize that same default explicitly.
+      request_data[:geoip_disable] = disable_geoip.nil? ? false : disable_geoip
 
       flags_response = _request_feature_flag_evaluation(request_data)
 
@@ -302,14 +303,19 @@ module PostHog
           errors << FeatureFlagError.api_error(status) if status && status >= 400
           errors << FeatureFlagError::ERRORS_WHILE_COMPUTING if flags_data[:errorsWhileComputingFlags]
           errors << FeatureFlagError::QUOTA_LIMITED if flags_data[:quotaLimited]&.include?('feature_flags')
-          errors << FeatureFlagError::FLAG_MISSING unless flags.key?(key.to_s)
+          flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
+          failed = flag_detail&.failed == true && !flags.key?(key)
+          if failed
+            errors << FeatureFlagError::EVALUATION_FAILED
+          elsif !flags.key?(key)
+            errors << FeatureFlagError::FLAG_MISSING
+          end
 
           response = flags[key]
-          response = false if response.nil?
+          response = false if response.nil? && !failed
           payload = payloads[key]
           feature_flag_error = errors.join(',') unless errors.empty?
 
-          flag_detail = flags_data[:flagDetails]&.[](key.to_sym)
           has_experiment = flag_detail&.metadata&.has_experiment
           minimal_flag_called_events = flags_data[:minimalFlagCalledEvents]
 
@@ -422,8 +428,11 @@ module PostHog
               flags = stringify_keys(flags).merge(server_flags)
               payloads = stringify_keys(payloads).merge(server_payloads)
             else
-              flags = server_flags
-              payloads = server_payloads
+              # A failed record must preserve a successful same-context local pair,
+              # independently of the response-wide error bit.
+              failed_keys = (flag_details || {}).select { |_, flag| flag.failed == true }.keys.map(&:to_s)
+              flags = stringify_keys(flags).slice(*failed_keys).merge(server_flags)
+              payloads = stringify_keys(payloads).slice(*failed_keys).merge(server_payloads)
             end
           end
         rescue StandardError => e
@@ -548,15 +557,39 @@ module PostHog
       when 'w'
         parsed_dt = parsed_dt.prev_day(number * 7)
       when 'm'
-        parsed_dt = parsed_dt.prev_month(number)
+        parsed_dt = subtract_months(parsed_dt, number)
       when 'y'
-        parsed_dt = parsed_dt.prev_year(number)
+        parsed_dt = subtract_years(parsed_dt, number)
       else
         return nil
       end
 
       parsed_dt
     end
+
+    # Steps back one month at a time and clamps the day after every step, as the
+    # SDK spec requires: March 31 minus two months is January 28. A single
+    # prev_month(2) clamps once and lands on January 31.
+    def self.subtract_months(date_time, months)
+      steps = 0
+      # Every month has at least 28 days, so once the day is 28 or less no step
+      # can clamp it again and the rest can be done in one jump.
+      while steps < months && date_time.day > 28
+        date_time = date_time.prev_month
+        steps += 1
+      end
+      date_time.prev_month(months - steps)
+    end
+    private_class_method :subtract_months
+
+    # Years work the same way. Only February 29 can clamp, and only on the first
+    # step, so one step followed by a single jump matches stepping every year.
+    def self.subtract_years(date_time, years)
+      return date_time if years.zero?
+
+      date_time.prev_year.prev_year(years - 1)
+    end
+    private_class_method :subtract_years
 
     # Parse a single semver numeric identifier, rejecting empty, non-digit, or
     # leading-zero values per semver 2.0.0 §2. `reason` names the owner of the value:

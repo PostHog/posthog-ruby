@@ -74,18 +74,22 @@ module PostHog
         # which, as an Exception, escapes the rescue below and breaks the app.
         REENTRANCY_KEY = :posthog_rails_logs_emitting
 
+        def accepts_severity?(severity)
+          severity >= @threshold
+        end
+
         # Mirrors `Logger#add` message/progname resolution, then emits to OTel
         # instead of writing to a log device.
         #
         # @return [Boolean] Always true so it composes with broadcast loggers.
-        def add(severity, message = nil, progname = nil)
+        def add(severity, message = nil, progname = nil, attributes: {})
           return true if Thread.current[REENTRANCY_KEY]
 
           begin
             Thread.current[REENTRANCY_KEY] = true
 
             severity ||= ::Logger::UNKNOWN
-            return true if severity < @threshold
+            return true unless accepts_severity?(severity)
 
             if message.nil?
               if block_given?
@@ -99,7 +103,9 @@ module PostHog
             return true if message.nil?
             return true if self_log?(message, progname)
 
-            record = apply_before_send(build_record(severity, message, progname))
+            record = build_record(severity, message, progname)
+            record[:attributes].merge!(attributes)
+            record = apply_before_send(record)
             return true if record.nil?
 
             case @rate_limiter&.record
