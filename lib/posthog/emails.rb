@@ -478,17 +478,21 @@ module PostHog
     end
 
     def encode_utf8(value, field)
-      plain = String.new(value)
-      utf8 = case plain.encoding
-             when Encoding::UTF_8 then plain
-             when Encoding::ASCII_8BIT then plain.force_encoding(Encoding::UTF_8)
-             else plain.encode(Encoding::UTF_8)
-             end
+      utf8 = transcode_utf8(String.new(value))
       raise ArgumentError, "#{field} must be valid UTF-8." unless utf8.valid_encoding?
 
       utf8
+    rescue Encoding::ConverterNotFoundError
+      raise ArgumentError, "#{field} encoding #{value.encoding.name} cannot be transcoded to UTF-8."
     rescue EncodingError
       raise ArgumentError, "#{field} must be valid UTF-8."
+    end
+
+    def transcode_utf8(plain)
+      return plain if plain.encoding == Encoding::UTF_8
+      return plain.force_encoding(Encoding::UTF_8) if plain.encoding == Encoding::ASCII_8BIT
+
+      plain.encode(Encoding::UTF_8)
     end
 
     def category_type?(value)

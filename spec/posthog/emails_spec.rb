@@ -41,46 +41,6 @@ module PostHog
       bodies
     end
 
-    def valid_category_object?(category)
-      return false unless category.is_a?(Hash) && (category.keys - %w[key type name description]).empty?
-      return false unless %w[key name].all? { |field| category[field].is_a?(String) && !category[field].strip.empty? }
-      return false unless %w[marketing transactional].include?(category['type'])
-
-      !category.key?('description') || category['description'].is_a?(String)
-    end
-
-    def serve_categories(categories = {}, templates: {})
-      filed = []
-      stub_request(:post, send_url).to_return do |request|
-        body = JSON.parse(request.body)
-        category = body['category']
-        unless category.nil?
-          valid = category == 'transactional' || valid_category_object?(category)
-          next refuse(400, 'invalid_input') unless valid
-        end
-
-        if templates.key?(body['template_key'])
-          stored = categories[templates[body['template_key']]]
-          next refuse(400, 'marketing_template') if stored&.fetch('type') == 'marketing'
-
-          named = category.is_a?(Hash) ? category.slice('key', 'type') : category
-          followed = stored&.slice('key', 'type') || 'transactional'
-          next refuse(400, 'category_mismatch') unless category.nil? || named == followed
-
-          category = stored
-        end
-        if category.is_a?(Hash)
-          existing = categories[category['key']]
-          next refuse(400, 'category_mismatch') if existing && existing['type'] != category['type']
-
-          categories[category['key']] ||= category
-        end
-        filed << (category['key'] if category.is_a?(Hash))
-        accept
-      end
-      [categories, filed]
-    end
-
     # Serves each raw HTTP response once, in order, on a local socket, and points the client's app host at it. A
     # response can be a lambda that takes the socket's URL. WebMock is off meanwhile: its Net::HTTP wrapper reads the
     # whole body before it hands over the response.
@@ -374,14 +334,15 @@ module PostHog
         )
       end
 
-      it 'files a send under the transactional category it names, and TRANSACTIONAL under none' do
-        categories, filed = serve_categories
+      it 'sends a transactional MessageCategory and the TRANSACTIONAL sentinel on the wire' do
+        stub_request(:post, send_url).to_return(accept)
 
-        send_code(category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts'))
-        send_code(category: Emails::TRANSACTIONAL)
+        categorized = send_code(
+          category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts')
+        )
+        uncategorized = send_code(category: Emails::TRANSACTIONAL)
 
-        expect(filed).to eq(['receipts', nil])
-        expect(categories).to eq('receipts' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' })
+        expect([categorized.id, uncategorized.id]).to eq(%w[msg_1 msg_1])
         expect(sent_bodies.map { |body| body['category'] }).to eq([
                                                                     { 'key' => 'receipts', 'type' => 'transactional',
                                                                       'name' => 'Receipts' },
@@ -389,33 +350,28 @@ module PostHog
                                                                   ])
       end
 
-      context 'with a template_key that names a template in a transactional category' do
-        let(:receipts) { { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' } }
+      it 'omits category on the wire when category is omitted or nil' do
+        stub_request(:post, send_url).to_return(accept)
 
-        it "files the email under the template's category when the send leaves category out" do
-          _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
+        omitted = send_code(template_key: 'order-receipt')
+        explicit_nil = send_code(template_key: 'order-receipt', category: nil)
 
-          send_code(template_key: 'order-receipt')
-          send_code(template_key: 'order-receipt', category: nil)
+        expect([omitted.id, explicit_nil.id]).to eq(%w[msg_1 msg_1])
+        raw_bodies = sent_raw_bodies
+        expect(raw_bodies.length).to eq(2)
+        raw_bodies.each do |raw|
+          expect(JSON.parse(raw)).not_to have_key('category')
+        end
+      end
 
-          expect(filed).to eq(%w[receipts receipts])
-          raw_bodies = sent_raw_bodies
-          expect(raw_bodies.length).to eq(2)
-          raw_bodies.each do |raw|
-            expect(JSON.parse(raw)).not_to have_key('category')
+      it 'surfaces a server category_mismatch refusal on TRANSACTIONAL as EmailError' do
+        stub_request(:post, send_url).to_return(refuse(400, 'category_mismatch'))
+
+        expect { send_code(template_key: 'order-receipt', category: Emails::TRANSACTIONAL) }
+          .to raise_error(EmailError) do |error|
+            expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
           end
-        end
-
-        it 'refuses TRANSACTIONAL with category_mismatch' do
-          _, filed = serve_categories({ 'receipts' => receipts }, templates: { 'order-receipt' => 'receipts' })
-
-          expect { send_code(template_key: 'order-receipt', category: Emails::TRANSACTIONAL) }
-            .to raise_error(EmailError) do |error|
-              expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
-            end
-          expect(sent_bodies.first['category']).to eq('transactional')
-          expect(filed).to be_empty
-        end
+        expect(sent_bodies.first['category']).to eq('transactional')
       end
 
       it 'refuses template_data, because local templates are not supported' do
@@ -1025,6 +981,9 @@ module PostHog
         ].each do |category|
           expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
         end
+        utf7_name = 'Newsletter'.dup.force_encoding(Encoding::UTF_7)
+        expect { send_code(category: Emails::MessageCategory.new(**newsletter, name: utf7_name)) }
+          .to raise_error(ArgumentError, /\Acategory name encoding UTF-7 cannot be transcoded to UTF-8\.\z/)
         expect { send_template(idempotency_key: 'has space') }.to raise_error(ArgumentError, /idempotency_key/)
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
