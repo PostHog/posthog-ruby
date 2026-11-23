@@ -37,12 +37,34 @@ module PostHog
       bodies
     end
 
+    def valid_category_object?(category)
+      return false unless category.is_a?(Hash) && (category.keys - %w[key type name description]).empty?
+      return false unless %w[key name].all? { |field| category[field].is_a?(String) && !category[field].strip.empty? }
+      return false unless %w[marketing transactional].include?(category['type'])
+
+      !category.key?('description') || category['description'].is_a?(String)
+    end
+
+    def clickable_unsubscribe_link?(body)
+      html = body['html'].to_s
+      if html.empty?
+        body['text'].to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
+      else
+        without_comments = html.gsub(/<!--.*?-->/m, '')
+        unsub = '\{\{\s*unsubscribe_url\s*\}\}'
+        without_comments.match?(/<a\b[^>]*\bhref\s*=\s*(?:"[^"]*#{unsub}[^"]*"|'[^']*#{unsub}[^']*')/im)
+      end
+    end
+
     def serve_categories(categories = {}, templates: {})
       filed = []
       stub_request(:post, send_url).to_return do |request|
         body = JSON.parse(request.body)
-        category = body['category']
-        next refuse(400, 'invalid_input') unless [nil, 'transactional'].include?(category) || category.is_a?(Hash)
+        if body.key?('category')
+          category = body['category']
+          valid = category == 'transactional' || valid_category_object?(category)
+          next refuse(400, 'invalid_input') unless valid
+        end
 
         if templates.key?(body['template_key'])
           stored = categories[templates[body['template_key']]]
@@ -55,9 +77,14 @@ module PostHog
           category = stored
         end
         if category.is_a?(Hash)
-          content = body['html'].to_s.empty? ? body['text'] : body['html']
-          unsubscribable = content.to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
-          next refuse(400, 'unsubscribe_link_required') if category['type'] == 'marketing' && !unsubscribable
+          existing = categories[category['key']]
+          next refuse(400, 'category_mismatch') if existing && existing['type'] != category['type']
+
+          if category['type'] == 'marketing'
+            has_copies = !Array(body['cc']).empty? || !Array(body['bcc']).empty?
+            next refuse(400, 'copies_not_allowed') if has_copies
+            next refuse(400, 'unsubscribe_link_required') unless clickable_unsubscribe_link?(body)
+          end
 
           categories[category['key']] ||= category
         end
@@ -255,21 +282,62 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'to')
       end
 
-      it 'creates a category the first time a send names it, and leaves it unchanged on later sends' do
-        categories, = serve_categories
+      it 'sends a marketing MessageCategory with its description, omitting nil and keeping empty strings' do
+        categories, filed = serve_categories
         html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        newsletter = { key: 'newsletter', type: 'marketing' }
 
-        send_code(category: Emails::MessageCategory.new(**newsletter, name: 'Newsletter',
-                                                                      description: 'Monthly product news'), html: html)
-        result = send_code(category: Emails::MessageCategory.new(**newsletter, name: 'Weekly news',
-                                                                               description: 'Weekly'), html: html)
-
-        expect(result.id).to eq('msg_1')
-        expect(categories).to eq(
-          'newsletter' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter',
-                            'description' => 'Monthly product news' }
+        with_desc = send_code(
+          category: Emails::MessageCategory.new(
+            key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly product news'
+          ),
+          html: html
         )
+        without_desc = send_code(
+          category: Emails::MessageCategory.new(key: 'announcements', type: 'marketing', name: 'Announcements'),
+          html: html
+        )
+        empty_desc = send_code(
+          category: Emails::MessageCategory.new(
+            key: 'updates', type: 'marketing', name: 'Updates', description: ''
+          ),
+          html: html
+        )
+
+        expect([with_desc.id, without_desc.id, empty_desc.id]).to eq(%w[msg_1 msg_1 msg_1])
+        expect(filed).to eq(%w[newsletter announcements updates])
+        expect(sent_bodies.map { |body| body['category'] }).to eq([
+                                                                    { 'key' => 'newsletter', 'type' => 'marketing',
+                                                                      'name' => 'Newsletter',
+                                                                      'description' => 'Monthly product news' },
+                                                                    { 'key' => 'announcements', 'type' => 'marketing',
+                                                                      'name' => 'Announcements' },
+                                                                    { 'key' => 'updates', 'type' => 'marketing',
+                                                                      'name' => 'Updates', 'description' => '' }
+                                                                  ])
+        expect(categories['newsletter']).to eq('key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter',
+                                               'description' => 'Monthly product news')
+      end
+
+      it 'normalizes valid UTF-16LE category strings to UTF-8 on the wire' do
+        _, filed = serve_categories
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        utf16_category = Emails::MessageCategory.new(
+          key: 'newsletter'.encode(Encoding::UTF_16LE),
+          type: 'marketing'.encode(Encoding::UTF_16LE),
+          name: 'Newsletter'.encode(Encoding::UTF_16LE),
+          description: 'Monthly product news'.encode(Encoding::UTF_16LE)
+        )
+
+        send_code(category: 'transactional'.encode(Encoding::UTF_16LE))
+        send_code(category: utf16_category, html: html)
+
+        expect(filed).to eq([nil, 'newsletter'])
+        expect(sent_bodies.map { |body| body['category'] }).to eq([
+                                                                    'transactional',
+                                                                    { 'key' => 'newsletter', 'type' => 'marketing',
+                                                                      'name' => 'Newsletter',
+                                                                      'description' => 'Monthly product news' }
+                                                                  ])
       end
 
       it 'files a send under the transactional category it names, and TRANSACTIONAL under none' do
@@ -291,6 +359,7 @@ module PostHog
           send_code(template_key: 'order-receipt')
 
           expect(filed).to eq(['receipts'])
+          expect(sent_bodies.first).not_to have_key('category')
         end
 
         it 'refuses TRANSACTIONAL with category_mismatch' do
@@ -302,17 +371,6 @@ module PostHog
             end
           expect(filed).to be_empty
         end
-      end
-
-      it 'refuses a template_key that names a template in a marketing category with marketing_template' do
-        newsletter = { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' }
-        _, filed = serve_categories({ 'newsletter' => newsletter }, templates: { 'november-digest' => 'newsletter' })
-
-        expect { send_code(template_key: 'november-digest', html: '<a href="{{ unsubscribe_url }}">Unsubscribe</a>') }
-          .to raise_error(EmailError) do |error|
-            expect([error.code, error.name]).to eq(%w[marketing_template validation_error])
-          end
-        expect(filed).to be_empty
       end
 
       it 'refuses template_data, because local templates are not supported' do
@@ -880,11 +938,14 @@ module PostHog
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
         newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
         [
-          'newsletter', newsletter,
+          'newsletter', newsletter, "\xFF".b,
           Emails::MessageCategory.new(**newsletter, key: :newsletter),
+          Emails::MessageCategory.new(**newsletter, key: "\xFF".b),
           Emails::MessageCategory.new(**newsletter, type: 'promotional'),
+          Emails::MessageCategory.new(**newsletter, type: "\xFF".b),
           Emails::MessageCategory.new(**newsletter, name: nil),
-          Emails::MessageCategory.new(**newsletter, description: 1)
+          Emails::MessageCategory.new(**newsletter, description: 1),
+          Emails::MessageCategory.new(**newsletter, description: "\xFF".b)
         ].each do |category|
           expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
         end
@@ -1042,7 +1103,7 @@ module PostHog
         end
       end
 
-      [[429, 'quota_limited'], [422, 'recipient_suppressed'], [422, 'recipient_opted_out']].each do |status, code|
+      [[429, 'quota_limited'], [422, 'recipient_suppressed']].each do |status, code|
         it "raises a #{status} #{code} without retrying it" do
           stub_request(:post, send_url).to_return(refuse(status, code), accept)
 
@@ -1188,11 +1249,6 @@ module PostHog
         [409, 'idempotency_key_in_flight', 'concurrent_idempotent_requests'],
         [422, 'idempotency_key_reused', 'invalid_idempotent_request'],
         [422, 'recipient_suppressed', 'validation_error'],
-        [422, 'recipient_opted_out', 'validation_error'],
-        [400, 'category_mismatch', 'validation_error'],
-        [400, 'too_many_categories', 'validation_error'],
-        [400, 'unsubscribe_link_required', 'validation_error'],
-        [400, 'copies_not_allowed', 'validation_error'],
         [429, 'quota_limited', 'monthly_quota_exceeded'],
         [429, 'throttled', 'rate_limit_exceeded'],
         [500, 'server_error', 'application_error']

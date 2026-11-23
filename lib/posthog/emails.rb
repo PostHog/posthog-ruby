@@ -212,14 +212,19 @@ module PostHog
     #   whether PostHog captures the email's engagement events. It still works, but a send can't set both. Sent
     #   only when you set it.
     # @param category [String, MessageCategory] Code form: {TRANSACTIONAL} for a transactional email with no category,
-    #   or the {MessageCategory} the email belongs to. Left out, the email follows the category of the template that
-    #   `template_key` names, or is transactional with no category. A marketing email skips recipients who opted out of
-    #   its category or of all marketing, can't have copies, and needs a `{{ unsubscribe_url }}` link in its `html`, or
-    #   in its `text` when it has no `html`. PostHog refuses a send with `category_mismatch` when the type differs from
-    #   the existing category's, or when `template_key` names a template in another category, {TRANSACTIONAL} for a
-    #   template in a category included; `marketing_template` when `template_key` names a template in a marketing
-    #   category, because a template made in PostHog is transactional; `too_many_categories` when the project can't
-    #   take another category; `unsubscribe_link_required`; `copies_not_allowed`; or `recipient_opted_out`.
+    #   or the {MessageCategory} the email belongs to. Left out, when code-send categories are enabled for the project,
+    #   the email follows the transactional category of the template that `template_key` names, or is transactional
+    #   with no category; when categories are disabled for the project, it is queued as transactional with no category.
+    #   A marketing email skips recipients who opted out of its category or of all marketing, can't have copies
+    #   (`copies_not_allowed`), can't combine attachments with workflows that can defer delivery (`workflow_can_wait`),
+    #   and needs a clickable `<a href="{{ unsubscribe_url }}">` link in its `html` (or `{{ unsubscribe_url }}` in its
+    #   `text` when it has no `html`). PostHog refuses a send with `categories_not_enabled` when code-send categories
+    #   are unavailable for the project (and HTTP 400 on an older PostHog server); `category_mismatch` when the type
+    #   differs from the existing category's, or when `template_key` names a template in another transactional category
+    #   (including {TRANSACTIONAL} for a template in a category); `marketing_template` when `template_key` names a
+    #   template in a marketing category, because a template made in PostHog is transactional; `too_many_categories`
+    #   when the project can't take another category; `unsubscribe_link_required`; `copies_not_allowed`;
+    #   `workflow_can_wait`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -443,21 +448,39 @@ module PostHog
     end
 
     def category_payload(category)
-      return category if category == TRANSACTIONAL
+      return TRANSACTIONAL if category.is_a?(String) && encode_utf8(category, 'category') == TRANSACTIONAL
       unless category.is_a?(MessageCategory)
         raise ArgumentError, 'category must be PostHog::Emails::TRANSACTIONAL or a PostHog::Emails::MessageCategory.'
       end
 
-      check_category_fields(category)
-      category.to_h.compact
+      normalize_category(category).compact
     end
 
-    def check_category_fields(category)
+    def normalize_category(category)
       raise ArgumentError, 'category key and name must be strings.' unless [category.key, category.name].all?(String)
-      raise ArgumentError, "category type must be 'marketing' or 'transactional'." unless category_type?(category.type)
-      return if category.description.nil? || category.description.is_a?(String)
 
-      raise ArgumentError, 'category description must be a string.'
+      key = encode_utf8(category.key, 'category key')
+      name = encode_utf8(category.name, 'category name')
+      type = category.type.is_a?(String) ? encode_utf8(category.type, 'category type') : nil
+      raise ArgumentError, "category type must be 'marketing' or 'transactional'." unless category_type?(type)
+
+      { key: key, type: type, name: name, description: normalize_category_description(category.description) }
+    end
+
+    def normalize_category_description(description)
+      return nil if description.nil?
+      raise ArgumentError, 'category description must be a string.' unless description.is_a?(String)
+
+      encode_utf8(description, 'category description')
+    end
+
+    def encode_utf8(value, field)
+      utf8 = value.encoding == Encoding::UTF_8 ? value : value.encode(Encoding::UTF_8)
+      raise ArgumentError, "#{field} must be valid UTF-8." unless utf8.valid_encoding?
+
+      utf8
+    rescue EncodingError
+      raise ArgumentError, "#{field} must be valid UTF-8."
     end
 
     def category_type?(value)
