@@ -248,7 +248,7 @@ module PostHog
       files = EmailAttachments.from(fields.fetch(:attachments, []), bodies_with_derived_text(fields), fields[:subject])
       payload[:attachments] = files.references unless files.empty?
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
-      payload[:scheduled_at] = wire_time(due) if due
+      payload[:scheduled_at] = time_in_iso8601(due) if due
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
 
@@ -385,10 +385,6 @@ module PostHog
       seconds = second.to_i + (fraction ? Rational(fraction.to_i, 10**fraction.size) : 0)
       offset = offset_hours ? "#{offset_hours}:#{offset_minutes}" : '+00:00'
       Time.new(year.to_i, month.to_i, day.to_i, hour.to_i, minute.to_i, seconds, offset)
-    end
-
-    def wire_time(time)
-      time.strftime('%Y-%m-%dT%H:%M:%S.%LZ')
     end
 
     def check_schedulable
