@@ -214,20 +214,23 @@ module PostHog
     # @param category [String, MessageCategory] Code form: {TRANSACTIONAL} for a transactional email with no category,
     #   or the {MessageCategory} the email belongs to. Left out, when code-send categories are enabled for the project,
     #   the email follows the transactional category of the template that `template_key` names, or is transactional
-    #   with no category; when categories are disabled for the project, it is queued as transactional with no category.
-    #   A marketing email skips recipients who opted out of its category or of all marketing, can't have copies
-    #   (`copies_not_allowed`), can't carry attachments (`workflow_can_wait` on a verified sender because marketing
-    #   sending limits can hold delivery, or `sandbox_fields_unsupported` when using the PostHog test sender), and
-    #   needs a clickable `<a href="{{ unsubscribe_url }}">` link in its `html` (or `{{ unsubscribe_url }}` in its
-    #   `text` when it has no `html`). When code-send categories are disabled for the project, a send with
-    #   {TRANSACTIONAL} and a fresh `template_key` can still queue, while an explicit {MessageCategory} is refused with
-    #   `categories_not_enabled` (and any `category` returns HTTP 400 on an older PostHog server). PostHog also refuses
-    #   a send with `category_mismatch` when the type differs from the existing category's, or when `template_key` names
-    #   a template in another transactional category (including {TRANSACTIONAL} for a template in a category);
-    #   `marketing_template` when `template_key` names a transactional-enabled saved email template in a marketing
-    #   category (a saved template never enabled for transactional sends returns `template_not_transactional`);
-    #   `too_many_categories` when the project can't take another category; `unsubscribe_link_required`;
-    #   `copies_not_allowed`; `workflow_can_wait`; `sandbox_fields_unsupported`; or `recipient_opted_out`.
+    #   with no category; when categories are disabled for the project, PostHog sends no per-send category override (a
+    #   matching saved template still uses its workflow's stored configuration, and a transactional-enabled template
+    #   in a marketing category still returns `marketing_template`). A marketing email skips recipients who opted out
+    #   of its category or of all marketing, can't have copies (`copies_not_allowed`), can't carry attachments
+    #   (`workflow_can_wait` on a verified sender because marketing sending limits can hold delivery, or
+    #   `sandbox_fields_unsupported` when using the PostHog test sender), and needs a clickable link whose `href`
+    #   points to `{{ unsubscribe_url }}` (with optional query string or fragment) in its `html` (or
+    #   `{{ unsubscribe_url }}` in its `text` when it has no `html`). When code-send categories are disabled for the
+    #   project, a send with {TRANSACTIONAL} and a fresh `template_key` can still queue, while an explicit
+    #   {MessageCategory} is refused with `categories_not_enabled` (and any `category` returns HTTP 400 on an older
+    #   PostHog server). PostHog also refuses a send with `category_mismatch` when the type differs from the existing
+    #   category's, or when `template_key` names a template in another transactional category (including
+    #   {TRANSACTIONAL} for a template in a category); `marketing_template` when `template_key` names a
+    #   transactional-enabled saved email template in a marketing category (a saved template never enabled for
+    #   transactional sends returns `template_not_transactional`); `too_many_categories` when the project can't take
+    #   another category; `unsubscribe_link_required`; `copies_not_allowed`; `workflow_can_wait`;
+    #   `sandbox_fields_unsupported`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already

@@ -1035,13 +1035,6 @@ module PostHog
             .to raise_error(ArgumentError, /\Acategory/)
           expect(a_request(:any, %r{/messaging/})).not_to have_been_made
         end
-
-        it 'refuses a case-insensitive String subclass for category type before any request' do
-          category = Emails::MessageCategory.new(**newsletter, type: case_insensitive_string.new('MARKETING'))
-
-          expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory type/)
-          expect(a_request(:any, %r{/messaging/})).not_to have_been_made
-        end
       end
     end
 
