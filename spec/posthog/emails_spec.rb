@@ -1186,6 +1186,27 @@ module PostHog
         end
       end
 
+      it 'raises a 422 recipient_opted_out on a marketing send without retrying it' do
+        stub_request(:post, send_url).to_return(
+          refuse(422, 'recipient_opted_out', type: 'invalid_request', detail: 'Recipient opted out.'),
+          accept
+        )
+        category = Emails::MessageCategory.new(key: 'newsletter', type: 'marketing', name: 'Newsletter')
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+
+        expect { send_code(template_key: 'monthly-digest', html: html, category: category) }
+          .to raise_error(EmailError, 'Recipient opted out.') do |error|
+            expect(error.status_code).to eq(422)
+            expect(error.code).to eq('recipient_opted_out')
+            expect(error.name).to eq('validation_error')
+          end
+        expect(a_request(:post, send_url)).to have_been_made.once
+        expect(sent_bodies.first.slice('template_key', 'category')).to eq(
+          'template_key' => 'monthly-digest',
+          'category' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' }
+        )
+      end
+
       it 'retries a network error, and reports it as service_unavailable' do
         stub_request(:post, send_url).to_raise(Errno::ECONNREFUSED)
 
