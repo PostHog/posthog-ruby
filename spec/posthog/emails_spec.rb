@@ -288,8 +288,8 @@ module PostHog
         utf16_category = Emails::MessageCategory.new(
           key: 'newsletter'.encode(Encoding::UTF_16LE),
           type: 'marketing'.encode(Encoding::UTF_16LE),
-          name: 'Newsletter'.encode(Encoding::UTF_16LE),
-          description: 'Monthly product news'.encode(Encoding::UTF_16LE)
+          name: 'Café 🍵'.encode(Encoding::UTF_16LE),
+          description: 'Überblick 📰'.encode(Encoding::UTF_16LE)
         )
 
         transactional = send_code(category: 'transactional'.encode(Encoding::UTF_16LE))
@@ -306,9 +306,8 @@ module PostHog
                                                                                     'category' => {
                                                                                       'key' => 'newsletter',
                                                                                       'type' => 'marketing',
-                                                                                      'name' => 'Newsletter',
-                                                                                      'description' =>
-                                                                                        'Monthly product news'
+                                                                                      'name' => 'Café 🍵',
+                                                                                      'description' => 'Überblick 📰'
                                                                                     }
                                                                                   }
                                                                                 ])
