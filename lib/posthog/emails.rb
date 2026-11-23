@@ -262,9 +262,11 @@ module PostHog
       end
       begin
         result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-      ensure
-        raise unconfirmed if unconfirmed
+      rescue StandardError => e
+        raise unconfirmed || e
       end
+      raise unconfirmed if unconfirmed
+
       result
     end
 
@@ -380,6 +382,8 @@ module PostHog
     end
 
     def offset_time(value)
+      return nil unless value.valid_encoding?
+
       parts = SCHEDULED_AT_PATTERN.match(value)
       return nil if parts.nil?
 

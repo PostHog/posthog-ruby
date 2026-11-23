@@ -1154,8 +1154,8 @@ module PostHog
       end
 
       it 'refuses a time without an offset before any request' do
-        ['2026-12-01T09:00:00', '2026-12-01 09:00:00Z', '2026-12-01', '2026-02-30T09:00:00Z', 'tomorrow',
-         Date.new(2026, 12, 1), 1_764_576_000].each do |scheduled_at|
+        ['2026-12-01T09:00:00', '2026-12-01 09:00:00Z', '2026-12-01', '2026-02-30T09:00:00Z', '1500-02-29T09:00:00Z',
+         'tomorrow', Date.new(2026, 12, 1), 1_764_576_000].each do |scheduled_at|
           expect { send_template(scheduled_at: scheduled_at) }.to raise_error(ArgumentError, /scheduled_at/)
         end
         expect(a_request(:any, %r{/messaging/|amazonaws})).not_to have_been_made
@@ -1240,6 +1240,24 @@ module PostHog
 
         expect(log.string).to include('PostHog email warning unverified_link: Check.')
         expect(emails.get(error.message_id).status).to eq('queued')
+      end
+
+      it 'raises schedule_not_confirmed with the message ID on a time that is not UTF-8' do
+        body = %({"message_id":"#{message_id}","status":"scheduled","scheduled_at":"2026-12-01T08:00:00.123Z\xFF"})
+        stub_request(:post, send_url).to_return(status: 202, body: body.b)
+
+        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
+          expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
+        }
+      end
+
+      it 'lets an interrupt while it logs warnings stop the send' do
+        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn).and_raise(Interrupt)
+        PostHog::Logging.logger = logger
+
+        expect { send_template(scheduled_at: due) }.to raise_error(Interrupt)
       end
 
       it 'logs warnings once the send settles, and keeps schedule_not_confirmed when the logger fails' do
