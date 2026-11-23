@@ -252,7 +252,7 @@ module PostHog
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
 
-      call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+      result, unconfirmed = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
         check_schedulable if due
         upload(files, secret_key, max_retries || @max_retries) unless files.empty?
         uri = URI(@app_host + SEND_PATH)
@@ -260,6 +260,12 @@ module PostHog
           parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due)
         end
       end
+      begin
+        result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+      ensure
+        raise unconfirmed if unconfirmed
+      end
+      result
     end
 
     # Reads what happened to an email that {#send} queued, for 30 days after the send.
@@ -688,14 +694,13 @@ module PostHog
                              status_code: status)
       end
 
-      found = warnings(fields['warnings'])
-      found.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-      result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: found, scheduled_at: nil)
-      return result if due.nil? || time_had_passed?(fields)
-      raise schedule_not_confirmed(id, status) unless confirms?(fields, due)
+      result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
+                              scheduled_at: nil)
+      return [result, nil] if due.nil? || time_had_passed?(fields)
+      return [result, schedule_not_confirmed(id, status)] unless confirms?(fields, due)
 
       result.scheduled_at = due
-      result
+      [result, nil]
     end
 
     def time_had_passed?(fields)

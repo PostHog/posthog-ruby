@@ -1138,6 +1138,7 @@ module PostHog
         send_code(scheduled_at: '2026-12-01T10:00:00.1230000001+02:00')
         send_code(scheduled_at: '2026-12-01T08:00:00.124000Z')
         send_code(scheduled_at: Time.utc(2026, 12, 1, 8, 0, 0.124r).strftime('%Y-%m-%dT%H:%M:%S.%L%z'))
+        send_code(scheduled_at: '2026-12-01T13:30:00.124+0530')
 
         expect(sent_bodies.map { |body| body['scheduled_at'] }).to all(eq('2026-12-01T08:00:00.124Z'))
       end
@@ -1239,6 +1240,22 @@ module PostHog
 
         expect(log.string).to include('PostHog email warning unverified_link: Check.')
         expect(emails.get(error.message_id).status).to eq('queued')
+      end
+
+      it 'logs warnings once the send settles, and keeps schedule_not_confirmed when the logger fails' do
+        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        settled = []
+        allow(logger).to receive(:warn) do
+          settled << emails.close(timeout: 0)
+          raise IOError, 'log device closed'
+        end
+        PostHog::Logging.logger = logger
+
+        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
+          expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
+        }
+        expect(settled).to eq([true])
       end
 
       it 'surfaces a refused time and never sends without it' do
