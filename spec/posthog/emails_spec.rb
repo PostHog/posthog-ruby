@@ -333,6 +333,40 @@ module PostHog
         )
       end
 
+      it 'serializes String subclasses on category fields as plain JSON strings' do
+        stub_request(:post, send_url).to_return(accept)
+        spoofed_string = Class.new(String) do
+          def initialize(value, serialized)
+            super(value)
+            @serialized = serialized
+          end
+
+          def to_json(*)
+            @serialized
+          end
+        end
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        category = Emails::MessageCategory.new(
+          key: spoofed_string.new('newsletter', '"spoofed-key"'),
+          type: spoofed_string.new('marketing', '"transactional"'),
+          name: spoofed_string.new('Newsletter', '"Spoofed"'),
+          description: spoofed_string.new('Monthly news', '"Spoofed desc"')
+        )
+
+        result = send_code(category: category, html: html)
+
+        expect(result.id).to eq('msg_1')
+        expect(sent_bodies.first.slice('html', 'category')).to eq(
+          'html' => html,
+          'category' => {
+            'key' => 'newsletter',
+            'type' => 'marketing',
+            'name' => 'Newsletter',
+            'description' => 'Monthly news'
+          }
+        )
+      end
+
       it 'sends a transactional MessageCategory and the TRANSACTIONAL sentinel on the wire' do
         stub_request(:post, send_url).to_return(accept)
 
