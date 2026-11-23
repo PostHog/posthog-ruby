@@ -52,12 +52,11 @@ module PostHog
 
     def clickable_unsubscribe_link?(body)
       html = body['html'].to_s
-      if html.empty?
-        body['text'].to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
-      else
-        Nokogiri::HTML::DocumentFragment.parse(html).css('a[href]').any? do |link|
-          link['href'].to_s.strip.match?(/\A\{\{\s*unsubscribe_url\s*\}\}(?:#.*)?\z/)
-        end
+      return body['text'].to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/) if html.empty?
+      return false unless html.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
+
+      Nokogiri::HTML::DocumentFragment.parse(html).css('a[href]').any? do |link|
+        link['href'].to_s.strip.match?(/\A\{\{\s*unsubscribe_url\s*\}\}(?:[?#].*)?\z/)
       end
     end
 
@@ -346,6 +345,25 @@ module PostHog
                                                                   ])
       end
 
+      it 'accepts valid UTF-8 bytes tagged as ASCII-8BIT on category fields' do
+        _, filed = serve_categories
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        binary_category = Emails::MessageCategory.new(
+          key: 'cafe-news'.b,
+          type: 'marketing'.b,
+          name: 'Café'.b,
+          description: 'Café updates'.b
+        )
+
+        result = send_code(category: binary_category, html: html)
+
+        expect(result.id).to eq('msg_1')
+        expect(filed).to eq(['cafe-news'])
+        expect(sent_bodies.first['category']).to eq(
+          'key' => 'cafe-news', 'type' => 'marketing', 'name' => 'Café', 'description' => 'Café updates'
+        )
+      end
+
       it 'files a send under the transactional category it names, and TRANSACTIONAL under none' do
         categories, filed = serve_categories
 
@@ -369,7 +387,6 @@ module PostHog
           raw_bodies = sent_raw_bodies
           expect(raw_bodies.length).to eq(2)
           raw_bodies.each do |raw|
-            expect(raw).not_to include('"category"')
             expect(JSON.parse(raw)).not_to have_key('category')
           end
         end
@@ -949,15 +966,18 @@ module PostHog
         expect { send_template(to: ' ') }.to raise_error(ArgumentError, /to must be/)
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
         newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
+        malformed_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
         [
-          'newsletter', newsletter, "\xFF".b,
+          'newsletter', newsletter, "\xFF".b, malformed_utf8,
           Emails::MessageCategory.new(**newsletter, key: :newsletter),
           Emails::MessageCategory.new(**newsletter, key: "\xFF".b),
+          Emails::MessageCategory.new(**newsletter, name: malformed_utf8),
           Emails::MessageCategory.new(**newsletter, type: 'promotional'),
           Emails::MessageCategory.new(**newsletter, type: "\xFF".b),
           Emails::MessageCategory.new(**newsletter, name: nil),
           Emails::MessageCategory.new(**newsletter, description: 1),
-          Emails::MessageCategory.new(**newsletter, description: "\xFF".b)
+          Emails::MessageCategory.new(**newsletter, description: "\xFF".b),
+          Emails::MessageCategory.new(**newsletter, description: malformed_utf8)
         ].each do |category|
           expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
         end

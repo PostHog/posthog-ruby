@@ -475,7 +475,11 @@ module PostHog
     end
 
     def encode_utf8(value, field)
-      utf8 = value.encoding == Encoding::UTF_8 ? value : value.encode(Encoding::UTF_8)
+      utf8 = case value.encoding
+             when Encoding::UTF_8 then value
+             when Encoding::ASCII_8BIT then value.dup.force_encoding(Encoding::UTF_8)
+             else value.encode(Encoding::UTF_8)
+             end
       raise ArgumentError, "#{field} must be valid UTF-8." unless utf8.valid_encoding?
 
       utf8
