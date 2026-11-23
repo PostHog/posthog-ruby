@@ -224,10 +224,10 @@ module PostHog
     #   `categories_not_enabled` (and any `category` returns HTTP 400 on an older PostHog server). PostHog also refuses
     #   a send with `category_mismatch` when the type differs from the existing category's, or when `template_key` names
     #   a template in another transactional category (including {TRANSACTIONAL} for a template in a category);
-    #   `marketing_template` when `template_key` names a template in a marketing category, because a template made in
-    #   PostHog is transactional; `too_many_categories` when the project can't take another category;
-    #   `unsubscribe_link_required`; `copies_not_allowed`; `workflow_can_wait`; `sandbox_fields_unsupported`; or
-    #   `recipient_opted_out`.
+    #   `marketing_template` when `template_key` names a transactional-enabled saved email template in a marketing
+    #   category (a saved template never enabled for transactional sends returns `template_not_transactional`);
+    #   `too_many_categories` when the project can't take another category; `unsubscribe_link_required`;
+    #   `copies_not_allowed`; `workflow_can_wait`; `sandbox_fields_unsupported`; or `recipient_opted_out`.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already

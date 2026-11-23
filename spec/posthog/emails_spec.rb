@@ -955,35 +955,6 @@ module PostHog
         expect { send_template(template_id: 'welcome') }.to raise_error(ArgumentError, /template's UUID/)
         expect { send_template(to: ' ') }.to raise_error(ArgumentError, /to must be/)
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
-        newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
-        malformed_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
-        malformed_utf16 = "\x00\xD8".dup.force_encoding(Encoding::UTF_16LE)
-        case_insensitive = Class.new(String) do
-          def ==(other)
-            other.is_a?(String) && casecmp?(other)
-          end
-        end
-        [
-          'newsletter', newsletter, "\xFF".b, malformed_utf8, malformed_utf16,
-          case_insensitive.new('TRANSACTIONAL'),
-          Emails::MessageCategory.new(**newsletter, key: :newsletter),
-          Emails::MessageCategory.new(**newsletter, key: "\xFF".b),
-          Emails::MessageCategory.new(**newsletter, name: malformed_utf8),
-          Emails::MessageCategory.new(**newsletter, name: malformed_utf16),
-          Emails::MessageCategory.new(**newsletter, type: 'promotional'),
-          Emails::MessageCategory.new(**newsletter, type: "\xFF".b),
-          Emails::MessageCategory.new(**newsletter, type: case_insensitive.new('MARKETING')),
-          Emails::MessageCategory.new(**newsletter, name: nil),
-          Emails::MessageCategory.new(**newsletter, description: 1),
-          Emails::MessageCategory.new(**newsletter, description: "\xFF".b),
-          Emails::MessageCategory.new(**newsletter, description: malformed_utf8),
-          Emails::MessageCategory.new(**newsletter, description: malformed_utf16)
-        ].each do |category|
-          expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
-        end
-        utf7_name = 'Newsletter'.dup.force_encoding(Encoding::UTF_7)
-        expect { send_code(category: Emails::MessageCategory.new(**newsletter, name: utf7_name)) }
-          .to raise_error(ArgumentError, /\Acategory name encoding UTF-7 cannot be transcoded to UTF-8\.\z/)
         expect { send_template(idempotency_key: 'has space') }.to raise_error(ArgumentError, /idempotency_key/)
         expect { send_template(max_retries: -1) }.to raise_error(ArgumentError, /max_retries/)
         expect { send_template(template_data: []) }.to raise_error(ArgumentError, /template_data must be a Hash/)
@@ -994,6 +965,77 @@ module PostHog
         expect { send_code(reply_to: [1]) }.to raise_error(ArgumentError, /reply_to/)
         expect { send_template(headers: {}) }.to raise_error(ArgumentError, /unknown keyword: :headers/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+      end
+
+      context 'with invalid category values' do
+        let(:newsletter) { { key: 'newsletter', type: 'marketing', name: 'Newsletter' } }
+        let(:case_insensitive_string) do
+          Class.new(String) do
+            def ==(other)
+              other.is_a?(String) && casecmp?(other)
+            end
+          end
+        end
+
+        {
+          'a string other than TRANSACTIONAL' => ->(_) { 'newsletter' },
+          'a plain Hash instead of MessageCategory' => ->(base) { base },
+          'a non-string category key' => ->(base) { Emails::MessageCategory.new(**base, key: :newsletter) },
+          'an unknown category type' => ->(base) { Emails::MessageCategory.new(**base, type: 'promotional') },
+          'a nil category name' => ->(base) { Emails::MessageCategory.new(**base, name: nil) },
+          'a non-string category description' => ->(base) { Emails::MessageCategory.new(**base, description: 1) }
+        }.each do |label, build_category|
+          it "refuses #{label} before any request" do
+            expect { send_code(category: build_category.call(newsletter)) }.to raise_error(ArgumentError, /\Acategory/)
+            expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+          end
+        end
+
+        malformed_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
+        malformed_utf16 = "\x00\xD8".dup.force_encoding(Encoding::UTF_16LE)
+        {
+          'invalid binary bytes on category' => ->(_) { "\xFF".b },
+          'invalid binary bytes on category key' => ->(base) { Emails::MessageCategory.new(**base, key: "\xFF".b) },
+          'invalid binary bytes on category type' => ->(base) { Emails::MessageCategory.new(**base, type: "\xFF".b) },
+          'invalid binary bytes on category description' =>
+            ->(base) { Emails::MessageCategory.new(**base, description: "\xFF".b) },
+          'malformed UTF-8 on category' => ->(_) { malformed_utf8 },
+          'malformed UTF-8 on category name' => ->(base) { Emails::MessageCategory.new(**base, name: malformed_utf8) },
+          'malformed UTF-8 on category description' =>
+            ->(base) { Emails::MessageCategory.new(**base, description: malformed_utf8) },
+          'malformed UTF-16LE lone surrogate on category' => ->(_) { malformed_utf16 },
+          'malformed UTF-16LE lone surrogate on category name' =>
+            ->(base) { Emails::MessageCategory.new(**base, name: malformed_utf16) },
+          'malformed UTF-16LE lone surrogate on category description' =>
+            ->(base) { Emails::MessageCategory.new(**base, description: malformed_utf16) }
+        }.each do |label, build_category|
+          it "refuses #{label} before any request" do
+            expect { send_code(category: build_category.call(newsletter)) }
+              .to raise_error(ArgumentError, /\Acategory.*must be valid UTF-8\.\z/)
+            expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+          end
+        end
+
+        it 'reports an unsupported source encoding such as UTF-7 before any request' do
+          utf7_name = 'Newsletter'.dup.force_encoding(Encoding::UTF_7)
+
+          expect { send_code(category: Emails::MessageCategory.new(**newsletter, name: utf7_name)) }
+            .to raise_error(ArgumentError, /\Acategory name encoding UTF-7 cannot be transcoded to UTF-8\.\z/)
+          expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+        end
+
+        it 'refuses a case-insensitive String subclass for TRANSACTIONAL before any request' do
+          expect { send_code(category: case_insensitive_string.new('TRANSACTIONAL')) }
+            .to raise_error(ArgumentError, /\Acategory/)
+          expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+        end
+
+        it 'refuses a case-insensitive String subclass for category type before any request' do
+          category = Emails::MessageCategory.new(**newsletter, type: case_insensitive_string.new('MARKETING'))
+
+          expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory type/)
+          expect(a_request(:any, %r{/messaging/})).not_to have_been_made
+        end
       end
     end
 
