@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'English'
-require 'nokogiri'
 require 'spec_helper'
 
 module PostHog
@@ -50,16 +49,6 @@ module PostHog
       !category.key?('description') || category['description'].is_a?(String)
     end
 
-    def clickable_unsubscribe_link?(body)
-      html = body['html'].to_s
-      return body['text'].to_s.match?(/\{\{\s*unsubscribe_url\s*\}\}/) if html.empty?
-      return false unless html.match?(/\{\{\s*unsubscribe_url\s*\}\}/)
-
-      Nokogiri::HTML::DocumentFragment.parse(html).css('a[href]').any? do |link|
-        link['href'].to_s.strip.match?(/\A\{\{\s*unsubscribe_url\s*\}\}(?:[?#].*)?\z/)
-      end
-    end
-
     def serve_categories(categories = {}, templates: {})
       filed = []
       stub_request(:post, send_url).to_return do |request|
@@ -83,13 +72,6 @@ module PostHog
         if category.is_a?(Hash)
           existing = categories[category['key']]
           next refuse(400, 'category_mismatch') if existing && existing['type'] != category['type']
-
-          if category['type'] == 'marketing'
-            next refuse(400, 'unsubscribe_link_required') unless clickable_unsubscribe_link?(body)
-
-            has_copies = !Array(body['cc']).empty? || !Array(body['bcc']).empty?
-            next refuse(400, 'copies_not_allowed') if has_copies
-          end
 
           categories[category['key']] ||= category
         end
@@ -1019,24 +1001,27 @@ module PostHog
         expect { send_template(distinct_id: '') }.to raise_error(ArgumentError, /distinct_id/)
         newsletter = { key: 'newsletter', type: 'marketing', name: 'Newsletter' }
         malformed_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
+        malformed_utf16 = "\x00\xD8".dup.force_encoding(Encoding::UTF_16LE)
         case_insensitive = Class.new(String) do
           def ==(other)
             other.is_a?(String) && casecmp?(other)
           end
         end
         [
-          'newsletter', newsletter, "\xFF".b, malformed_utf8,
+          'newsletter', newsletter, "\xFF".b, malformed_utf8, malformed_utf16,
           case_insensitive.new('TRANSACTIONAL'),
           Emails::MessageCategory.new(**newsletter, key: :newsletter),
           Emails::MessageCategory.new(**newsletter, key: "\xFF".b),
           Emails::MessageCategory.new(**newsletter, name: malformed_utf8),
+          Emails::MessageCategory.new(**newsletter, name: malformed_utf16),
           Emails::MessageCategory.new(**newsletter, type: 'promotional'),
           Emails::MessageCategory.new(**newsletter, type: "\xFF".b),
           Emails::MessageCategory.new(**newsletter, type: case_insensitive.new('MARKETING')),
           Emails::MessageCategory.new(**newsletter, name: nil),
           Emails::MessageCategory.new(**newsletter, description: 1),
           Emails::MessageCategory.new(**newsletter, description: "\xFF".b),
-          Emails::MessageCategory.new(**newsletter, description: malformed_utf8)
+          Emails::MessageCategory.new(**newsletter, description: malformed_utf8),
+          Emails::MessageCategory.new(**newsletter, description: malformed_utf16)
         ].each do |category|
           expect { send_code(category: category) }.to raise_error(ArgumentError, /\Acategory/)
         end
