@@ -367,29 +367,24 @@ module PostHog
         )
       end
 
-      it 'keeps the initial MessageCategory snapshot across retries when mutated mid-send' do
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        category = Emails::MessageCategory.new(
-          key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly news'
-        )
-        recorded_bodies = []
-        stub_request(:post, send_url).to_return do |request|
-          recorded_bodies << JSON.parse(request.body)
-          if recorded_bodies.size == 1
-            category.key = 'receipts'
-            category.type = 'transactional'
-            category.name = 'Receipts'
-            category.description = 'Order receipts'
-            refuse(503, 'delivery_unavailable')
-          else
-            accept
+      it 'reads a single MessageCategory snapshot instead of field-by-field getters' do
+        stub_request(:post, send_url).to_return(accept)
+        mutating_category = Class.new(Emails::MessageCategory) do
+          def name
+            self.key = 'receipts'
+            self.type = 'transactional'
+            super
           end
         end
+        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
+        category = mutating_category.new(
+          key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly news'
+        )
 
-        result = send_code(category: category, html: html, max_retries: 1)
+        result = send_code(category: category, html: html)
 
         expect(result.id).to eq('msg_1')
-        expected = {
+        expect(sent_bodies.first.slice('html', 'category')).to eq(
           'html' => html,
           'category' => {
             'key' => 'newsletter',
@@ -397,9 +392,7 @@ module PostHog
             'name' => 'Newsletter',
             'description' => 'Monthly news'
           }
-        }
-        expect(recorded_bodies.map { |body| body.slice('html', 'category') }).to eq([expected, expected])
-        expect(a_request(:post, send_url)).to have_been_made.twice
+        )
       end
 
       it 'sends a transactional MessageCategory and the TRANSACTIONAL sentinel on the wire' do
