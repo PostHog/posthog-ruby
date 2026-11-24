@@ -165,9 +165,9 @@ module PostHog
         expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
       end
 
-      it "logs the reply's warnings" do
+      it "logs the reply's warnings once each" do
         warning = { code: 'unverified_link', detail: 'A link points to an unverified domain.' }
-        stub_request(:post, batch_url).to_return(answer(queued('msg_1'), warnings: [warning]))
+        stub_request(:post, batch_url).to_return(answer(queued('msg_1'), warnings: [warning, warning]))
         log = StringIO.new
         PostHog::Logging.logger = Logger.new(log, level: Logger::WARN)
 
