@@ -17,14 +17,14 @@ group :development, :test do
   gem 'actioncable', rails_version
   gem 'activejob', rails_version
   gem 'activesupport', rails_version
-  gem 'commander', '~> 5.0'
+  gem 'commander', '~> 6.0'
   gem 'mcp', '>= 1.4'
   gem 'oj', '~> 3.17.7'
   gem 'prettier'
   gem 'railties', rails_version
   gem 'rake', '~> 13.4.2'
   gem 'rspec', '~> 3.13'
-  gem 'rubocop', '~> 1.91.0'
+  gem 'rubocop', '~> 1.92.2'
   gem 'sidekiq', require: false
   gem 'timecop'
   gem 'tzinfo', '~> 2.0'
