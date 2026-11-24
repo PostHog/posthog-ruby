@@ -1,5 +1,14 @@
 # posthog-rails
 
+## 3.27.1
+
+### Patch Changes
+
+- b0a7eab: `PostHog.evaluate_flags` is now defined on the Rails facade next to the other flag methods, instead of reaching the client only through `method_missing`. Use it in place of the deprecated `PostHog.is_feature_enabled` and `PostHog.get_feature_flag`.
+- Updated dependencies [b0a7eab]
+- Updated dependencies [b1135df]
+  - posthog-ruby@3.35.1
+
 ## 3.27.0
 
 ### Minor Changes
