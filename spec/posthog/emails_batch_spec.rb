@@ -236,6 +236,16 @@ module PostHog
           end
         end
 
+        it 'tells a one-recipient batch refused by a 413 without a fix to make the email smaller, not to split it' do
+          stub_request(:post, batch_url).to_return(status: 413, body: '<html>Request Entity Too Large</html>')
+
+          expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
+            expect([error.code, error.status_code]).to eq(['content_too_large', 413])
+            expect(error.fix).to include('smaller')
+            expect(error.fix).not_to include('Split')
+          }
+        end
+
         it "keeps a 400 content_too_large for content over PostHog's limit as PostHog sent it, without split advice" do
           stub_request(:post, batch_url).to_return(
             refuse(400, 'content_too_large', fix: 'Make template_data smaller.', attr: 'template_data')

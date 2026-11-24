@@ -27,11 +27,13 @@ module PostHog
       'detail' => 'PostHog refused the batch as too large, so no email was sent.',
       'fix' => 'Split the recipients into smaller batches.'
     }.freeze
+    # One recipient can't be split, so only a smaller email gets through.
+    TOO_LARGE_ALONE = TOO_LARGE.merge('fix' => 'Make the email smaller, such as its template_data.').freeze
     EARLIER_ATTEMPT = 'An earlier attempt of this batch may have queued this email, so it may still go out. ' \
                       'The last attempt ended with:'
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
     private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
-                     :RESULT_DEFAULTS
+                     :TOO_LARGE_ALONE, :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
 
@@ -138,7 +140,7 @@ module PostHog
       fields = if status == 404
                  NOT_FOUND.merge(answered)
                elsif status == 413
-                 TOO_LARGE.merge(answered.select { |_, value| text(value) })
+                 (@members.size > 1 ? TOO_LARGE : TOO_LARGE_ALONE).merge(answered.select { |_, value| text(value) })
                else
                  answered
                end
