@@ -240,7 +240,7 @@ module PostHog
     def recipient_too_large
       EmailError.new(code: 'content_too_large', field: 'recipients',
                      message: "This recipient's email is larger than one batch request takes, so it wasn't sent.",
-                     fix: "Send this recipient's email with emails.send.")
+                     fix: "Make this recipient's template_data, or the batch's content, smaller.")
     end
 
     def text(value)

@@ -146,6 +146,14 @@ module PostHog
           .to eq([['alan@example.com']])
       end
 
+      it 'fails every recipient when the shared content alone is too large, and sends nothing' do
+        results = batch_template([ada, alan], template_data: { note: 'x' * (4 * 1024 * 1024) }).results
+
+        expect(statuses(results)).to eq(%w[failed failed])
+        expect(results.map { |result| result.error.code }.uniq).to eq(['content_too_large'])
+        expect(a_request(:any, %r{/api/messaging/})).not_to have_been_made
+      end
+
       it 'sends a request of exactly 4 MiB and splits one a byte larger' do
         bodies = []
         stub_request(:post, batch_url).to_return do |request|
