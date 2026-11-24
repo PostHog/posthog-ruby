@@ -570,6 +570,10 @@ module PostHog
       uri = URI("#{@app_host}#{STATUS_BY_KEY_PATH}?#{URI.encode_www_form(idempotency_key: key)}")
       parse_status_reply(request(Net::HTTP::Get.new(uri), uri, secret_key, {}))
     rescue EmailError => e
+      # A caller's deadline raised as Timeout::Error itself arrives as a network error. Net::HTTP's own timeouts are
+      # subclasses of it.
+      raise e.cause if e.cause.instance_of?(Timeout::Error)
+
       e.status_code == 404 ? nil : :stop
     end
 

@@ -164,6 +164,13 @@ module PostHog
         expect([result.status, result.message_id, result.error.code]).to eq(%w[unconfirmed msg_ada api_error])
       end
 
+      it "lets a caller's deadline through while it reads an email by its key" do
+        stub_request(:post, batch_url).to_return(answer('not a result'))
+        stub_request(:get, "#{status_by_key}welcome%3Aada").to_raise(Timeout::Error.new('deadline'))
+
+        expect { batch_template([ada]) }.to raise_error(Timeout::Error, 'deadline')
+      end
+
       it 'fails a recipient too large for one request and sends the rest' do
         stub_request(:post, batch_url).to_return(answer(queued('msg_2')))
         huge = { to: 'ada@example.com', template_data: { note: 'x' * (4 * 1024 * 1024) } }
@@ -288,19 +295,24 @@ module PostHog
           expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
             result = error.results.first
             expect([error.code, result.status, result.message_id]).to eq(['invalid_recipient', 'unconfirmed', nil])
-            expect([result.error.code, result.later_error.code]).to eq(%w[delivery_unavailable invalid_recipient])
+            expect([result.error.code, result.later_error.code]).to eq(%w[idempotency_key_in_flight invalid_recipient])
           }
           expect(a_request(:get, status_by_key_url)).to have_been_made.once
         end
 
-        it 'keeps a recipient unconfirmed when PostHog holds its key past the retries' do
+        it 'keeps a recipient unconfirmed when PostHog holds its key past the retries, with what its status says' do
           stub_request(:post, batch_url).to_return(refuse(409, 'idempotency_key_in_flight'))
-          stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(status: 404, body: '{"code":"not_found"}')
+          stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(
+            status: 200, body: JSON.generate(id: 'msg_ada', status: 'failed', reason: 'recipient_suppressed',
+                                             created_at: '2026-11-24T08:00:00Z', status_at: '2026-11-24T08:00:00Z')
+          )
 
           expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
             result = error.results.first
-            expect([error.code, result.status, result.later_error.code])
-              .to eq(%w[idempotency_key_in_flight unconfirmed idempotency_key_in_flight])
+            expect([error.code, result.status, result.message_id])
+              .to eq(%w[idempotency_key_in_flight unconfirmed msg_ada])
+            expect([result.error.code, result.later_error.code])
+              .to eq(%w[idempotency_key_in_flight recipient_suppressed])
           }
         end
 

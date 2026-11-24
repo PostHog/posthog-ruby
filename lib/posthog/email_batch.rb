@@ -50,20 +50,25 @@ module PostHog
       @chunks = split(JSON.generate(shared.merge(recipients: [])))
     end
 
-    def lost(chunk)
+    def lost(chunk, error = nil)
       chunk.indices.each do |index|
         @maybe_queued << index
         message_id = @results[index]&.message_id
-        set(index, 'unconfirmed', message_id: message_id, error: unconfirmed(message_id))
+        set(index, 'unconfirmed', message_id: message_id, error: error || unconfirmed(message_id))
       end
     end
 
     def answer(chunk, (status, payload, retry_after))
       fields = payload.is_a?(Hash) ? payload : {}
       unless status.between?(200, 299)
+        error = response_error(fields, status, retry_after, chunk.indices)
         # PostHog holds a key while it sends the email, so a request refused for that may already have queued it.
-        lost(chunk) if status >= 500 || fields['code'] == 'idempotency_key_in_flight'
-        raise response_error(fields, status, retry_after, chunk.indices)
+        if error.code == 'idempotency_key_in_flight'
+          lost(chunk, error)
+        elsif status >= 500
+          lost(chunk)
+        end
+        raise error
       end
 
       slots = fields['results']
@@ -83,7 +88,7 @@ module PostHog
       @chunks[position].indices.each do |index|
         if !@maybe_queued.include?(index)
           set(index, 'failed', error: error)
-        elsif later
+        elsif later && !@results[index].error.equal?(later)
           earlier = @results[index]
           set(index, 'unconfirmed', message_id: earlier.message_id, error: earlier.error, later_error: later)
         end
