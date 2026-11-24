@@ -124,12 +124,12 @@ module PostHog
 
       private
 
-      def dispatch_kind(&handler)
+      def dispatch_kind(&)
         case @kind
-        when :tools_call then dispatch_tool_call(&handler)
-        when :tools_list then dispatch_tools_list(&handler)
-        when :initialize then dispatch_initialize(&handler)
-        else dispatch_generic(&handler)
+        when :tools_call then dispatch_tool_call(&)
+        when :tools_list then dispatch_tools_list(&)
+        when :initialize then dispatch_initialize(&)
+        else dispatch_generic(&)
         end
       end
 

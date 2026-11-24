@@ -13,7 +13,6 @@ require 'posthog/unresolved_flag_reason'
 require 'posthog/flag_evaluation_errors'
 require 'posthog/known_absent_property_keys'
 require 'digest'
-require 'set'
 
 module PostHog
   # Polls and evaluates feature flag definitions for {PostHog::Client}.

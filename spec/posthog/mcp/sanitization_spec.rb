@@ -239,9 +239,74 @@ RSpec.describe PostHog::MCP::Sanitization do
       expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
       expect(described_class.redact_pii(123)).to eq(123)
     end
+
+    it 'scans a long run of separated digits in linear time' do
+      # Ten-digit groups never reach Luhn, so the time is the scan alone.
+      cpu_seconds = lambda do |input|
+        Array.new(3) do
+          started = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+          described_class.redact_pii(input)
+          Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - started
+        end.min
+      end
+      small = cpu_seconds.call('1111111111-' * 9_091)
+      large = cpu_seconds.call('1111111111-' * 90_910)
+      expect(large / small).to be < 25
+    end
   end
 
   describe '.sanitize_event' do
+    it 'scans only the head of the intent that truncation can keep' do
+      scanned = []
+      allow(described_class).to receive(:redact_pii).and_wrap_original do |original, value|
+        scanned << value.length
+        original.call(value)
+      end
+      described_class.sanitize_event('user_intent' => "Charging card 4111 1111 1111 1111. #{'x' * 1_000_000}")
+      expect(scanned).to eq([4 * PostHog::MCP::Truncation::MAX_USER_INTENT_LENGTH])
+    end
+
+    # Lowercase and digits only until the last character, so only the whole
+    # word has the three character classes a credential needs.
+    alphabet = [*'a'..'z', *'0'..'9']
+    random = Random.new(5607)
+    long_word = "#{Array.new(4_999) { alphabet.sample(random: random) }.join}Q"
+    {
+      'a long word whose tail makes it a credential' => ["#{long_word} trailing words", '[redacted] trailing words'],
+      'emails that shrink the head past the cut' => ['abcdefghij@example.com ' * 400, '[redacted] ' * 400],
+      'tokens that shrink the head past the cut' => ['phc_123456789012345678901234567890 ' * 400, '[redacted] ' * 400]
+    }.each do |label, (intent, full_scan)|
+      it "keeps the same intent as a full scan for #{label}" do
+        expect(PostHog::MCP::Truncation.truncate_event(described_class.sanitize_event('user_intent' => intent))['user_intent'])
+          .to eq(PostHog::MCP::Truncation.truncate_string(full_scan, PostHog::MCP::Truncation::MAX_USER_INTENT_LENGTH))
+      end
+    end
+
+    it 'still redacts an intent that is binary data in full' do
+      expect(described_class.sanitize_event('user_intent' => 'A' * 20_000)['user_intent']).to eq(binary)
+    end
+
+    it 'applies the breadth and depth limits to parameters before sanitizing them' do
+      allow(described_class).to receive(:sanitize_string).and_call_original
+      breadth = PostHog::MCP::Truncation::MAX_BREADTH
+      parameters = (1..10_000).to_h { |i| ["arg#{i}", "value #{i}"] }
+      parameters['arg1'] = { 'password' => Array.new(1_000) { |i| "secret #{i}" } }
+      sanitized = described_class.sanitize_event('parameters' => parameters)['parameters']
+      expect(sanitized.length).to eq(breadth + 1)
+      expect(sanitized['arg1']).to eq('password' => '[redacted]')
+      expect(sanitized['...']).to eq('[MaxProperties ~]')
+      expect(described_class).to have_received(:sanitize_string).exactly(breadth - 1).times
+    end
+
+    it 'limits parameters exactly as truncation would after a full sanitize' do
+      deep = (1..12).reduce('leaf phc_123456789012345678901234567890') { |inner, i| { "level#{i}" => inner } }
+      parameters = { 'deep' => deep, 'list' => Array.new(150) { |i| "item #{i}" },
+                     'token' => { 'nested' => 'x' }, 'text' => 'ok phc_123456789012345678901234567890' }
+      expected = PostHog::MCP::Truncation.normalize(described_class.sanitize_captured_value(parameters))
+      expect(PostHog::MCP::Truncation.normalize(described_class.sanitize_event('parameters' => parameters)['parameters']))
+        .to eq(expected)
+    end
+
     it 'redacts PII in the intent only, and tokens in exception values' do
       event = {
         'user_intent' => 'Rotating token phc_123456789012345678901234567890 for user carol@example.org.',

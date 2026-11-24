@@ -1,7 +1,9 @@
 version: 2
 updates:
   - package-ecosystem: "bundler"
-    directory: "/"
+    directories:
+      - "/"
+      - "/gemfiles/rails-latest"
     versioning-strategy: "increase-if-necessary"
     schedule:
       interval: "weekly"

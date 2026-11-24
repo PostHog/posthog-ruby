@@ -11,7 +11,7 @@ module PostHog
     module Ids
       module_function
 
-      # RFC 9562 UUIDv7 (time-ordered), implemented inline so Ruby 3.0/3.1 work too.
+      # RFC 9562 UUIDv7 (time-ordered), implemented inline because `SecureRandom.uuid_v7` needs Ruby 3.3.
       #
       # @return [String] lowercase, hyphenated uuid
       def uuid_v7

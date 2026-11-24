@@ -1,5 +1,17 @@
 # posthog-ruby
 
+## 3.35.0
+
+### Minor Changes
+
+- fa5f566: Require Ruby 3.2 or later. Ruby 3.0 and 3.1 are end-of-life and CI hasn't tested them. The changelog for 3.0.0 already listed Ruby 3.2 as the minimum, but the gemspec still allowed 3.0. Apps on Ruby 3.0 or 3.1 will keep resolving to the last posthog-ruby release that allowed them.
+
+## 3.34.4
+
+### Patch Changes
+
+- e8568ce: `PostHog::MCP` capture no longer slows down on large agent input. The intent card check is linear in the length of a digit run; a long `context` argument made it quadratic. The intent is scanned only as far as truncation keeps it. Tool parameters are cut to the depth and breadth limits before sanitizing, and a sensitive key is redacted without reading what it holds. What counts as a card, SSN or phone number is unchanged.
+
 ## 3.34.3
 
 ### Patch Changes

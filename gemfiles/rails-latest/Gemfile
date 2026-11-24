@@ -1,0 +1,7 @@
+# frozen_string_literal: true
+
+# Latest Rails with real OpenTelemetry dependencies. Dependabot updates the
+# committed lockfile, so CI never resolves gems at run time.
+ENV['RAILS_VERSION'] = '>= 5.2'
+
+eval_gemfile '../otel.gemfile'

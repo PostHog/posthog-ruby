@@ -40,11 +40,11 @@ module PostHog
         @tool_owned_params = {}
       end
 
-      def synchronize(&block)
+      def synchronize(&)
         if @mutex.owned?
           yield
         else
-          @mutex.synchronize(&block)
+          @mutex.synchronize(&)
         end
       end
 
