@@ -79,7 +79,7 @@ module PostHog
     end
 
     def stop(position, error)
-      later = error.status_code && error.status_code < 500 && !UNCONFIRMED_CODES.include?(error.code) ? error : nil
+      later = error.status_code && error.status_code < 500 ? error : nil
       @chunks[position].indices.each do |index|
         if !@maybe_queued.include?(index)
           set(index, 'failed', error: error)
@@ -108,18 +108,13 @@ module PostHog
       end
     end
 
-    # A status read by key found the email. PostHog records a refusal before queueing, such as a suppressed
-    # address, as a failed email, so only another status shows that PostHog accepted it.
+    # A status read by key gives the email's ID, so the caller can read it with emails.get, but confirms nothing: an
+    # earlier email with the same key reads the same way. A failed status, such as a suppressed address, becomes the
+    # reason.
     def found(index, status)
-      if status.status == 'failed'
-        earlier = @results[index]
-        set(index, 'unconfirmed', message_id: status.id, error: earlier.error,
-                                  later_error: earlier.later_error || failed_status(status))
-        return
-      end
-
-      @maybe_queued.delete(index)
-      set(index, 'queued', message_id: status.id)
+      earlier = @results[index]
+      later = earlier.later_error || (failed_status(status) if status.status == 'failed')
+      set(index, 'unconfirmed', message_id: status.id, error: earlier.error, later_error: later)
     end
 
     def result

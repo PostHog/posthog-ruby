@@ -148,8 +148,20 @@ module PostHog
         results = batch_template([ada, alan]).results
 
         expect(results.map { |result| [result.status, result.message_id] })
-          .to eq([%w[unconfirmed msg_ada], %w[queued msg_alan]])
+          .to eq([%w[unconfirmed msg_ada], %w[unconfirmed msg_alan]])
         expect(a_request(:get, status_by_key_url)).to have_been_made.once
+      end
+
+      it 'takes only the ID from a status read by key, and keeps the email unconfirmed' do
+        stub_request(:post, batch_url).to_return(answer('not a result'))
+        stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(
+          status: 200, body: JSON.generate(id: 'msg_ada', status: 'archived', created_at: '2026-11-24T08:00:00Z',
+                                           status_at: '2026-11-24T08:00:00Z')
+        )
+
+        result = batch_template([ada]).results.first
+
+        expect([result.status, result.message_id, result.error.code]).to eq(%w[unconfirmed msg_ada api_error])
       end
 
       it 'fails a recipient too large for one request and sends the rest' do
@@ -179,21 +191,25 @@ module PostHog
           bodies << request.body
           answer(*JSON.parse(request.body)['recipients'].map { |recipient| queued("msg_#{recipient['to']}") })
         end
-        pair = lambda do |first, second|
-          [{ to: 'ada@example.com', idempotency_key: 'k-ada', template_data: { note: 'x' * first } },
-           { to: 'alan@example.com', idempotency_key: 'k-alan', template_data: { note: 'x' * second } }]
+        # Three recipients, so each stays under the 1.5 MiB PostHog takes for one email.
+        trio = lambda do |sizes|
+          sizes.each_with_index.map do |size, index|
+            { to: "user#{index}@example.com", idempotency_key: "k-#{index}", template_data: { note: 'x' * size } }
+          end
         end
-        batch_template(pair.call(1, 1))
-        fill = (4 * 1024 * 1024) - bodies.first.bytesize + 2
+        batch_template(trio.call([1, 1, 1]))
+        fill = (4 * 1024 * 1024) - bodies.first.bytesize + 3
+        sizes = [fill / 3, fill / 3, fill - (2 * (fill / 3))]
 
-        batch_template(pair.call(fill / 2, fill - (fill / 2)))
-        result = batch_template(pair.call(fill / 2, fill - (fill / 2) + 1))
+        batch_template(trio.call(sizes))
+        result = batch_template(trio.call([sizes[0], sizes[1], sizes[2] + 1]))
 
+        expect(sizes.max).to be < 1.5 * 1024 * 1024
         expect(bodies.drop(1).map(&:bytesize).first).to eq(4 * 1024 * 1024)
-        expect(bodies.drop(1).map { |body| JSON.parse(body)['recipients'].size }).to eq([2, 1, 1])
-        expect(bodies.last(2).map { |body| JSON.parse(body)['recipients'].first['message_data']['note'].size })
-          .to eq([fill / 2, fill - (fill / 2) + 1])
-        expect(statuses(result.results)).to eq(%w[queued queued])
+        expect(bodies.drop(1).map { |body| JSON.parse(body)['recipients'].size }).to eq([3, 2, 1])
+        notes = bodies.last(2).flat_map { |body| JSON.parse(body)['recipients'] }.map { |r| r['message_data']['note'] }
+        expect(notes.map(&:size)).to eq([sizes[0], sizes[1], sizes[2] + 1])
+        expect(statuses(result.results)).to eq(%w[queued queued queued])
       end
 
       it 'logs each warning once' do
@@ -283,8 +299,8 @@ module PostHog
 
           expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
             result = error.results.first
-            expect([error.code, result.status, result.later_error]).to eq(['idempotency_key_in_flight', 'unconfirmed',
-                                                                           nil])
+            expect([error.code, result.status, result.later_error.code])
+              .to eq(%w[idempotency_key_in_flight unconfirmed idempotency_key_in_flight])
           }
         end
 
@@ -308,7 +324,7 @@ module PostHog
           expect { batch_template([ada, alan], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
             expect(error.code).to eq('network_error')
             expect(error.results.map { |result| [result.status, result.message_id] })
-              .to eq([['unconfirmed', nil], %w[queued msg_alan]])
+              .to eq([['unconfirmed', nil], %w[unconfirmed msg_alan]])
             expect(error.results.first.error.code).to eq('delivery_unavailable')
           }
           expect(a_request(:post, batch_url)).to have_been_made.twice

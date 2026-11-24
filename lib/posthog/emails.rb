@@ -127,7 +127,7 @@ module PostHog
     #     `delivery_unavailable`, `idempotency_key_in_flight` or `api_error`.
     # @!attribute [r] later_error
     #   @return [EmailError, nil] For an `unconfirmed` email, what a retry in the same call answered about it, which
-    #     describes only that retry.
+    #     describes only that retry, or why a status the client read by its key reads `failed`.
     BatchEmailResult = Struct.new(:index, :to, :idempotency_key, :status, :message_id, :replayed, :error, :later_error,
                                   keyword_init: true)
 
@@ -352,7 +352,8 @@ module PostHog
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
     # queues an email twice. Retries follow {#send}'s. At the end of the batch, the client reads by its key each
-    # `unconfirmed` email that PostHog answered without a message ID.
+    # `unconfirmed` email that PostHog answered without a message ID, and adds the ID it finds, so you can read the
+    # email with {#get}. The email stays `unconfirmed`.
     #
     # @param recipients [Array<Hash>] 1 or more recipients, each a Hash with:
     #   - +to+ [String] the recipient's email address;
@@ -362,7 +363,7 @@ module PostHog
     #     when a batch may be cut off and run again: a rerun within 24 hours replays the emails that went out instead
     #     of sending them twice. A send and a batch recipient with the same key and the same email replay each other.
     #     Never reuse a key for another email: after a lost answer, the client reads the email by its key, and an
-    #     earlier email with that key reads as this one, `queued`;
+    #     earlier email with that key gives its message ID as this one's;
     #   - +template_data+ [Hash] optional, only with +template_id+: values for this recipient, merged over the
     #     batch's +template_data+. A top-level key set here replaces the same key there.
     # @param template_id [String] Template form: the UUID of a template made transactional in PostHog.
