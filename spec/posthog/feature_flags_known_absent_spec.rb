@@ -569,6 +569,22 @@ module PostHog
         expect(snapshot.unresolved_flags).to eq('org-child' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
       end
 
+      it 'apply the group keys of a group-aggregated dependency instead of person values' do
+        org_parent = group_flag('org-parent', { key: 'tier', operator: 'exact', value: 'pro', type: 'group',
+                                                group_type_index: 0 })
+        c = local_client(org_parent, flag('person-child', flag_dependency('org-parent')),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: %w[person-child org-parent],
+                                              groups: { organization: 'acme' },
+                                              person_properties: { tier: 'pro' },
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('org-parent')).to be(false)
+        expect(snapshot.get_flag('person-child')).to be(false)
+      end
+
       it 'apply group keys to a dependency with the same group aggregation' do
         org_parent = group_flag('org-parent', { key: 'tier', operator: 'is_not_set', type: 'group',
                                                 group_type_index: 0 })

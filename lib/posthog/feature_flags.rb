@@ -1224,7 +1224,7 @@ module PostHog
     # @param properties [Hash] Person properties for evaluation
     # @param cohort_properties [Hash] Cohort properties for evaluation
     # @param known_absent_scope [PostHog::KnownAbsentPropertyKeys::Scope, nil] Keys of properties known to be
-    #   absent. A dependency aggregated differently does not use them.
+    #   absent. A dependency aggregated differently uses the listing for its own aggregation instead.
     # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
     def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties,
                                  snapshot: _evaluation_snapshot, known_absent: nil, known_absent_scope: nil)
@@ -1271,7 +1271,8 @@ module PostHog
                 cohort_properties,
                 snapshot: snapshot,
                 known_absent: known_absent,
-                known_absent_scope: dependency_known_absent_scope(dep_flag, known_absent_scope)
+                known_absent_scope: dependency_known_absent_scope(dep_flag, known_absent, known_absent_scope,
+                                                                  snapshot)
               )
               evaluation_cache[dep_flag_key] = dep_result
             rescue RequiresServerEvaluation => e
@@ -1308,13 +1309,16 @@ module PostHog
       self.class.matches_dependency_value(expected_value, actual_value)
     end
 
-    # A dependency is evaluated with the caller's properties, so it uses the caller's listed keys only when it
-    # aggregates the same way. Otherwise a listing for one scope would resolve a filter on another.
-    def dependency_known_absent_scope(dep_flag, known_absent_scope)
-      return nil if known_absent_scope.nil?
-      return nil unless known_absent_scope.aggregation?(dep_flag.dig(:filters, :aggregation_group_type_index))
+    # A dependency uses the listing for its own aggregation, so a listing for one scope never resolves a
+    # filter on another. It has none when its group type index is unknown.
+    def dependency_known_absent_scope(dep_flag, known_absent, known_absent_scope, snapshot)
+      dep_aggregation = dep_flag.dig(:filters, :aggregation_group_type_index)
+      return known_absent_scope if known_absent_scope&.aggregation?(dep_aggregation)
+      return nil if known_absent.nil?
+      return known_absent.person_scope if dep_aggregation.nil?
 
-      known_absent_scope
+      group_name = snapshot[:group_type_mapping][dep_aggregation.to_s.to_sym]
+      group_name.nil? ? nil : known_absent.group_scope(group_name, dep_aggregation)
     end
 
     def self.matches_dependency_value(expected_value, actual_value)
