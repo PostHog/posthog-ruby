@@ -146,21 +146,27 @@ module PostHog
           .to eq([['alan@example.com']])
       end
 
-      it 'splits the recipients so no request is over 4 MiB' do
-        stub_request(:post, batch_url).to_return(answer(queued('msg_0'), queued('msg_1')), answer(queued('msg_2')))
-        note = 'x' * (1536 * 1024)
-        recipients = Array.new(3) { |index| { to: "user#{index}@example.com", template_data: { note: note } } }
+      it 'sends a request of exactly 4 MiB and splits one a byte larger' do
+        bodies = []
+        stub_request(:post, batch_url).to_return do |request|
+          bodies << request.body
+          answer(*JSON.parse(request.body)['recipients'].map { |recipient| queued("msg_#{recipient['to']}") })
+        end
+        pair = lambda do |first, second|
+          [{ to: 'ada@example.com', idempotency_key: 'k-ada', template_data: { note: 'x' * first } },
+           { to: 'alan@example.com', idempotency_key: 'k-alan', template_data: { note: 'x' * second } }]
+        end
+        batch_template(pair.call(1, 1))
+        fill = (4 * 1024 * 1024) - bodies.first.bytesize + 2
 
-        result = batch_template(recipients)
+        batch_template(pair.call(fill / 2, fill - (fill / 2)))
+        result = batch_template(pair.call(fill / 2, fill - (fill / 2) + 1))
 
-        expect(statuses(result.results)).to eq(%w[queued queued queued])
-        expect(batch_bodies.map { |body| body['recipients'].size }).to eq([2, 1])
-      end
-
-      it 'refuses shared content too large for any request before sending' do
-        expect { batch_template([ada], template_data: { note: 'x' * (4 * 1024 * 1024) }) }
-          .to raise_error(ArgumentError, /shared content is larger than one batch request takes/)
-        expect(a_request(:any, %r{/api/messaging/})).not_to have_been_made
+        expect(bodies.drop(1).map(&:bytesize).first).to eq(4 * 1024 * 1024)
+        expect(bodies.drop(1).map { |body| JSON.parse(body)['recipients'].size }).to eq([2, 1, 1])
+        expect(bodies.last(2).map { |body| JSON.parse(body)['recipients'].first['message_data']['note'].size })
+          .to eq([fill / 2, fill - (fill / 2) + 1])
+        expect(statuses(result.results)).to eq(%w[queued queued])
       end
 
       it 'logs each warning once' do
@@ -267,6 +273,21 @@ module PostHog
             result = error.results.first
             expect([result.status, result.message_id]).to eq(%w[unconfirmed msg_ada])
             expect([result.error.code, result.later_error.code]).to eq(%w[delivery_unavailable recipient_suppressed])
+            expect(result.later_error.message_id).to be_nil
+          }
+        end
+
+        it "keeps a retry's answer over a status by key that reads failed" do
+          stub_request(:post, batch_url).to_return(refuse(503, 'delivery_unavailable'), refuse(429, 'rate_limited'))
+          stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(
+            status: 200, body: JSON.generate(id: 'msg_ada', status: 'failed', reason: 'recipient_suppressed',
+                                             created_at: '2026-11-24T08:00:00Z', status_at: '2026-11-24T08:00:00Z')
+          )
+
+          expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+            result = error.results.first
+            expect([result.status, result.message_id]).to eq(%w[unconfirmed msg_ada])
+            expect([result.error.code, result.later_error.code]).to eq(%w[delivery_unavailable rate_limited])
           }
         end
 
@@ -312,30 +333,15 @@ module PostHog
         end
       end
 
-      it "waits for an answer that comes after the client's own timeout" do
-        server = TCPServer.new('127.0.0.1', 0)
-        responder = Thread.new do
-          Thread.current.report_on_exception = false
-          connection = server.accept
-          request = +''
-          request << connection.readpartial(65_536) until request.include?("\r\n\r\n")
-          sleep 0.5
-          body = JSON.generate(results: [queued('msg_1')])
-          connection.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n" \
-                           "Connection: close\r\n\r\n#{body}")
-          connection.close
-        end
-        options.merge!(host: 'http://127.0.0.1:9', app_host: "http://127.0.0.1:#{server.addr[1]}",
-                       email_request_timeout_seconds: 0.2)
-        WebMock.disable!
+      it "waits at least 45 seconds for each answer, and connects and writes within the client's timeout" do
+        stub_request(:post, batch_url).to_return(answer(queued('msg_1')))
+        allow(Net::HTTP).to receive(:start).and_call_original
+        options[:email_request_timeout_seconds] = 3
 
-        result = batch_template([{ to: 'ada@example.com' }], max_retries: 0)
+        batch_template([ada])
 
-        expect(statuses(result.results)).to eq(['queued'])
-        expect(responder.join(5)).to be_truthy
-      ensure
-        WebMock.enable!
-        server&.close
+        expect(Net::HTTP).to have_received(:start)
+          .with('us.posthog.com', 443, hash_including(read_timeout: 45.0, open_timeout: 3, write_timeout: 3))
       end
 
       it 'refuses a bad batch before any request' do

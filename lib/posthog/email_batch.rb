@@ -112,7 +112,8 @@ module PostHog
     def found(index, status)
       if status.status == 'failed'
         earlier = @results[index]
-        set(index, 'unconfirmed', message_id: status.id, error: earlier.error, later_error: failed_status(status))
+        set(index, 'unconfirmed', message_id: status.id, error: earlier.error,
+                                  later_error: earlier.later_error || failed_status(status))
         return
       end
 
@@ -131,11 +132,6 @@ module PostHog
     private
 
     def split(empty)
-      if empty.bytesize >= MAX_BODY_BYTES
-        raise ArgumentError, "The batch's shared content is larger than one batch request takes, 4 MiB, so no email " \
-                             'was sent. Make the template_data, subject, html or text smaller.'
-      end
-
       chunks = []
       current = []
       size = empty.bytesize
@@ -236,7 +232,7 @@ module PostHog
 
     def failed_status(status)
       reason = text(status.reason)
-      EmailError.new(code: reason || 'failed', message_id: status.id,
+      EmailError.new(code: reason || 'failed',
                      message: "PostHog's status of this email reads failed#{" (#{reason})" if reason}, so it may not " \
                               'have gone out.')
     end
