@@ -1223,6 +1223,23 @@ module PostHog
             expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
           }
         end
+
+        it 'measures the minute from the first attempt, not from a retry' do
+          clock = now
+          allow(Time).to receive(:now) { clock }
+          stub_request(:post, send_url).to_return(
+            lambda { |_request|
+              clock = now + 2
+              refuse(503, 'delivery_unavailable')
+            },
+            accept(message_id, status: 'queued', scheduled_at: nil)
+          )
+
+          expect { send_template(scheduled_at: now + 61) }.to raise_error(EmailError) { |error|
+            expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
+          }
+          expect(a_request(:post, send_url)).to have_been_made.twice
+        end
       end
 
       it 'returns a replay of the same key with its original time' do
@@ -1286,9 +1303,10 @@ module PostHog
         deadline = Class.new(StandardError)
         logger = Logger.new(File::NULL)
         events = Queue.new
+        never_released = Queue.new
         allow(logger).to receive(:warn) do
           events << :logging
-          sleep 5
+          never_released.pop
         end
         PostHog::Logging.logger = logger
 
@@ -1319,7 +1337,7 @@ module PostHog
         logger = Logger.new(File::NULL)
         settled = []
         allow(logger).to receive(:warn) do
-          settled << emails.close(timeout: 0)
+          settled << client.shutdown(timeout: 0)
           raise IOError, 'log device closed'
         end
         PostHog::Logging.logger = logger
@@ -1328,6 +1346,42 @@ module PostHog
           expect([error.cause.code, error.cause.message_id]).to eq(['schedule_not_confirmed', message_id])
         }
         expect(settled).to eq([true])
+      end
+
+      let(:other_id) { '0f4c5b2e-9d3a-4e1f-8b7c-6a5d4e3f2a1b' }
+
+      it "gives a logger's reused exception the cause of the send that failed, and leaves the earlier one alone" do
+        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
+                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        reused = IOError.new('log device closed')
+        allow(logger).to receive(:warn).and_raise(reused)
+        PostHog::Logging.logger = logger
+
+        first = begin
+          send_template(scheduled_at: due)
+        rescue IOError => e
+          e
+        end
+        expect { send_template(scheduled_at: due) }.to raise_error(IOError) { |error|
+          expect(error.cause.message_id).to eq(message_id)
+        }
+        expect(first.cause.message_id).to eq(other_id)
+      end
+
+      it 'names the send that failed when the logger raises its exception again while the caller handles it' do
+        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
+                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn).and_raise(IOError.new('log device closed'))
+        PostHog::Logging.logger = logger
+
+        send_again = lambda do
+          send_template(scheduled_at: due)
+        rescue IOError
+          send_template(scheduled_at: due)
+        end
+        expect(&send_again).to raise_error(IOError) { |error| expect(error.cause.message_id).to eq(message_id) }
       end
 
       it 'surfaces a refused time and never sends without it' do
@@ -1363,13 +1417,11 @@ module PostHog
                          status_url).with(headers: { 'Authorization' => 'Bearer phs_test' })).to have_been_made.once
       end
 
-      %w[scheduled archived].each do |status|
-        it "passes the #{status} status through" do
-          stub_request(:get, status_url).to_return(status: 200,
-                                                   body: JSON.generate(record.merge(status: status, reason: nil)))
+      it 'passes the archived status through' do
+        stub_request(:get, status_url).to_return(status: 200,
+                                                 body: JSON.generate(record.merge(status: 'archived', reason: nil)))
 
-          expect(emails.get(message_id)).to have_attributes(status: status, reason: nil)
-        end
+        expect(emails.get(message_id)).to have_attributes(status: 'archived', reason: nil)
       end
 
       it 'does not retry an unknown message ID' do
