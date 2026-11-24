@@ -8,14 +8,12 @@ module PostHog
     # HTTP headers cannot travel with the request object; this is the one place
     # the integration relies on ambient state.
     #
-    # Uses fiber storage (`Fiber[]`, Ruby 3.2+), which is per fiber, isolated per
-    # Ractor, and inherited by fibers/threads a tool spawns. Falls back to
-    # fiber-local `Thread.current[]` on Ruby 3.0/3.1.
+    # Uses fiber storage (`Fiber[]`), which is per fiber, isolated per Ractor, and
+    # inherited by fibers/threads a tool spawns.
     #
     # @api private
     module RequestScope
       KEY = :posthog_mcp_request_scope
-      FIBER_STORAGE = Fiber.respond_to?(:[]) && Fiber.respond_to?(:[]=)
 
       module_function
 
@@ -27,15 +25,11 @@ module PostHog
       #   even while another request on the same server is in flight. `actor` is absent until
       #   the request resolves identity, which is what tells {Analytics} it has none to use.
       def current
-        FIBER_STORAGE ? Fiber[KEY] : Thread.current[KEY]
+        Fiber[KEY]
       end
 
       def current=(value)
-        if FIBER_STORAGE
-          Fiber[KEY] = value
-        else
-          Thread.current[KEY] = value
-        end
+        Fiber[KEY] = value
       end
 
       # Rack `env` keys for the two request headers Rack stores without `HTTP_`.
