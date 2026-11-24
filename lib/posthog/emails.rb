@@ -214,11 +214,13 @@ module PostHog
     # @param scheduled_at [Time, DateTime, String] When to send the email, at most 7 days ahead: a +Time+, such as
     #   +Time.now + 3600+ or a Rails time with zone, a +DateTime+, or an ISO 8601 time with an offset, such as
     #   `2026-12-01T10:00:00+01:00`. A time that has passed sends the email now. PostHog keeps the time to the
-    #   millisecond, and the client rounds a finer time up to the next millisecond, so the email never goes out early,
-    #   and sends that time on every retry. Work out a relative time once and pass the same time when you send again
-    #   with the same +idempotency_key+: another time with that key raises `idempotency_key_reused`. Only PostHog Cloud
-    #   schedules emails. To stop scheduled emails, disable the email's workflow in PostHog until they have reached a
-    #   final status, which refuses every new send of it meanwhile.
+    #   millisecond, and the client rounds a finer time up to the next millisecond and sends that time on every retry.
+    #   When PostHog sends the email now, the client accepts that for a time up to a minute ahead by this machine's
+    #   clock, to allow for clock skew, so such an email can go out up to a minute early. Work out a relative time
+    #   once and pass the same time when you send again with the same +idempotency_key+: another time with that key
+    #   raises `idempotency_key_reused`. Only PostHog Cloud schedules emails. To stop scheduled emails, disable the
+    #   email's workflow in PostHog until they have reached a final status, which refuses every new send of it
+    #   meanwhile.
     # @return [SendResult] The accepted email.
     # @raise [EmailError] PostHog did not queue the email, or the client could not tell whether it did.
     #   With +scheduled_at+, {EmailError#code} is `scheduling_requires_cloud` before any request when the client's
