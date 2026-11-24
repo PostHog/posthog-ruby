@@ -120,8 +120,9 @@ module PostHog
     # @!attribute [r] message_id
     #   @return [String, nil] The email's message ID, when PostHog named it.
     # @!attribute [r] replayed
-    #   @return [Boolean] Whether an earlier send with the same key had already queued the email, so no new email
-    #     went out.
+    #   @return [Boolean] PostHog's marker that an earlier send with the same key had already queued the email, so
+    #     no new email went out. A replay that follows the first send at once can read +false+ even then; the same
+    #     {#message_id} is what shows it is the same email.
     # @!attribute [r] error
     #   @return [EmailError, nil] Why the email is not `queued`. For an `unconfirmed` email, {EmailError#code} names
     #     what left it so, such as `idempotency_key_in_flight`, `delivery_unavailable`, `api_error` or
