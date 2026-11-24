@@ -549,7 +549,7 @@ module PostHog
       end
     end
 
-    describe 'Phase 2 deprecation warnings' do
+    describe 'Phase 2 deprecation warnings', :deprecation_warnings do
       it 'is_feature_enabled emits a deprecation warning pointing at evaluate_flags' do
         stub_flags(flags_response)
         out = capture_stderr { client.is_feature_enabled('boolean-flag', 'user-1') }

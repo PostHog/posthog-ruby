@@ -88,6 +88,7 @@ module PostHog
         identify
         alias
         group_identify
+        evaluate_flags
         is_feature_enabled
         get_feature_flag
         get_all_flags

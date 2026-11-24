@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
   spec.executables = ['posthog']
   spec.summary = 'PostHog library'
   spec.description = 'The PostHog ruby library'
-  spec.authors = ['']
+  spec.authors = ['PostHog']
   spec.email = 'engineering@posthog.com'
   spec.homepage = 'https://github.com/PostHog/posthog-ruby'
   spec.license = 'MIT'

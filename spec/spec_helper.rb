@@ -4,10 +4,33 @@ require 'posthog'
 require 'active_support/all'
 require 'webmock/rspec'
 
+# Specs still cover the deprecated flag APIs, and each spec builds a new client, so the
+# once-per-client deprecation warnings would flood the output. Tag an example or group
+# with `:deprecation_warnings` to let them through.
+module PostHogDeprecationWarningFilter
+  class << self
+    attr_accessor :silenced
+  end
+
+  def warn(message, *args, **kwargs)
+    return if PostHogDeprecationWarningFilter.silenced && message.include?('[posthog-ruby] DEPRECATION:')
+
+    super
+  end
+end
+Warning.singleton_class.prepend(PostHogDeprecationWarningFilter)
+
 RSpec.configure do |config|
   config.before(:each) do
     PostHog::Logging.logger = Logger.new(File::NULL) # Suppress all logging
     PostHog::Client.reset_instance_tracking!
+  end
+
+  config.around(:each) do |example|
+    PostHogDeprecationWarningFilter.silenced = !example.metadata[:deprecation_warnings]
+    example.run
+  ensure
+    PostHogDeprecationWarningFilter.silenced = false
   end
 end
 
