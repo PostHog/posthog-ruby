@@ -147,6 +147,7 @@ module PostHog
         expect(results.map(&:status)).to eq(%w[queued unconfirmed])
         expect([results.last.error.code, resend_with_key(results.last)])
           .to eq(['recipient_suppressed', ['unconfirmed', 'welcome:alan', true]])
+        expect(results.last.error.message).to start_with('An earlier attempt of this batch may have queued')
       end
 
       it 'leaves an unconfirmed email PostHog answered without an ID to be sent again with its key' do
@@ -299,6 +300,7 @@ module PostHog
 
           expect { batch_template([ada, alan], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
             expect(error.code).to eq('rate_limited')
+            expect(error.results.first.error.message).to start_with('An earlier attempt of this batch may have queued')
             expect(error.results.map { |result| resend_with_key(result) })
               .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
           }

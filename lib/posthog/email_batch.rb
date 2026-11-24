@@ -27,8 +27,10 @@ module PostHog
       'detail' => 'PostHog refused the batch as too large, so no email was sent.',
       'fix' => 'Split the recipients into smaller batches.'
     }.freeze
+    EARLIER_ATTEMPT = 'An earlier attempt of this batch may have queued this email, so it may still go out. ' \
+                      "PostHog's last answer:"
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
-    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
+    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
                      :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
@@ -74,10 +76,11 @@ module PostHog
     # Every recipient of a request that failed as a whole is `unconfirmed` when any attempt may have queued it, and
     # `failed` otherwise.
     def failure(error)
+      refused = !maybe_queued?(error)
       attempt_failed(error)
       results = @members.map do |member|
         if @maybe_queued
-          result(member, 'unconfirmed', error: resend(error))
+          result(member, 'unconfirmed', error: resend(error, earlier: refused))
         else
           result(member, 'failed', error: error)
         end
@@ -108,7 +111,8 @@ module PostHog
       answer = slot_error(slot['error'], message_id)
       # A refusal can't confirm an email that an earlier attempt of the request may have queued.
       if UNCONFIRMED_CODES.include?(answer.code) || @maybe_queued
-        return result(member, 'unconfirmed', message_id: message_id, error: resend(answer))
+        earlier = !UNCONFIRMED_CODES.include?(answer.code)
+        return result(member, 'unconfirmed', message_id: message_id, error: resend(answer, earlier: earlier))
       end
 
       result(member, 'failed', message_id: message_id, error: answer)
@@ -119,11 +123,13 @@ module PostHog
       Emails::BatchEmailResult.new(**RESULT_DEFAULTS, **identity, **fields)
     end
 
-    # A caller who follows PostHog's own advice without the key sends a second email.
-    def resend(error)
-      return error if error.fix == RESEND_FIX
+    # A caller who follows PostHog's own advice without the key sends a second email. A refusal that follows an
+    # attempt that may have queued the email can't say no email was sent, so its message says so first.
+    def resend(error, earlier: false)
+      return error if error.fix == RESEND_FIX && !earlier
 
-      EmailError.new(code: error.code, message: error.message, status_code: error.status_code, why: error.why,
+      message = earlier ? "#{EARLIER_ATTEMPT} #{error.message}" : error.message
+      EmailError.new(code: error.code, message: message, status_code: error.status_code, why: error.why,
                      fix: RESEND_FIX, docs_url: error.docs_url, field: error.field, retry_after: error.retry_after)
     end
 
