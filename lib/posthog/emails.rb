@@ -144,7 +144,8 @@ module PostHog
     STATUS_PATH = '/api/messaging/emails/%<message_id>s/'
     BATCH_PATH = '/api/messaging/send/email_batch/'
     STATUS_BY_KEY_PATH = '/api/messaging/emails/status/'
-    # PostHog waits up to 30 seconds for its pipeline before it answers a batch.
+    # PostHog waits up to 30 seconds for its pipeline before it answers a batch. Connecting and writing keep the
+    # client's timeout.
     BATCH_ATTEMPT_TIMEOUT_SECONDS = 45.0
     BATCH_RECIPIENT_FIELDS = %w[to distinct_id idempotency_key template_data].freeze
     US_APP_HOST = 'https://us.posthog.com'
@@ -340,8 +341,8 @@ module PostHog
     # waits at least 45 seconds for each answer. A batch takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
-    # queues an email twice. Retries follow {#send}'s. After a lost answer, the client reads each email that may have
-    # gone out by its key.
+    # queues an email twice. Retries follow {#send}'s. When a request of the batch fails as a whole, the client reads
+    # by its key each email of the batch whose answer was lost.
     #
     # @param recipients [Array<Hash>] 1 or more recipients, each a Hash with:
     #   - +to+ [String] the recipient's email address;
@@ -375,13 +376,8 @@ module PostHog
     #   +idempotency_key+.
     def batch(
       recipients:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil,
-      from: nil, reply_to: nil, sensitive: nil, tracking: nil, capture_engagement: nil, max_retries: nil, **unexpected
+      from: nil, reply_to: nil, sensitive: nil, tracking: nil, capture_engagement: nil, max_retries: nil
     )
-      unless unexpected.empty?
-        raise ArgumentError, "A batch doesn't take #{unexpected.keys.join(', ')}, so no email was sent. A batch " \
-                             "takes no scheduled_at, cc, bcc or attachments, and each recipient's to goes in " \
-                             'recipients.'
-      end
       unless max_retries.nil? || retry_count?(max_retries)
         raise ArgumentError,
               'max_retries must be a nonnegative integer.'
@@ -469,7 +465,7 @@ module PostHog
     end
 
     def batch_recipient_fields(recipient, index)
-      fields = recipient.is_a?(Hash) ? recipient.transform_keys(&:to_s) : {}
+      fields = recipient.is_a?(Hash) ? Utils.stringify_keys(recipient) : {}
       unless fields.key?('to')
         raise ArgumentError, "recipients[#{index}] must be a Hash with to, such as { to: 'user@example.com' }."
       end
@@ -504,7 +500,6 @@ module PostHog
       EmailBatch::Member.new(index: index, to: to, idempotency_key: key, wire: JSON.generate(wire))
     end
 
-    # Sends the chunks one after another, and returns the EmailBatchError of the first that fails as a whole.
     def send_chunks(run, secret_key, max_retries)
       run.chunks.each_with_index do |chunk, position|
         return run.failure(run.closed_at(position)) if position.positive? && !still_admitted?
@@ -522,11 +517,10 @@ module PostHog
 
     def send_chunk(run, chunk, secret_key, max_retries)
       uri = URI(@app_host + BATCH_PATH)
-      timeout = [@timeout.to_f, BATCH_ATTEMPT_TIMEOUT_SECONDS].max
-      attempts = 0
-      with_retries(max_retries) do
-        attempts += 1
-        if attempts > 1 && !still_admitted?
+      read_timeout = [@timeout.to_f, BATCH_ATTEMPT_TIMEOUT_SECONDS].max
+      body = chunk.body
+      with_retries(max_retries) do |attempt|
+        if attempt.positive? && !still_admitted?
           raise EmailError.new(
             code: 'client_closed',
             message: "The PostHog client is shut down, so it didn't retry this request of the batch."
@@ -534,7 +528,7 @@ module PostHog
         end
 
         begin
-          reply = request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, chunk.body, timeout: timeout)
+          reply = request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, body, read_timeout: read_timeout)
         rescue EmailError
           run.lost(chunk)
           raise
@@ -552,7 +546,7 @@ module PostHog
         status = status_by_key(key, secret_key)
         break if status == :stop
 
-        run.accepted(index, status) if status
+        run.found(index, status) if status
       end
     end
 
@@ -805,7 +799,7 @@ module PostHog
     def with_retries(max_retries)
       attempt = 0
       begin
-        yield
+        yield attempt
       rescue EmailError => e
         delay = retry_delay(e, attempt, max_retries)
         raise if delay.nil?
@@ -910,21 +904,21 @@ module PostHog
       )
     end
 
-    def request(request, uri, secret_key, headers, body = nil, timeout: @timeout)
+    def request(request, uri, secret_key, headers, body = nil, read_timeout: @timeout)
       request['Authorization'] = "Bearer #{secret_key}"
       request['Accept'] = 'application/json'
       request['User-Agent'] = @user_agent if @user_agent
       request['X-PostHog-Migrated-From'] = @migrated_from if @migrated_from
-      status, answer, retry_after = exchange(request, uri, headers, body, timeout: timeout)
+      status, answer, retry_after = exchange(request, uri, headers, body, read_timeout: read_timeout)
       [status, parse_json(answer), retry_after]
     end
 
-    def exchange(request, uri, headers, body, timeout: @timeout)
+    def exchange(request, uri, headers, body, read_timeout: @timeout)
       headers.each { |name, value| request[name] = value }
       request.body = body if body
 
       head = nil
-      response = Net::HTTP.start(uri.hostname, uri.port, connection_options(uri, timeout)) do |http|
+      response = Net::HTTP.start(uri.hostname, uri.port, connection_options(uri, read_timeout)) do |http|
         http.request(request) { |started| head = started }
       end
       [response.code.to_i, response.body, parse_retry_after(response['Retry-After'])]
@@ -934,9 +928,9 @@ module PostHog
                            retry_after: head && parse_retry_after(head['Retry-After']))
     end
 
-    def connection_options(uri, timeout)
+    def connection_options(uri, read_timeout)
       options = {
-        use_ssl: uri.scheme == 'https', open_timeout: timeout, read_timeout: timeout, write_timeout: timeout,
+        use_ssl: uri.scheme == 'https', open_timeout: @timeout, read_timeout: read_timeout, write_timeout: @timeout,
         # Net::HTTP returns a body cut off by a closed connection as if it were whole. Raise instead.
         max_retries: 0, ignore_eof: false
       }

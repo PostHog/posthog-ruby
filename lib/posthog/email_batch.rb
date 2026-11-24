@@ -26,7 +26,13 @@ module PostHog
     private_constant :UNCONFIRMED_CODES, :UNAVAILABLE_FIX, :NOT_FOUND, :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
-    Chunk = Struct.new(:body, :indices, keyword_init: true)
+    # The recipients of one request. The body is built when the request goes out, so a large batch holds one at a
+    # time.
+    Chunk = Struct.new(:empty, :recipients, :indices, keyword_init: true) do
+      def body
+        "#{empty.delete_suffix(']}')}#{recipients.map(&:wire).join(',')}]}"
+      end
+    end
 
     attr_reader :chunks
 
@@ -44,7 +50,6 @@ module PostHog
       @chunks = split(JSON.generate(shared.merge(recipients: [])))
     end
 
-    # An attempt that may have queued some of the chunk got no usable answer.
     def lost(chunk)
       chunk.indices.each do |index|
         @maybe_queued << index
@@ -53,7 +58,6 @@ module PostHog
       end
     end
 
-    # Records PostHog's answer to the chunk, or raises the error of a refused request.
     def answer(chunk, (status, payload, retry_after))
       fields = payload.is_a?(Hash) ? payload : {}
       unless status.between?(200, 299)
@@ -73,7 +77,6 @@ module PostHog
       end
     end
 
-    # The request of the chunk at +position+ failed as a whole, so the batch stops there.
     def stop(position, error)
       later = error.status_code && error.status_code < 500 ? error : nil
       @chunks[position].indices.each do |index|
@@ -91,7 +94,6 @@ module PostHog
                               ))
     end
 
-    # The client shut down before the chunk at +position+ went out.
     def closed_at(position)
       error = EmailError.new(code: 'client_closed',
                              message: "The PostHog client is shut down, so the rest of the batch wasn't sent.")
@@ -99,15 +101,21 @@ module PostHog
       error
     end
 
-    # Recipients a lost answer left without a message ID, with their keys.
     def lost_keys
       @maybe_queued.sort.filter_map do |index|
         [index, @members[index].idempotency_key] if @results[index].message_id.nil?
       end
     end
 
-    # A status read by key found the email, so PostHog accepted it.
-    def accepted(index, status)
+    # A status read by key found the email. PostHog records a refusal before queueing, such as a suppressed
+    # address, as a failed email, so only another status shows that PostHog accepted it.
+    def found(index, status)
+      if status.status == 'failed'
+        earlier = @results[index]
+        set(index, 'unconfirmed', message_id: status.id, error: earlier.error, later_error: failed_status(status))
+        return
+      end
+
       @maybe_queued.delete(index)
       set(index, 'queued', message_id: status.id)
     end
@@ -123,6 +131,11 @@ module PostHog
     private
 
     def split(empty)
+      if empty.bytesize >= MAX_BODY_BYTES
+        raise ArgumentError, "The batch's shared content is larger than one batch request takes, 4 MiB, so no email " \
+                             'was sent. Make the template_data, subject, html or text smaller.'
+      end
+
       chunks = []
       current = []
       size = empty.bytesize
@@ -146,7 +159,7 @@ module PostHog
     end
 
     def chunk(empty, members)
-      Chunk.new(body: "#{empty.delete_suffix(']}')}#{members.map(&:wire).join(',')}]}", indices: members.map(&:index))
+      Chunk.new(empty: empty, recipients: members, indices: members.map(&:index))
     end
 
     def settle(index, slot)
@@ -210,7 +223,8 @@ module PostHog
 
       code = text(error['code']) || 'api_error'
       status = error['status'].is_a?(Integer) ? error['status'] : nil
-      EmailError.new(code: code, status_code: status, message_id: message_id,
+      # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
+      EmailError.new(code: code, status_code: status, message_id: (message_id if UNCONFIRMED_CODES.include?(code)),
                      message: text(error['detail']) || "PostHog didn't queue this email: #{code}.")
     end
 
@@ -218,6 +232,13 @@ module PostHog
       EmailError.new(code: 'delivery_unavailable', message_id: message_id,
                      message: "PostHog didn't confirm this email, so it may still go out. Send it again with the " \
                               'same idempotency_key within 24 hours, so it goes out once.')
+    end
+
+    def failed_status(status)
+      reason = text(status.reason)
+      EmailError.new(code: reason || 'failed', message_id: status.id,
+                     message: "PostHog's status of this email reads failed#{" (#{reason})" if reason}, so it may not " \
+                              'have gone out.')
     end
 
     def recipient_too_large

@@ -131,7 +131,7 @@ module PostHog
            [nil, 'api_error', 'application_error']]
         )
         expect(results.first.error.status_code).to eq(422)
-        expect(results.first.error.message_id).to eq('msg_1')
+        expect(results.map { |result| result.error.message_id }).to eq([nil, 'msg_2', nil])
       end
 
       it 'fails a recipient too large for one request and sends the rest' do
@@ -146,6 +146,23 @@ module PostHog
           .to eq([['alan@example.com']])
       end
 
+      it 'splits the recipients so no request is over 4 MiB' do
+        stub_request(:post, batch_url).to_return(answer(queued('msg_0'), queued('msg_1')), answer(queued('msg_2')))
+        note = 'x' * (1536 * 1024)
+        recipients = Array.new(3) { |index| { to: "user#{index}@example.com", template_data: { note: note } } }
+
+        result = batch_template(recipients)
+
+        expect(statuses(result.results)).to eq(%w[queued queued queued])
+        expect(batch_bodies.map { |body| body['recipients'].size }).to eq([2, 1])
+      end
+
+      it 'refuses shared content too large for any request before sending' do
+        expect { batch_template([ada], template_data: { note: 'x' * (4 * 1024 * 1024) }) }
+          .to raise_error(ArgumentError, /shared content is larger than one batch request takes/)
+        expect(a_request(:any, %r{/api/messaging/})).not_to have_been_made
+      end
+
       it 'logs each warning once' do
         warning = { code: 'unverified_link', detail: 'A link points to an unverified domain.' }
         recipients = Array.new(101) { |index| { to: "user#{index}@example.com" } }
@@ -153,14 +170,13 @@ module PostHog
           answer(*Array.new(100) { |index| queued("msg_#{index}") }, warnings: [warning]),
           answer(queued('msg_100'), warnings: [warning])
         )
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn)
-        PostHog::Logging.logger = logger
+        log = StringIO.new
+        PostHog::Logging.logger = Logger.new(log)
 
         result = batch_template(recipients)
 
         expect(result.warnings.map(&:code)).to eq(['unverified_link'])
-        expect(logger).to have_received(:warn).once
+        expect(log.string.scan('PostHog email warning unverified_link').size).to eq(1)
       end
 
       it "lets the logger's error through, with a failed batch's error as its cause" do
@@ -240,6 +256,20 @@ module PostHog
           expect(a_request(:get, status_by_key_url)).to have_been_made.twice
         end
 
+        it 'keeps a recipient whose status by key reads failed unconfirmed' do
+          stub_request(:post, batch_url).to_raise(Errno::ECONNRESET)
+          stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(
+            status: 200, body: JSON.generate(id: 'msg_ada', status: 'failed', reason: 'recipient_suppressed',
+                                             created_at: '2026-11-24T08:00:00Z', status_at: '2026-11-24T08:00:00Z')
+          )
+
+          expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
+            result = error.results.first
+            expect([result.status, result.message_id]).to eq(%w[unconfirmed msg_ada])
+            expect([result.error.code, result.later_error.code]).to eq(%w[delivery_unavailable recipient_suppressed])
+          }
+        end
+
         it 'keeps the first unconfirmed answer and adds what a later retry said' do
           stub_request(:post, batch_url).to_return(
             refuse(503, 'delivery_unavailable'),
@@ -254,10 +284,23 @@ module PostHog
           expect(result.results.first.later_error.code).to eq('idempotency_key_reused')
         end
 
+        it "doesn't retry once the client shuts down" do
+          stub_request(:post, batch_url).to_return do
+            client.shutdown(timeout: 0)
+            refuse(503, 'delivery_unavailable')
+          end
+
+          expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
+            expect(error.code).to eq('client_closed')
+            expect(statuses(error.results)).to eq(['unconfirmed'])
+          }
+          expect(a_request(:post, batch_url)).to have_been_made.once
+        end
+
         it 'stops before the next request once the client shuts down' do
           recipients = Array.new(101) { |index| { to: "user#{index}@example.com" } }
           stub_request(:post, batch_url).to_return do
-            emails.close(timeout: 0)
+            client.shutdown(timeout: 0)
             answer(*Array.new(100) { |index| queued("msg_#{index}") })
           end
 
@@ -269,14 +312,30 @@ module PostHog
         end
       end
 
-      it 'waits at least 45 seconds for each answer' do
-        stub_request(:post, batch_url).to_return(answer(queued('msg_1')))
-        allow(Net::HTTP).to receive(:start).and_call_original
+      it "waits for an answer that comes after the client's own timeout" do
+        server = TCPServer.new('127.0.0.1', 0)
+        responder = Thread.new do
+          Thread.current.report_on_exception = false
+          connection = server.accept
+          request = +''
+          request << connection.readpartial(65_536) until request.include?("\r\n\r\n")
+          sleep 0.5
+          body = JSON.generate(results: [queued('msg_1')])
+          connection.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n" \
+                           "Connection: close\r\n\r\n#{body}")
+          connection.close
+        end
+        options.merge!(host: 'http://127.0.0.1:9', app_host: "http://127.0.0.1:#{server.addr[1]}",
+                       email_request_timeout_seconds: 0.2)
+        WebMock.disable!
 
-        batch_template([ada])
+        result = batch_template([{ to: 'ada@example.com' }], max_retries: 0)
 
-        expect(Net::HTTP).to have_received(:start)
-          .with('us.posthog.com', 443, hash_including(read_timeout: 45.0, open_timeout: 45.0))
+        expect(statuses(result.results)).to eq(['queued'])
+        expect(responder.join(5)).to be_truthy
+      ensure
+        WebMock.enable!
+        server&.close
       end
 
       it 'refuses a bad batch before any request' do
@@ -287,8 +346,8 @@ module PostHog
            /recipients\[1\] has the same idempotency_key as recipients\[0\]/],
           [{ recipients: [{ to: '' }] }, /recipients\[0\]: to must be/],
           [{ recipients: [{ to: 'a@example.com', cc: 'b@example.com' }] }, /recipients\[0\] takes only/],
-          [{ recipients: [ada], scheduled_at: Time.now }, /doesn't take scheduled_at/],
-          [{ recipients: [ada], cc: 'b@example.com' }, /doesn't take cc/],
+          [{ recipients: [ada], scheduled_at: Time.now }, /unknown keyword: :scheduled_at/],
+          [{ recipients: [ada], cc: 'b@example.com' }, /unknown keyword: :cc/],
           [{ recipients: [ada], template_id: 'nope' }, /template_id must be/]
         ].each do |args, message|
           expect { emails.batch(template_id: template_id, **args) }.to raise_error(ArgumentError, message)

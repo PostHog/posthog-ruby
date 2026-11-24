@@ -77,7 +77,7 @@ instance_method PostHog::EmailError#retry_after()
 instance_method PostHog::EmailError#status_code()
 instance_method PostHog::EmailError#why()
 class PostHog::Emails
-instance_method PostHog::Emails#batch(recipients:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., sensitive: ..., tracking: ..., capture_engagement: ..., max_retries: ..., **unexpected)
+instance_method PostHog::Emails#batch(recipients:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., sensitive: ..., tracking: ..., capture_engagement: ..., max_retries: ...)
 instance_method PostHog::Emails#get(message_id)
 instance_method PostHog::Emails#send(to:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., cc: ..., bcc: ..., attachments: ..., sensitive: ..., tracking: ..., capture_engagement: ..., distinct_id: ..., idempotency_key: ..., max_retries: ..., scheduled_at: ...)
 class_method PostHog::Emails.logger()
