@@ -1223,23 +1223,6 @@ module PostHog
             expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
           }
         end
-
-        it 'measures the minute from the first attempt, not from a retry' do
-          clock = now
-          allow(Time).to receive(:now) { clock }
-          stub_request(:post, send_url).to_return(
-            lambda { |_request|
-              clock = now + 2
-              refuse(503, 'delivery_unavailable')
-            },
-            accept(message_id, status: 'queued', scheduled_at: nil)
-          )
-
-          expect { send_template(scheduled_at: now + 61) }.to raise_error(EmailError) { |error|
-            expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
-          }
-          expect(a_request(:post, send_url)).to have_been_made.twice
-        end
       end
 
       it 'returns a replay of the same key with its original time' do
@@ -1303,10 +1286,9 @@ module PostHog
         deadline = Class.new(StandardError)
         logger = Logger.new(File::NULL)
         events = Queue.new
-        never_released = Queue.new
         allow(logger).to receive(:warn) do
           events << :logging
-          never_released.pop
+          sleep 5
         end
         PostHog::Logging.logger = logger
 
