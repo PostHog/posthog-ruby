@@ -122,7 +122,7 @@ module PostHog
     # duration to sleep between attempts
     #
     # Returns [last_result, raised_exception]
-    def retry_with_backoff(retries_remaining, &block)
+    def retry_with_backoff(retries_remaining, &)
       result, caught_exception = nil
       should_retry = false
 
@@ -137,7 +137,7 @@ module PostHog
       if should_retry && (retries_remaining > 1)
         logger.debug("Retrying request, #{retries_remaining} retries left")
         sleep(retry_delay_seconds)
-        retry_with_backoff(retries_remaining - 1, &block)
+        retry_with_backoff(retries_remaining - 1, &)
       else
         [result, caught_exception]
       end

@@ -63,8 +63,11 @@ module PostHog
       # @return [PostHog::MCP::Analytics] handle for custom events; a no-op handle when
       #   instrumentation fails (logged, never raised)
       # @raise [LoadError] when the `mcp` gem is not available
+      # Named so the documented `kwargs` parameter stays in the public signature.
+      # rubocop:disable Style/ArgumentsForwarding
       def instrument(server, client = nil, options: nil, **kwargs)
         opts = options.is_a?(Options) ? options : Options.new(**kwargs)
+        # rubocop:enable Style/ArgumentsForwarding
         ensure_mcp_sdk!
         experimental_notice!(opts)
 

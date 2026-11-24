@@ -63,8 +63,8 @@ module PostHog
       # that has served an HTTP request the server-wide session is not a safe
       # fallback: it belongs to whichever request settled it last, which under
       # concurrency is somebody else's. That happens when a tool hands its work to
-      # a thread or fiber it spawned on Ruby 3.0/3.1, where {RequestScope} is
-      # fiber-local and is not inherited. Fail closed with a standalone session
+      # a thread that did not inherit the request's fiber storage, such as a pool
+      # created before the request. Fail closed with a standalone session
       # rather than filing the event under another caller's identity; over stdio a
       # server only ever talks to one client, so the fallback stays.
       def current_session_id(data, scope)
@@ -90,8 +90,8 @@ module PostHog
         Log.warn(
           data.options,
           'Warning: analytics.capture() ran without the scope of the request that started it, so its event got ' \
-          'a standalone $session_id instead of the caller\'s. On Ruby 3.2+ the scope follows threads and fibers ' \
-          'a tool spawns; before that it does not, so capture custom events from the tool body itself.'
+          'a standalone $session_id instead of the caller\'s. The scope follows threads and fibers a tool ' \
+          'spawns, but not work handed to a thread created outside the request, such as an existing pool.'
         )
       end
     end

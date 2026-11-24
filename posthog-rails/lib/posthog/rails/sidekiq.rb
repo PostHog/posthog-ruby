@@ -146,10 +146,10 @@ module PostHog
           @installation = installation
         end
 
-        def call(_worker, _job, _queue, &block)
+        def call(_worker, _job, _queue, &)
           return yield unless @installation.enabled?
 
-          @installation.with_job(&block)
+          @installation.with_job(&)
         end
       end
 

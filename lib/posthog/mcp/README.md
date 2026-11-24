@@ -29,9 +29,6 @@ These are the few things that differ from what the docs describe for the other S
 * **Truncation is tighter.** Events are truncated to fit the core client's 32KB per-message limit,
   because posthog-ruby drops larger messages at batch time - truncating harder beats losing the
   event.
-* **Request scope needs Ruby 3.2+ to be inherited.** A custom event captured from a thread or fiber
-  a tool spawns is attributed to that request on 3.2+ (fiber storage); before 3.2 capture from the
-  tool body itself, or an HTTP server falls back to a standalone session.
 * **Composed schemas are left alone.** A tool whose `input_schema` is `oneOf`/`allOf`/`anyOf` or a
   `$ref` has nothing injected into it and nothing stripped from its calls.
 * **stdio servers own `$stdout`.** The integration's own messages go only to the `logger:` you pass
