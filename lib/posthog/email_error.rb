@@ -53,7 +53,9 @@ module PostHog
       'delivery_unavailable' => 'service_unavailable',
       'content_too_large' => 'validation_error'
     }.freeze
-    private_constant :SDK_ERROR_NAMES
+    # A 409 PostHog answers before it takes the request, so no idempotency key is in flight.
+    VALIDATION_CONFLICTS = %w[template_outdated batch_unavailable].freeze
+    private_constant :SDK_ERROR_NAMES, :VALIDATION_CONFLICTS
 
     # @api private
     def self.name_for(status_code, code)
@@ -65,7 +67,7 @@ module PostHog
       when 400 then 'validation_error'
       when 403 then 'invalid_permission'
       when 404 then 'not_found'
-      when 409 then code == 'template_outdated' ? 'validation_error' : 'concurrent_idempotent_requests'
+      when 409 then VALIDATION_CONFLICTS.include?(code) ? 'validation_error' : 'concurrent_idempotent_requests'
       when 422 then code == 'idempotency_key_reused' ? 'invalid_idempotent_request' : 'validation_error'
       when 429 then code == 'quota_limited' ? 'monthly_quota_exceeded' : 'rate_limit_exceeded'
       when 503 then 'service_unavailable'
@@ -77,8 +79,8 @@ module PostHog
   # A request of {Emails#batch} failed as a whole, so the batch stopped.
   #
   # The other fields describe that request's error. {#results} holds every recipient: those of earlier requests as
-  # PostHog answered them, those of the failed request as `failed`, or `unconfirmed` where an earlier attempt may have
-  # queued them, and the rest as `not_attempted`.
+  # PostHog answered them, those of the failed request as `failed`, or `unconfirmed` where PostHog may have queued
+  # them, such as after a lost answer or while it held their key, and the rest as `not_attempted`.
   class EmailBatchError < EmailError
     # @return [Array<Emails::BatchEmailResult>] One result per recipient, in the order of the batch's recipients.
     attr_reader :results

@@ -61,7 +61,8 @@ module PostHog
     def answer(chunk, (status, payload, retry_after))
       fields = payload.is_a?(Hash) ? payload : {}
       unless status.between?(200, 299)
-        lost(chunk) if status >= 500
+        # PostHog holds a key while it sends the email, so a request refused for that may already have queued it.
+        lost(chunk) if status >= 500 || fields['code'] == 'idempotency_key_in_flight'
         raise response_error(fields, status, retry_after, chunk.indices)
       end
 
@@ -78,7 +79,7 @@ module PostHog
     end
 
     def stop(position, error)
-      later = error.status_code && error.status_code < 500 ? error : nil
+      later = error.status_code && error.status_code < 500 && !UNCONFIRMED_CODES.include?(error.code) ? error : nil
       @chunks[position].indices.each do |index|
         if !@maybe_queued.include?(index)
           set(index, 'failed', error: error)

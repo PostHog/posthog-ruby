@@ -122,6 +122,7 @@ module PostHog
           answer(slot_error('recipient_suppressed', 422, message_id: 'msg_1'),
                  slot_error('delivery_unavailable', 503, message_id: 'msg_2'), 'not a result')
         )
+        stub_request(:get, status_by_key_url).to_return(status: 404, body: '{"code":"not_found"}')
 
         results = batch_template([ada, alan, { to: 'grace@example.com' }]).results
 
@@ -132,6 +133,23 @@ module PostHog
         )
         expect(results.first.error.status_code).to eq(422)
         expect(results.map { |result| result.error.message_id }).to eq([nil, 'msg_2', nil])
+      end
+
+      it 'reads by its key each unconfirmed email PostHog answered without an ID' do
+        stub_request(:post, batch_url).to_return(
+          answer(slot_error('delivery_unavailable', 503, message_id: 'msg_ada'),
+                 slot_error('delivery_unavailable', 503, message_id: nil))
+        )
+        stub_request(:get, "#{status_by_key}welcome%3Aalan").to_return(
+          status: 200, body: JSON.generate(id: 'msg_alan', status: 'queued', created_at: '2026-11-24T08:00:00Z',
+                                           status_at: '2026-11-24T08:00:00Z')
+        )
+
+        results = batch_template([ada, alan]).results
+
+        expect(results.map { |result| [result.status, result.message_id] })
+          .to eq([%w[unconfirmed msg_ada], %w[queued msg_alan]])
+        expect(a_request(:get, status_by_key_url)).to have_been_made.once
       end
 
       it 'fails a recipient too large for one request and sends the rest' do
@@ -238,9 +256,35 @@ module PostHog
           stub_request(:post, batch_url).to_return(refuse(409, 'batch_unavailable', detail: 'Not yet.'))
 
           expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
-            expect([error.code, error.status_code]).to eq(['batch_unavailable', 409])
+            expect([error.code, error.name, error.status_code]).to eq(['batch_unavailable', 'validation_error', 409])
             expect(error.fix).to include('send', 'idempotency_key')
             expect(error.results.map(&:status)).to eq(['failed'])
+          }
+          expect(a_request(:post, batch_url)).to have_been_made.once
+        end
+
+        it 'keeps a recipient unconfirmed while PostHog holds its key, also after a later refusal' do
+          stub_request(:post, batch_url).to_return(
+            refuse(409, 'idempotency_key_in_flight'), refuse(400, 'invalid_recipient', attr: 'recipients__0__to')
+          )
+          stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(status: 404, body: '{"code":"not_found"}')
+
+          expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+            result = error.results.first
+            expect([error.code, result.status, result.message_id]).to eq(['invalid_recipient', 'unconfirmed', nil])
+            expect([result.error.code, result.later_error.code]).to eq(%w[delivery_unavailable invalid_recipient])
+          }
+          expect(a_request(:get, status_by_key_url)).to have_been_made.once
+        end
+
+        it 'keeps a recipient unconfirmed when PostHog holds its key past the retries' do
+          stub_request(:post, batch_url).to_return(refuse(409, 'idempotency_key_in_flight'))
+          stub_request(:get, "#{status_by_key}welcome%3Aada").to_return(status: 404, body: '{"code":"not_found"}')
+
+          expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
+            result = error.results.first
+            expect([error.code, result.status, result.later_error]).to eq(['idempotency_key_in_flight', 'unconfirmed',
+                                                                           nil])
           }
         end
 

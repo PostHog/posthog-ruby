@@ -341,8 +341,8 @@ module PostHog
     # waits at least 45 seconds for each answer. A batch takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
-    # queues an email twice. Retries follow {#send}'s. When a request of the batch fails as a whole, the client reads
-    # by its key each email of the batch whose answer was lost.
+    # queues an email twice. Retries follow {#send}'s. At the end of the batch, the client reads by its key each
+    # `unconfirmed` email that PostHog answered without a message ID.
     #
     # @param recipients [Array<Hash>] 1 or more recipients, each a Hash with:
     #   - +to+ [String] the recipient's email address;
@@ -501,18 +501,23 @@ module PostHog
     end
 
     def send_chunks(run, secret_key, max_retries)
+      error = nil
       run.chunks.each_with_index do |chunk, position|
-        return run.failure(run.closed_at(position)) if position.positive? && !still_admitted?
+        if position.positive? && !still_admitted?
+          error = run.closed_at(position)
+          break
+        end
 
         begin
           send_chunk(run, chunk, secret_key, max_retries)
         rescue EmailError => e
           run.stop(position, e)
-          read_lost(run, secret_key)
-          return run.failure(e)
+          error = e
+          break
         end
       end
-      nil
+      read_lost(run, secret_key)
+      run.failure(error) if error
     end
 
     def send_chunk(run, chunk, secret_key, max_retries)
@@ -537,8 +542,8 @@ module PostHog
       end
     end
 
-    # After a lost answer, a status read by key tells whether PostHog accepted the email. It reads each key once and
-    # stops at the first error but a 404, so a failing PostHog doesn't hold the caller up.
+    # For an email without a message ID, only a status read by key tells whether PostHog accepted it. It reads each
+    # key once and stops at the first error but a 404, so a failing PostHog doesn't hold the caller up.
     def read_lost(run, secret_key)
       run.lost_keys.each do |index, key|
         break unless still_admitted?
