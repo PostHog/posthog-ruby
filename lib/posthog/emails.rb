@@ -279,8 +279,16 @@ module PostHog
           raise if unconfirmed.nil? || e.cause.equal?(unconfirmed)
 
           # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email. A
-          # copy names this one and leaves the object an earlier caller holds alone.
-          raise e.dup, cause: unconfirmed
+          # copy names this one and leaves the object an earlier caller holds alone. One that can't be copied
+          # becomes the cause of this send's error instead.
+          copy = begin
+            e.dup
+          rescue Exception # rubocop:disable Lint/RescueException
+            nil
+          end
+          raise copy, cause: unconfirmed if copy
+
+          raise unconfirmed, cause: e
         end
       end
 
