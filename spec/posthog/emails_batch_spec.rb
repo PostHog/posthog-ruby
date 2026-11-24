@@ -339,6 +339,7 @@ module PostHog
         {
           'a 502 without a code' => [{ status: 502, body: '<html>Bad gateway</html>' }, 'unconfirmed'],
           'a 504 with a code' => [{ status: 504, body: JSON.generate(code: 'gateway_timeout') }, 'unconfirmed'],
+          'a 503 with client_closed' => [{ status: 503, body: JSON.generate(code: 'client_closed') }, 'unconfirmed'],
           'a 403 without a code' => [{ status: 403, body: '<html>Forbidden</html>' }, 'failed'],
           'a 403 naming keys in flight' => [
             { status: 403, body: JSON.generate(code: 'idempotency_key_in_flight') }, 'failed'
@@ -375,6 +376,7 @@ module PostHog
           expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
             expect(error.code).to eq('client_closed')
             expect(resend_with_key(error.results.first)).to eq(['unconfirmed', 'welcome:ada', true])
+            expect(error.results.first.error.message).to start_with('An earlier attempt of this batch may have queued')
           }
           expect(a_request(:post, batch_url)).to have_been_made.once
         end

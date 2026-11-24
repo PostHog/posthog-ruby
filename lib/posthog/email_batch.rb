@@ -28,7 +28,7 @@ module PostHog
       'fix' => 'Split the recipients into smaller batches.'
     }.freeze
     EARLIER_ATTEMPT = 'An earlier attempt of this batch may have queued this email, so it may still go out. ' \
-                      "PostHog's last answer:"
+                      'The last attempt ended with:'
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
     private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
                      :RESULT_DEFAULTS
@@ -47,6 +47,7 @@ module PostHog
       @reply_error = reply_error
       @warnings = []
       @maybe_queued = false
+      @attempt_error = nil
       empty = JSON.generate(shared.merge(recipients: []))
       @body = "#{empty.delete_suffix(']}')}#{members.map(&:wire).join(',')}]}"
     end
@@ -70,14 +71,15 @@ module PostHog
 
     # Remembers an attempt that failed, so a later attempt's refusal can't confirm what this one may have queued.
     def attempt_failed(error)
+      @attempt_error = error
       @maybe_queued = true if maybe_queued?(error)
     end
 
     # Every recipient of a request that failed as a whole is `unconfirmed` when any attempt may have queued it, and
     # `failed` otherwise.
     def failure(error)
-      refused = !maybe_queued?(error)
-      attempt_failed(error)
+      # Only an attempt's error says what PostHog may have queued; the client raises client_closed without a request.
+      refused = !(@attempt_error.equal?(error) && maybe_queued?(error))
       results = @members.map do |member|
         if @maybe_queued
           result(member, 'unconfirmed', error: resend(error, earlier: refused))
@@ -93,9 +95,6 @@ module PostHog
     # The status, not the code, says whether PostHog may have queued the emails: a 4xx refused them, except a 409 for
     # keys still in flight. No answer, a 5xx and a 2xx without a result for each recipient leave them unknown.
     def maybe_queued?(error)
-      # The client raises client_closed instead of sending a retry, so it says nothing about what PostHog queued.
-      return false if error.code == 'client_closed'
-
       status = error.status_code.to_i
       return true unless status.between?(400, 499)
 
@@ -126,7 +125,7 @@ module PostHog
     # A caller who follows PostHog's own advice without the key sends a second email. A refusal that follows an
     # attempt that may have queued the email can't say no email was sent, so its message says so first.
     def resend(error, earlier: false)
-      return error if error.fix == RESEND_FIX && !earlier
+      return error if error.fix == RESEND_FIX
 
       message = earlier ? "#{EARLIER_ATTEMPT} #{error.message}" : error.message
       EmailError.new(code: error.code, message: message, status_code: error.status_code, why: error.why,
