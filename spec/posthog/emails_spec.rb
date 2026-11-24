@@ -1271,10 +1271,34 @@ module PostHog
       it "lets the caller's deadline stop the send while it logs warnings" do
         stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
         logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn) { sleep 1 }
+        logging = Queue.new
+        allow(logger).to receive(:warn) do
+          logging << true
+          sleep 5
+        end
         PostHog::Logging.logger = logger
 
-        expect { Timeout.timeout(0.05) { send_template(scheduled_at: due) } }.to raise_error(Timeout::Error)
+        expect { Timeout.timeout(0.5) { send_template(scheduled_at: due) } }.to raise_error(Timeout::Error)
+        expect(logging.size).to eq(1)
+      end
+
+      it "lets a caller's deadline with an error class stop the send while it logs warnings" do
+        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        logging = Queue.new
+        allow(logger).to receive(:warn) do
+          logging << true
+          sleep 5
+        end
+        PostHog::Logging.logger = logger
+
+        sender = Thread.new { send_template(scheduled_at: due) }
+        sender.report_on_exception = false
+        logging.pop
+        # Timeout.timeout(seconds, Timeout::Error) delivers its deadline the same way.
+        sender.raise(Timeout::Error, 'execution expired')
+
+        expect { sender.value }.to raise_error(Timeout::Error, 'execution expired')
       end
 
       it 'lets an interrupt while it logs warnings stop the send' do

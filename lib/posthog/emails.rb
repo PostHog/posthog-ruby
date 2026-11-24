@@ -266,6 +266,9 @@ module PostHog
       begin
         result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
       rescue StandardError => e
+        # Timeout.timeout with an error class raises that class here, and the caller's deadline must win.
+        raise if e.is_a?(Timeout::Error)
+
         raise unconfirmed || e
       end
       raise unconfirmed if unconfirmed
