@@ -1188,22 +1188,28 @@ module PostHog
         expect(a_request(:any, %r{/messaging/|amazonaws})).not_to have_been_made
       end
 
-      it 'returns an email whose time had passed, or is due within a minute, as queued now' do
-        stub_request(:post, send_url).to_return(accept(message_id, status: 'queued', scheduled_at: nil))
+      context 'when PostHog answers that it sends the email now' do
+        let(:now) { Time.utc(2026, 11, 24, 8, 0, 0) }
 
-        ['2020-01-01T00:00:00Z', Time.now + 30].each do |scheduled_at|
-          expect(send_template(scheduled_at: scheduled_at))
-            .to have_attributes(id: message_id, status: 'queued', scheduled_at: nil)
+        before do
+          allow(Time).to receive(:now).and_return(now)
+          stub_request(:post, send_url).to_return(accept(message_id, status: 'queued', scheduled_at: nil))
         end
-      end
 
-      it 'raises schedule_not_confirmed when PostHog sends now an email due more than a minute ahead' do
-        stub_request(:post, send_url).to_return(accept(message_id, status: 'queued', scheduled_at: nil))
+        it 'returns the email as queued when its time had passed or is at most a minute ahead' do
+          ['2020-01-01T00:00:00Z', now + 60].each do |scheduled_at|
+            expect(send_template(scheduled_at: scheduled_at))
+              .to have_attributes(id: message_id, status: 'queued', scheduled_at: nil)
+          end
+        end
 
-        expect { send_template(scheduled_at: Time.now + 120) }.to raise_error(EmailError) { |error|
-          expect([error.code, error.message_id, error.status_code]).to eq(['schedule_not_confirmed', message_id, 202])
-        }
-        expect(a_request(:post, send_url)).to have_been_made.once
+        it 'raises schedule_not_confirmed for a time more than a minute ahead' do
+          expect { send_template(scheduled_at: now + 60.001r) }.to raise_error(EmailError) { |error|
+            expect([error.code, error.message_id, error.status_code])
+              .to eq(['schedule_not_confirmed', message_id, 202])
+          }
+          expect(a_request(:post, send_url)).to have_been_made.once
+        end
       end
 
       it 'returns a replay of the same key with its original time' do
@@ -1260,6 +1266,15 @@ module PostHog
         expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
           expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
         }
+      end
+
+      it "lets the caller's deadline stop the send while it logs warnings" do
+        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn) { sleep 1 }
+        PostHog::Logging.logger = logger
+
+        expect { Timeout.timeout(0.05) { send_template(scheduled_at: due) } }.to raise_error(Timeout::Error)
       end
 
       it 'lets an interrupt while it logs warnings stop the send' do
