@@ -151,6 +151,7 @@ module PostHog
 
         expect(statuses(results)).to eq(%w[failed failed])
         expect(results.map { |result| result.error.code }.uniq).to eq(['content_too_large'])
+        expect(results.first.error.fix).to eq("Make this recipient's template_data, or the batch's content, smaller.")
         expect(a_request(:any, %r{/api/messaging/})).not_to have_been_made
       end
 
