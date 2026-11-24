@@ -90,6 +90,9 @@ module PostHog
     # The status, not the code, says whether PostHog may have queued the emails: a 4xx refused them, except a 409 for
     # keys still in flight. No answer, a 5xx and a 2xx without a result for each recipient leave them unknown.
     def maybe_queued?(error)
+      # The client raises client_closed instead of sending a retry, so it says nothing about what PostHog queued.
+      return false if error.code == 'client_closed'
+
       status = error.status_code.to_i
       return true unless status.between?(400, 499)
 
@@ -129,7 +132,7 @@ module PostHog
       fields = if status == 404
                  NOT_FOUND.merge(answered)
                elsif status == 413
-                 TOO_LARGE.merge(answered.reject { |_, value| value == '' })
+                 TOO_LARGE.merge(answered.select { |_, value| text(value) })
                else
                  answered
                end

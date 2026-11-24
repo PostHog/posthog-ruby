@@ -333,9 +333,10 @@ module PostHog
     # Pass the template form, with +template_id+, or the code form, with +template_key+, as {#send} takes them. The
     # client sends at most 100 recipients in one request and waits at least 45 seconds for the answer. PostHog
     # refuses a batch too large to take at once with a 413 `content_too_large`: split the recipients into smaller
-    # batches. A 400 `content_too_large` means the shared content or one recipient's +template_data+ is over
-    # PostHog's limit, which splitting doesn't change: make it smaller. A batch takes no +cc+, +bcc+, +attachments+
-    # or +scheduled_at+.
+    # batches. A 400 `content_too_large` means the shared content is over PostHog's limit, which splitting doesn't
+    # change: make it smaller. A recipient whose own +template_data+ is over it comes back `failed` with
+    # `content_too_large` in its result, while the others go out. A batch takes no +cc+, +bcc+, +attachments+ or
+    # +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
     # queues an email twice. Retries follow {#send}'s. Send each `unconfirmed` email again with its
@@ -365,7 +366,7 @@ module PostHog
     #   with the same key when any attempt may have queued it (a 409 `idempotency_key_in_flight`, a 5xx, a lost
     #   answer, or `client_closed` when the client shut down before a retry), and `failed` when PostHog refused the
     #   request with a 4xx and no earlier attempt may have queued it. {EmailError#code} is `content_too_large` with
-    #   PostHog's fix: a 413 for a batch to split into smaller batches, a 400 for content to make smaller. It is
+    #   PostHog's fix: a 413 for a batch to split into smaller batches, a 400 for shared content to make smaller. It is
     #   `batch_unavailable` when the project can't send batches yet, and `not_found` when the template doesn't
     #   exist or batch sends are off: send each email the batch didn't queue with {#send} and its recipient's
     #   +idempotency_key+. The warnings of an answer without a result for each recipient are on

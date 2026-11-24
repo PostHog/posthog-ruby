@@ -218,7 +218,10 @@ module PostHog
             'Split them.'
           ],
           'a 413 without a JSON body' => [{ status: 413, body: '<html>Request Entity Too Large</html>' }, 'smaller'],
-          'a 413 with an empty code and fix' => [{ status: 413, body: JSON.generate(code: '', fix: '') }, 'smaller']
+          'a 413 with an empty code and fix' => [{ status: 413, body: JSON.generate(code: '', fix: '') }, 'smaller'],
+          'a 413 with fields that are not text' => [
+            { status: 413, body: JSON.generate(code: 413, fix: false) }, 'smaller'
+          ]
         }.each do |name, (reply, fix)|
           it "surfaces #{name} as content_too_large, with PostHog's fix or the advice to split the recipients" do
             stub_request(:post, batch_url).to_return(reply)
@@ -347,6 +350,18 @@ module PostHog
               expect(resend_with_key(error.results.first)).to eq([status, 'welcome:ada', status == 'unconfirmed'])
             }
           end
+        end
+
+        it 'leaves the recipients failed when the client shuts down after PostHog refused the only request' do
+          stub_request(:post, batch_url).to_return do
+            client.shutdown(timeout: 0)
+            refuse(429, 'rate_limited')
+          end
+
+          expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+            expect([error.code, error.results.map(&:status)]).to eq(['client_closed', ['failed']])
+          }
+          expect(a_request(:post, batch_url)).to have_been_made.once
         end
 
         it "doesn't retry once the client shuts down, and leaves the recipients unconfirmed" do
