@@ -108,10 +108,11 @@ module PostHog
       end
 
       answer = slot_error(slot['error'], message_id)
-      # A refusal can't confirm an email that an earlier attempt of the request may have queued.
-      if UNCONFIRMED_CODES.include?(answer.code) || @maybe_queued
-        earlier = !UNCONFIRMED_CODES.include?(answer.code)
-        return result(member, 'unconfirmed', message_id: message_id, error: resend(answer, earlier: earlier))
+      if UNCONFIRMED_CODES.include?(answer.code)
+        return result(member, 'unconfirmed', message_id: message_id, error: answer)
+      elsif @maybe_queued
+        # A refusal can't confirm an email that an earlier attempt of the request may have queued.
+        return result(member, 'unconfirmed', message_id: message_id, error: resend(answer, earlier: true))
       end
 
       result(member, 'failed', message_id: message_id, error: answer)

@@ -351,6 +351,7 @@ module PostHog
             expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
               expect(error.status_code).to eq(reply[:status])
               expect(resend_with_key(error.results.first)).to eq([status, 'welcome:ada', status == 'unconfirmed'])
+              expect(error.results.first.error.message).to eq(error.message)
             }
           end
         end
