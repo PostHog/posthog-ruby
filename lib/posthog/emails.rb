@@ -326,28 +326,7 @@ module PostHog
       begin
         raise unconfirmed if unconfirmed
       ensure
-        # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
-        # keeps schedule_not_confirmed as its cause.
-        begin
-          result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-        rescue Exception => e # rubocop:disable Lint/RescueException
-          raise if unconfirmed.nil? || e.cause.equal?(unconfirmed)
-
-          # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email. A
-          # copy names this one and leaves the object an earlier caller holds alone. One that can't be copied
-          # becomes the cause of this send's error instead, but a caller's deadline that arrives during the copy
-          # propagates.
-          copy = begin
-            e.dup
-          rescue StandardError => copy_error
-            raise if copy_error.is_a?(Timeout::Error)
-
-            nil
-          end
-          raise copy, cause: unconfirmed if copy
-
-          raise unconfirmed, cause: e
-        end
+        log_warnings(result.warnings, unconfirmed)
       end
 
       result
@@ -416,8 +395,7 @@ module PostHog
       begin
         raise failure if failure
       ensure
-        # A logger's own error keeps the batch's error as its cause.
-        result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+        log_warnings(result.warnings, failure)
       end
 
       result
@@ -557,6 +535,28 @@ module PostHog
         end
         run.answer(chunk, reply)
       end
+    end
+
+    # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
+    # keeps the call's error as its cause.
+    def log_warnings(warnings, failure)
+      warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      raise if failure.nil? || e.cause.equal?(failure)
+
+      # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier call. A copy
+      # names this one and leaves the object an earlier caller holds alone. One that can't be copied becomes the
+      # cause of this call's error instead, but a caller's deadline that arrives during the copy propagates.
+      copy = begin
+        e.dup
+      rescue StandardError => copy_error
+        raise if copy_error.is_a?(Timeout::Error)
+
+        nil
+      end
+      raise copy, cause: failure if copy
+
+      raise failure, cause: e
     end
 
     def still_admitted?

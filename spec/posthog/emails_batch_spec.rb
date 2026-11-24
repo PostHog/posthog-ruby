@@ -232,6 +232,25 @@ module PostHog
         }
       end
 
+      it "gives a logger's reused exception the failed batch's error as its cause, and leaves the earlier one alone" do
+        recipients = Array.new(101) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
+        slots = Array.new(100) { |index| queued("msg_#{index}") }
+        first = answer(*slots, warnings: [{ code: 'unverified_link' }])
+        stub_request(:post, batch_url)
+          .to_return(first, refuse(409, 'batch_unavailable'), first, refuse(404, 'not_found'))
+        reused = IOError.new('log device closed')
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn).and_raise(reused)
+        PostHog::Logging.logger = logger
+
+        expect { batch_template(recipients) }.to raise_error(reused)
+        earlier = reused.cause
+        expect { batch_template(recipients) }.to raise_error(IOError, 'log device closed') { |error|
+          expect(error.cause.code).to eq('not_found')
+        }
+        expect([reused.cause, earlier.code]).to eq([earlier, 'batch_unavailable'])
+      end
+
       context 'when a request fails as a whole' do
         let(:recipients) do
           Array.new(201) do |index|
@@ -276,11 +295,30 @@ module PostHog
             result = error.results.first
             expect([error.code, result.status, result.message_id]).to eq(['invalid_recipient', 'unconfirmed', nil])
             expect([result.error.code, result.later_error.code]).to eq(%w[idempotency_key_in_flight invalid_recipient])
+            expect(resend_with_key(result)).to eq(['unconfirmed', 'welcome:ada', true])
           }
         end
 
+        [
+          [%w[delivery_unavailable idempotency_key_in_flight], [503, 409]],
+          [['idempotency_key_in_flight', nil], [409, 503]]
+        ].each do |(error_code, later_code), (first, second)|
+          it "keeps the first reason it can't confirm a recipient when a #{first} retry answers #{second}" do
+            stub_request(:post, batch_url).to_return(
+              refuse(first, first == 409 ? 'idempotency_key_in_flight' : 'delivery_unavailable'),
+              refuse(second, second == 409 ? 'idempotency_key_in_flight' : 'delivery_unavailable')
+            )
+
+            expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+              result = error.results.first
+              expect([result.status, result.error.code, result.later_error&.code])
+                .to eq(['unconfirmed', error_code, later_code])
+            }
+          end
+        end
+
         it 'keeps a recipient unconfirmed when PostHog holds its key past the retries, to send again with it' do
-          stub_request(:post, batch_url).to_return(refuse(409, 'idempotency_key_in_flight'))
+          stub_request(:post, batch_url).to_return(refuse(409, 'idempotency_key_in_flight', fix: ''))
 
           expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
             result = error.results.first
@@ -310,6 +348,17 @@ module PostHog
           }
           expect(a_request(:post, batch_url)).to have_been_made.twice
           expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
+        end
+
+        it 'makes an answer without a result for each recipient their only error, since nothing retried it' do
+          stub_request(:post, batch_url).to_return(answer)
+
+          expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
+            result = error.results.first
+            expect([error.code, result.error.code, result.later_error]).to eq(['api_error', 'api_error', nil])
+            expect(resend_with_key(result)).to eq(['unconfirmed', 'welcome:ada', true])
+          }
+          expect(a_request(:post, batch_url)).to have_been_made.once
         end
 
         it "keeps a retry's refusal as the later answer of a recipient it can't confirm" do

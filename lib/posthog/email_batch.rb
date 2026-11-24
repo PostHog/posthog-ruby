@@ -53,6 +53,9 @@ module PostHog
 
     def lost(chunk, error = nil)
       chunk.indices.each do |index|
+        # The first answer that left an email unconfirmed stays its error, and stop adds the last refusal.
+        next if @maybe_queued.include?(index)
+
         @maybe_queued << index
         message_id = @results[index]&.message_id
         set(index, 'unconfirmed', message_id: message_id, error: error || unconfirmed(message_id))
@@ -74,9 +77,10 @@ module PostHog
 
       slots = fields['results']
       unless slots.is_a?(Array) && slots.size == chunk.indices.size
-        lost(chunk)
-        raise EmailError.new(code: 'api_error', status_code: status,
-                             message: 'PostHog answered the batch without a result for each recipient.')
+        error = EmailError.new(code: 'api_error', status_code: status, fix: RESEND_FIX,
+                               message: 'PostHog answered the batch without a result for each recipient.')
+        lost(chunk, error)
+        raise error
       end
       chunk.indices.zip(slots) { |index, slot| settle(index, slot.is_a?(Hash) ? slot : {}) }
       @parse_warnings.call(fields['warnings']).each do |warning|
@@ -183,7 +187,9 @@ module PostHog
       answered['attr'] = recipients_field(answered['attr'], indices) if answered['attr'].is_a?(String)
       fields = status == 404 ? NOT_FOUND.merge(answered) : answered
       fields = fields.merge('fix' => UNAVAILABLE_FIX) if fields['code'] == 'batch_unavailable'
-      fields = fields.merge('fix' => RESEND_FIX) if fields['code'] == 'idempotency_key_in_flight' && !fields['fix']
+      if fields['code'] == 'idempotency_key_in_flight' && !text(fields['fix'])
+        fields = fields.merge('fix' => RESEND_FIX)
+      end
       @reply_error.call(fields, status, retry_after)
     end
 
