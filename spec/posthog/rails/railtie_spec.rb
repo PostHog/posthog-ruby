@@ -68,17 +68,25 @@ RSpec.describe PostHog::Rails::Railtie do
       expect(logger).not_to have_received(:error)
     end
 
-    it 'delegates evaluate_flags explicitly with its arguments', :deprecation_warnings do
+    it 'delegates evaluate_flags explicitly with its arguments' do
       snapshot = instance_double(PostHog::FeatureFlagEvaluations)
       client = instance_double(PostHog::Client)
       allow(client).to receive(:evaluate_flags).and_return(snapshot)
       PostHog.client = client
 
       expect(PostHog.singleton_class.instance_method(:evaluate_flags).owner).to eq(PostHog.singleton_class)
-      expect do
-        expect(PostHog.evaluate_flags('user', groups: { company: 'acme' }, flag_keys: ['beta'])).to be(snapshot)
-      end.not_to output.to_stderr
+      expect(PostHog.evaluate_flags('user', groups: { company: 'acme' }, flag_keys: ['beta'])).to be(snapshot)
       expect(client).to have_received(:evaluate_flags).with('user', groups: { company: 'acme' }, flag_keys: ['beta'])
+    end
+
+    it 'evaluates flags through the facade without deprecation warnings', :deprecation_warnings do
+      client = PostHog.init(api_key: 'phc_test', test_mode: true)
+
+      expect do
+        expect(PostHog.evaluate_flags('user', only_evaluate_locally: true)).to be_a(PostHog::FeatureFlagEvaluations)
+      end.not_to output.to_stderr
+    ensure
+      client&.shutdown
     end
 
     it 'shuts down the previous client when init is called again' do
