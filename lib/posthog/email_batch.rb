@@ -27,13 +27,12 @@ module PostHog
       'detail' => 'PostHog refused the batch as too large, so no email was sent.',
       'fix' => 'Split the recipients into smaller batches.'
     }.freeze
-    # One recipient can't be split, so only a smaller email gets through.
-    TOO_LARGE_ALONE = TOO_LARGE.merge('fix' => 'Make the email smaller, such as its template_data.').freeze
+    SMALLER_FIX = 'Make the email smaller, such as its template_data.'
     EARLIER_ATTEMPT = 'An earlier attempt of this batch may have queued this email, so it may still go out. ' \
                       'The last attempt ended with:'
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
     private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
-                     :TOO_LARGE_ALONE, :RESULT_DEFAULTS
+                     :SMALLER_FIX, :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
 
@@ -82,9 +81,10 @@ module PostHog
     def failure(error)
       # Only an attempt's error says what PostHog may have queued; the client raises client_closed without a request.
       refused = !(@attempt_error.equal?(error) && maybe_queued?(error))
+      error = resend(error, earlier: true) if @maybe_queued && refused
       results = @members.map do |member|
         if @maybe_queued
-          result(member, 'unconfirmed', error: resend(error, earlier: refused))
+          result(member, 'unconfirmed', error: resend(error))
         else
           result(member, 'failed', error: error)
         end
@@ -140,12 +140,18 @@ module PostHog
       fields = if status == 404
                  NOT_FOUND.merge(answered)
                elsif status == 413
-                 (@members.size > 1 ? TOO_LARGE : TOO_LARGE_ALONE).merge(answered.select { |_, value| text(value) })
+                 too_large(answered)
                else
                  answered
                end
       fields = fields.merge('fix' => UNAVAILABLE_FIX) if fields['code'] == 'batch_unavailable'
       @reply_error.call(fields, status, retry_after)
+    end
+
+    def too_large(answered)
+      fields = TOO_LARGE.merge(answered.select { |_, value| text(value) })
+      # One recipient can't be split, so only a smaller email gets through, whatever the reply advises.
+      @members.size > 1 ? fields : fields.merge('fix' => SMALLER_FIX)
     end
 
     def slot_error(error, message_id)

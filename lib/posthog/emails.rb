@@ -365,11 +365,13 @@ module PostHog
     #   last attempt's. {EmailBatchError#results} holds every recipient: `unconfirmed` with a fix to send it again
     #   with the same key when any attempt may have queued it (a 409 `idempotency_key_in_flight`, a 5xx, or a lost
     #   answer), and `failed` when PostHog refused the request with a 4xx and no earlier attempt may have queued it.
-    #   The error is `client_closed` when the client shut down before a retry. {EmailError#code} is
-    #   `content_too_large` with PostHog's fix: a 413 for a batch to split into smaller batches, a 400 for shared
-    #   content to make smaller. It is `batch_unavailable` when the project can't send batches yet, and `not_found`
-    #   when the template doesn't exist or batch sends are off: send each email the batch didn't queue with {#send}
-    #   and its recipient's +idempotency_key+. The warnings of an answer without a result for each recipient are on
+    #   When only an earlier attempt may have queued them, the error's message says so, and its fix is the same-key
+    #   one. The error is `client_closed` when the client shut down before a retry. {EmailError#code} is
+    #   `content_too_large` with PostHog's fix: a 413 for a batch to split into smaller batches, or for one recipient
+    #   an email to make smaller, and a 400 for shared content to make smaller. It is `batch_unavailable` when the
+    #   project can't send batches yet, and `not_found` when the template doesn't exist or batch sends are off: send
+    #   each email the batch didn't queue with {#send} and its recipient's +idempotency_key+. The warnings of an
+    #   answer without a result for each recipient are on
     #   {EmailError#warnings}, and the client logs none of them.
     # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
     # @raise [ArgumentError] An argument has the wrong type or format, such as more than 100 recipients or two
