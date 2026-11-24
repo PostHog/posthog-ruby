@@ -1384,6 +1384,19 @@ module PostHog
         }
       end
 
+      it "lets a caller's deadline through when it arrives while the client copies the logger's exception" do
+        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
+                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        interrupted = Class.new(IOError) { def initialize_copy(_other) = raise(Timeout::Error, 'deadline') }
+        reused = interrupted.new('log device closed')
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn).and_raise(reused)
+        PostHog::Logging.logger = logger
+
+        expect { send_template(scheduled_at: due) }.to raise_error(reused)
+        expect { send_template(scheduled_at: due) }.to raise_error(Timeout::Error, 'deadline')
+      end
+
       it 'names the send that failed when the logger raises its exception again while the caller handles it' do
         stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
                                                 accept(message_id, warnings: [{ code: 'unverified_link' }]))
