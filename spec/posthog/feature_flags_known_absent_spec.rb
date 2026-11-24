@@ -29,6 +29,10 @@ module PostHog
       Client.new(api_key: API_KEY, personal_api_key: API_KEY, test_mode: true)
     end
 
+    def plan_scope
+      KnownAbsentPropertyKeys.build(['plan'], nil).person_scope
+    end
+
     def flags_request_body
       body = nil
       expect(WebMock).to(have_requested(:post, flags_endpoint).with { |request| body = JSON.parse(request.body) })
@@ -66,8 +70,8 @@ module PostHog
         ['semver_wildcard', '1.2.*'] => false
       }.each do |(operator, value), expected|
         it "#{expected ? 'matches' : 'does not match'} #{operator}" do
-          property = { key: 'plan', operator: operator, value: value }
-          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])).to be(expected)
+          property = { key: 'plan', operator: operator, value: value, type: 'person' }
+          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_scope: plan_scope)).to be(expected)
         end
       end
 
@@ -171,7 +175,8 @@ module PostHog
       end
 
       it 'override the $group_key the SDK adds to group properties' do
-        definition = flag('no-group-key', { key: '$group_key', operator: 'is_not_set', type: 'group' })
+        definition = flag('no-group-key', { key: '$group_key', operator: 'is_not_set', type: 'group',
+                                            group_type_index: 0 })
         definition[:filters][:aggregation_group_type_index] = 0
         c = group_client(definition)
 
@@ -207,9 +212,9 @@ module PostHog
         %w[future_operator pro]
       ].each do |operator, value|
         it "stays unsupported for #{operator} #{value.inspect} on a listed key" do
-          property = { key: 'plan', operator: operator, value: value }
+          property = { key: 'plan', operator: operator, value: value, type: 'person' }
           expect do
-            FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])
+            FeatureFlagsPoller.match_property(property, {}, known_absent_scope: plan_scope)
           end.to raise_error(InconclusiveMatchError) { |e|
             expect(e.reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
           }
@@ -225,7 +230,7 @@ module PostHog
         it "stays unsupported for #{name} condition value on a listed key" do
           property = { key: 'plan', type: 'person' }.merge(filter)
           expect do
-            FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])
+            FeatureFlagsPoller.match_property(property, {}, known_absent_scope: plan_scope)
           end.to raise_error(InconclusiveMatchError) { |e|
             expect(e.reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
           }
@@ -233,9 +238,9 @@ module PostHog
       end
 
       it 'stays unsupported for a JSON null condition value with a String-keyed filter' do
-        property = JSON.parse('{"key": "plan", "operator": "is_not", "value": null}')
+        property = JSON.parse('{"key": "plan", "operator": "is_not", "value": null, "type": "person"}')
         expect do
-          FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])
+          FeatureFlagsPoller.match_property(property, {}, known_absent_scope: plan_scope)
         end.to raise_error(InconclusiveMatchError) { |e|
           expect(e.reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
         }
@@ -243,8 +248,8 @@ module PostHog
 
       { 'is_not_set' => true, 'is_set' => false }.each do |operator, expected|
         it "still resolves #{operator} with a null condition value on a listed key" do
-          property = { key: 'plan', operator: operator, value: nil }
-          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])).to be(expected)
+          property = { key: 'plan', operator: operator, value: nil, type: 'person' }
+          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_scope: plan_scope)).to be(expected)
         end
       end
 
@@ -319,8 +324,8 @@ module PostHog
 
       unusable_values.each do |(operator, value), expected|
         it "resolves #{operator} #{value.inspect} to #{expected} on a listed key" do
-          property = { key: 'plan', operator: operator, value: value }
-          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])).to be(expected)
+          property = { key: 'plan', operator: operator, value: value, type: 'person' }
+          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_scope: plan_scope)).to be(expected)
         end
       end
 
@@ -408,6 +413,173 @@ module PostHog
           expect(remote.get_flag('range-cohort')).to be(true)
           expect(flags_request_body['person_property_keys_known_absent']).to eq(['plan'])
         end
+      end
+    end
+
+    describe 'filter types' do
+      let(:group_type_mapping) { { '0' => 'organization', '1' => 'project' } }
+
+      def created_at(operator, value = nil)
+        filter = { key: 'created_at', operator: operator, type: 'person_metadata' }
+        filter[:value] = value unless value.nil?
+        filter
+      end
+
+      def group_flag(key, *properties, group_type_index: 0)
+        definition = flag(key, *properties)
+        definition[:filters][:aggregation_group_type_index] = group_type_index
+        definition
+      end
+
+      def flag_dependency(key)
+        { key: key, type: 'flag', value: true, operator: 'flag_evaluates_to', dependency_chain: [key] }
+      end
+
+      [['is_not_set', nil], ['is_date_before', '2025-01-01T00:00:00Z'],
+       ['is_date_after', '2025-01-01T00:00:00Z']].each do |operator, value|
+        it "do not resolve a person_metadata #{operator} filter on a listed key" do
+          c = local_client(flag('old-account', created_at(operator, value)))
+
+          snapshot = c.evaluate_flags('user-1', flag_keys: ['old-account'], only_evaluate_locally: true,
+                                                person_property_keys_known_absent: ['created_at'])
+
+          expect(snapshot.unresolved_flags).to eq('old-account' => UnresolvedFlagReason::MISSING_CONTEXT)
+        end
+
+        it "do not resolve a person_metadata #{operator} cohort leaf on a listed key" do
+          cohorts = { '9' => { type: 'AND', values: [{ type: 'AND', values: [created_at(operator, value)] }] } }
+          c = local_client(flag('old-cohort', { key: 'id', value: 9, type: 'cohort' }), cohorts: cohorts)
+
+          snapshot = c.evaluate_flags('user-1', flag_keys: ['old-cohort'], only_evaluate_locally: true,
+                                                person_property_keys_known_absent: ['created_at'])
+
+          expect(snapshot.unresolved_flags).to eq('old-cohort' => UnresolvedFlagReason::MISSING_CONTEXT)
+        end
+      end
+
+      it 'resolve a person_metadata filter on a listed key from a supplied value' do
+        c = local_client(flag('old-account', created_at('is_date_before', '2025-01-01T00:00:00Z')))
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['old-account'], only_evaluate_locally: true,
+                                              person_properties: { created_at: '2024-01-01T00:00:00Z' },
+                                              person_property_keys_known_absent: ['created_at'])
+
+        expect(snapshot.get_flag('old-account')).to be(true)
+      end
+
+      it 'fall back to /flags for a person_metadata filter on a listed key' do
+        c = local_client(flag('old-account', created_at('is_date_before', '2025-01-01T00:00:00Z')))
+        stub_request(:post, flags_endpoint).to_return(
+          status: 200,
+          body: { flags: { 'old-account' => { key: 'old-account', enabled: true, variant: nil,
+                                              metadata: { id: 1 } } } }.to_json
+        )
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['old-account'],
+                                              person_property_keys_known_absent: ['created_at'])
+
+        expect(snapshot.get_flag('old-account')).to be(true)
+        expect(flags_request_body['person_property_keys_known_absent']).to eq(['created_at'])
+      end
+
+      it 'do not resolve a group filter in a person-aggregated flag from person keys' do
+        c = local_client(flag('person-flag', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                               group_type_index: 0 }),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['person-flag'], groups: { organization: 'acme' },
+                                              only_evaluate_locally: true,
+                                              person_property_keys_known_absent: ['tier'])
+
+        expect(snapshot.unresolved_flags).to eq('person-flag' => UnresolvedFlagReason::MISSING_CONTEXT)
+      end
+
+      it 'do not resolve a group filter in a group-aggregated flag from person keys' do
+        c = local_client(group_flag('org-flag', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                                  group_type_index: 0 }),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['org-flag'], groups: { organization: 'acme' },
+                                              only_evaluate_locally: true,
+                                              person_property_keys_known_absent: ['tier'])
+
+        expect(snapshot.unresolved_flags).to eq('org-flag' => UnresolvedFlagReason::MISSING_CONTEXT)
+      end
+
+      it 'do not resolve a group filter for another group type from group keys' do
+        c = local_client(group_flag('org-flag', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                                  group_type_index: 1 }),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['org-flag'], groups: { organization: 'acme' },
+                                              only_evaluate_locally: true,
+                                              group_property_keys_known_absent: { organization: ['tier'] })
+
+        expect(snapshot.unresolved_flags).to eq('org-flag' => UnresolvedFlagReason::MISSING_CONTEXT)
+      end
+
+      it 'do not resolve a person filter in a group-aggregated flag from group keys' do
+        c = local_client(group_flag('org-flag', person('plan', 'is_not_set')), group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['org-flag'], groups: { organization: 'acme' },
+                                              only_evaluate_locally: true,
+                                              group_property_keys_known_absent: { organization: ['plan'] })
+
+        expect(snapshot.unresolved_flags).to eq('org-flag' => UnresolvedFlagReason::MISSING_CONTEXT)
+      end
+
+      it 'do not resolve a person cohort leaf in a group-aggregated flag from group keys' do
+        cohorts = { '7' => { type: 'AND', values: [{ type: 'AND', values: [person('plan', 'is_not_set')] }] } }
+        c = local_client(group_flag('org-cohort', { key: 'id', value: 7, type: 'cohort' }),
+                         cohorts: cohorts, group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['org-cohort'], groups: { organization: 'acme' },
+                                              only_evaluate_locally: true,
+                                              group_property_keys_known_absent: { organization: ['plan'] })
+
+        expect(snapshot.unresolved_flags).to eq('org-cohort' => UnresolvedFlagReason::MISSING_CONTEXT)
+      end
+
+      it 'do not leak person keys into a group-aggregated flag dependency' do
+        org_parent = group_flag('org-parent', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                                group_type_index: 0 })
+        c = local_client(org_parent, flag('person-child', flag_dependency('org-parent')),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['person-child'], groups: { organization: 'acme' },
+                                              group_properties: { organization: { tier: 'enterprise' } },
+                                              person_property_keys_known_absent: ['tier'],
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('person-child')).to be_nil
+        expect(snapshot.unresolved_flags).to eq('person-child' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+      end
+
+      it 'do not leak group keys into a person-aggregated flag dependency' do
+        org_child = group_flag('org-child', flag_dependency('person-parent'))
+        c = local_client(flag('person-parent', person('tier', 'is_not_set')), org_child,
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['org-child'], groups: { organization: 'acme' },
+                                              person_properties: { tier: 'pro' },
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('org-child')).to be_nil
+        expect(snapshot.unresolved_flags).to eq('org-child' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+      end
+
+      it 'apply group keys to a dependency with the same group aggregation' do
+        org_parent = group_flag('org-parent', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                                group_type_index: 0 })
+        c = local_client(org_parent, group_flag('org-child', flag_dependency('org-parent')),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['org-child'], groups: { organization: 'acme' },
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('org-child')).to be(true)
       end
     end
 

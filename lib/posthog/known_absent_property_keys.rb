@@ -82,6 +82,47 @@ module PostHog
       @group_keys[group_type.to_s]
     end
 
+    # @return [Scope] The listed person keys, for filters with `type: "person"`.
+    def person_scope
+      Scope.new(person_keys, nil)
+    end
+
+    # @param group_type [String, Symbol]
+    # @param group_type_index [Integer, String] The index that group_type maps to.
+    # @return [Scope] The listed keys for that group type, for group filters of that group type.
+    def group_scope(group_type, group_type_index)
+      Scope.new(group_keys(group_type), group_type_index)
+    end
+
+    # Listed keys for one evaluation scope: person properties, or the properties of one group type.
+    # Any other filter type, such as `person_metadata`, never resolves from a listing.
+    class Scope
+      # @return [Integer, String, nil] The group type index, or nil for the person scope.
+      attr_reader :group_type_index
+
+      def initialize(keys, group_type_index)
+        @keys = keys
+        @group_type_index = group_type_index
+      end
+
+      # @param aggregation_group_type_index [Integer, String, nil] A flag's aggregation, nil for persons.
+      def aggregation?(aggregation_group_type_index)
+        aggregation_group_type_index.to_s == @group_type_index.to_s
+      end
+
+      # @param property [Hash] A property filter.
+      # @return [Boolean] Whether the filter's key is listed for this scope and the filter reads this scope.
+      def covers?(property)
+        return false unless @keys&.include?((property[:key] || property['key']).to_s)
+
+        type = property[:type] || property['type']
+        return type == 'person' if @group_type_index.nil?
+
+        filter_group_type_index = property[:group_type_index] || property['group_type_index']
+        type == 'group' && !filter_group_type_index.nil? && aggregation?(filter_group_type_index)
+      end
+    end
+
     # @return [Hash] The `/flags` request body fields, omitting a field with nothing listed.
     def request_fields
       fields = {}
