@@ -1188,11 +1188,22 @@ module PostHog
         expect(a_request(:any, %r{/messaging/|amazonaws})).not_to have_been_made
       end
 
-      it 'returns an email whose time had passed as queued now' do
+      it 'returns an email whose time had passed, or is due within a minute, as queued now' do
         stub_request(:post, send_url).to_return(accept(message_id, status: 'queued', scheduled_at: nil))
 
-        expect(send_template(scheduled_at: '2020-01-01T00:00:00Z'))
-          .to have_attributes(id: message_id, status: 'queued', scheduled_at: nil)
+        ['2020-01-01T00:00:00Z', Time.now + 30].each do |scheduled_at|
+          expect(send_template(scheduled_at: scheduled_at))
+            .to have_attributes(id: message_id, status: 'queued', scheduled_at: nil)
+        end
+      end
+
+      it 'raises schedule_not_confirmed when PostHog sends now an email due more than a minute ahead' do
+        stub_request(:post, send_url).to_return(accept(message_id, status: 'queued', scheduled_at: nil))
+
+        expect { send_template(scheduled_at: Time.now + 120) }.to raise_error(EmailError) { |error|
+          expect([error.code, error.message_id, error.status_code]).to eq(['schedule_not_confirmed', message_id, 202])
+        }
+        expect(a_request(:post, send_url)).to have_been_made.once
       end
 
       it 'returns a replay of the same key with its original time' do

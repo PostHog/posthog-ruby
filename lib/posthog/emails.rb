@@ -113,6 +113,7 @@ module PostHog
       \A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?
       (?:Z|([+-]\d{2}):?(\d{2}))\z
     /x
+    SEND_NOW_TOLERANCE_SECONDS = 60
     SCHEDULED_AT_NEEDED = 'scheduled_at must be a Time, or an ISO 8601 time with an offset, such as ' \
                           '2026-12-01T09:00:00Z or 2026-12-01T10:00:00+01:00, so no email was sent.'
     JSON_CONTENT = { 'Content-Type' => 'application/json' }.freeze
@@ -131,7 +132,8 @@ module PostHog
     ].freeze
     private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :SCHEDULING_APP_HOSTS, :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN,
-                     :TEMPLATE_KEY_PATTERN, :HEADER_TOKEN_PATTERN, :SCHEDULED_AT_PATTERN, :SCHEDULED_AT_NEEDED,
+                     :TEMPLATE_KEY_PATTERN, :HEADER_TOKEN_PATTERN, :SCHEDULED_AT_PATTERN, :SEND_NOW_TOLERANCE_SECONDS,
+                     :SCHEDULED_AT_NEEDED,
                      :JSON_CONTENT, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY, :CODE_FORM_WHY,
                      :TEMPLATE_FIELDS, :CODE_FIELDS, :NETWORK_ERRORS
 
@@ -222,8 +224,9 @@ module PostHog
     #   With +scheduled_at+, {EmailError#code} is `scheduling_requires_cloud` before any request when the client's
     #   app host isn't PostHog Cloud US or EU, such as a self-hosted PostHog, a reverse proxy or a custom domain, which
     #   could send the email at once. It is `schedule_not_confirmed` when PostHog accepted the email without confirming
-    #   its time: the email exists and may go out at another time, and {EmailError#message_id} names it. Read it with
-    #   {#get} before you send again.
+    #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
+    #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
+    #   send again.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -700,15 +703,16 @@ module PostHog
 
       result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
                               scheduled_at: nil)
-      return [result, nil] if due.nil? || time_had_passed?(fields)
+      return [result, nil] if due.nil? || time_had_passed?(fields, due)
       return [result, schedule_not_confirmed(id, status)] unless confirms?(fields, due)
 
       result.scheduled_at = due
       [result, nil]
     end
 
-    def time_had_passed?(fields)
-      fields['status'] == 'queued' && fields.key?('scheduled_at') && fields['scheduled_at'].nil?
+    def time_had_passed?(fields, due)
+      fields['status'] == 'queued' && fields.key?('scheduled_at') && fields['scheduled_at'].nil? &&
+        due <= Time.now + SEND_NOW_TOLERANCE_SECONDS
     end
 
     def confirms?(fields, due)
