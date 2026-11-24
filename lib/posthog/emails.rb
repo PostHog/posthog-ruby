@@ -273,7 +273,14 @@ module PostHog
       ensure
         # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
         # keeps schedule_not_confirmed as its cause.
-        result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+        begin
+          result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email.
+          raise e, cause: unconfirmed if unconfirmed
+
+          raise
+        end
       end
 
       result

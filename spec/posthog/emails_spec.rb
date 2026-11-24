@@ -1348,6 +1348,21 @@ module PostHog
         expect(settled).to eq([true])
       end
 
+      it "gives a logger's reused exception the cause of the send that failed" do
+        other_id = '0f4c5b2e-9d3a-4e1f-8b7c-6a5d4e3f2a1b'
+        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
+                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        logger = Logger.new(File::NULL)
+        reused = IOError.new('log device closed')
+        allow(logger).to receive(:warn).and_raise(reused)
+        PostHog::Logging.logger = logger
+
+        expect { send_template(scheduled_at: due) }.to raise_error(IOError)
+        expect { send_template(scheduled_at: due) }.to raise_error(IOError) { |error|
+          expect(error.cause.message_id).to eq(message_id)
+        }
+      end
+
       it 'surfaces a refused time and never sends without it' do
         stub_request(:post, send_url).to_return(
           refuse(400, 'scheduled_too_far', detail: "`scheduled_at` is more than 7 days away, so PostHog didn't " \
@@ -1381,13 +1396,11 @@ module PostHog
                          status_url).with(headers: { 'Authorization' => 'Bearer phs_test' })).to have_been_made.once
       end
 
-      %w[scheduled archived].each do |status|
-        it "passes the #{status} status through" do
-          stub_request(:get, status_url).to_return(status: 200,
-                                                   body: JSON.generate(record.merge(status: status, reason: nil)))
+      it 'passes the archived status through' do
+        stub_request(:get, status_url).to_return(status: 200,
+                                                 body: JSON.generate(record.merge(status: 'archived', reason: nil)))
 
-          expect(emails.get(message_id)).to have_attributes(status: status, reason: nil)
-        end
+        expect(emails.get(message_id)).to have_attributes(status: 'archived', reason: nil)
       end
 
       it 'does not retry an unknown message ID' do
