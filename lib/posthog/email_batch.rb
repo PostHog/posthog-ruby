@@ -13,6 +13,7 @@ module PostHog
     MAX_RECIPIENTS = 100
     MAX_BODY_BYTES = 4 * 1024 * 1024
     UNCONFIRMED_CODES = %w[idempotency_key_in_flight delivery_unavailable api_error].freeze
+    RESEND_FIX = 'Send it again with the same idempotency_key within 24 hours, so it goes out once.'
     UNAVAILABLE_FIX = "Until batch sends are on for the project, send each email the batch didn't queue with " \
                       "emails.send and its recipient's idempotency_key."
     NOT_FOUND = {
@@ -23,7 +24,7 @@ module PostHog
                'idempotency_key.'
     }.freeze
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil, later_error: nil }.freeze
-    private_constant :UNCONFIRMED_CODES, :UNAVAILABLE_FIX, :NOT_FOUND, :RESULT_DEFAULTS
+    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :UNAVAILABLE_FIX, :NOT_FOUND, :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
     # The recipients of one request. The body is built when the request goes out, so a large batch holds one at a
@@ -107,21 +108,6 @@ module PostHog
       error
     end
 
-    def lost_keys
-      @maybe_queued.sort.filter_map do |index|
-        [index, @members[index].idempotency_key] if @results[index].message_id.nil?
-      end
-    end
-
-    # A status read by key gives the email's ID, so the caller can read it with emails.get, but confirms nothing: an
-    # earlier email with the same key reads the same way. A failed status, such as a suppressed address, becomes the
-    # reason.
-    def found(index, status)
-      earlier = @results[index]
-      later = earlier.later_error || (failed_status(status) if status.status == 'failed')
-      set(index, 'unconfirmed', message_id: status.id, error: earlier.error, later_error: later)
-    end
-
     def result
       Emails::BatchResult.new(results: @results.dup.freeze, warnings: @warnings.dup.freeze)
     end
@@ -197,6 +183,7 @@ module PostHog
       answered['attr'] = recipients_field(answered['attr'], indices) if answered['attr'].is_a?(String)
       fields = status == 404 ? NOT_FOUND.merge(answered) : answered
       fields = fields.merge('fix' => UNAVAILABLE_FIX) if fields['code'] == 'batch_unavailable'
+      fields = fields.merge('fix' => RESEND_FIX) if fields['code'] == 'idempotency_key_in_flight' && !fields['fix']
       @reply_error.call(fields, status, retry_after)
     end
 
@@ -213,7 +200,7 @@ module PostHog
 
     def slot_error(error, message_id)
       unless error.is_a?(Hash)
-        return EmailError.new(code: 'api_error', message_id: message_id,
+        return EmailError.new(code: 'api_error', message_id: message_id, fix: RESEND_FIX,
                               message: 'PostHog answered without a readable result for this email, so it may still ' \
                                        'go out.')
       end
@@ -221,21 +208,15 @@ module PostHog
       code = text(error['code']) || 'api_error'
       status = error['status'].is_a?(Integer) ? error['status'] : nil
       # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
-      EmailError.new(code: code, status_code: status, message_id: (message_id if UNCONFIRMED_CODES.include?(code)),
+      unconfirmed = UNCONFIRMED_CODES.include?(code)
+      EmailError.new(code: code, status_code: status, message_id: (message_id if unconfirmed),
+                     fix: (RESEND_FIX if unconfirmed),
                      message: text(error['detail']) || "PostHog didn't queue this email: #{code}.")
     end
 
     def unconfirmed(message_id)
-      EmailError.new(code: 'delivery_unavailable', message_id: message_id,
-                     message: "PostHog didn't confirm this email, so it may still go out. Send it again with the " \
-                              'same idempotency_key within 24 hours, so it goes out once.')
-    end
-
-    def failed_status(status)
-      reason = text(status.reason)
-      EmailError.new(code: reason || 'failed',
-                     message: "PostHog's status of this email reads failed#{" (#{reason})" if reason}, so it may not " \
-                              'have gone out.')
+      EmailError.new(code: 'delivery_unavailable', message_id: message_id, fix: RESEND_FIX,
+                     message: "PostHog didn't confirm this email, so it may still go out.")
     end
 
     def recipient_too_large

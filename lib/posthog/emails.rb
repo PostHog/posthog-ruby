@@ -127,7 +127,7 @@ module PostHog
     #     `delivery_unavailable`, `idempotency_key_in_flight` or `api_error`.
     # @!attribute [r] later_error
     #   @return [EmailError, nil] For an `unconfirmed` email, what a retry in the same call answered about it, which
-    #     describes only that retry, or why a status the client read by its key reads `failed`.
+    #     describes only that retry.
     BatchEmailResult = Struct.new(:index, :to, :idempotency_key, :status, :message_id, :replayed, :error, :later_error,
                                   keyword_init: true)
 
@@ -143,7 +143,6 @@ module PostHog
     UPLOADS_PATH = '/api/messaging/attachments/uploads/'
     STATUS_PATH = '/api/messaging/emails/%<message_id>s/'
     BATCH_PATH = '/api/messaging/send/email_batch/'
-    STATUS_BY_KEY_PATH = '/api/messaging/emails/status/'
     # PostHog waits up to 30 seconds for its pipeline before it answers a batch. Connecting and writing keep the
     # client's timeout.
     BATCH_ATTEMPT_TIMEOUT_SECONDS = 45.0
@@ -184,7 +183,7 @@ module PostHog
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
     ].freeze
-    private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :BATCH_PATH, :STATUS_BY_KEY_PATH,
+    private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :BATCH_PATH,
                      :BATCH_ATTEMPT_TIMEOUT_SECONDS, :BATCH_RECIPIENT_FIELDS, :US_APP_HOST, :EU_APP_HOST,
                      :CLOUD_APP_HOSTS,
                      :SCHEDULING_APP_HOSTS, :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN,
@@ -359,9 +358,8 @@ module PostHog
     # waits at least 45 seconds for each answer. A batch takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
-    # queues an email twice. Retries follow {#send}'s. At the end of the batch, the client reads by its key each
-    # `unconfirmed` email that PostHog answered without a message ID, and adds the ID it finds, so you can read the
-    # email with {#get}. The email stays `unconfirmed`.
+    # queues an email twice. Retries follow {#send}'s. Send each `unconfirmed` email again with its
+    # +idempotency_key+ within 24 hours, so it goes out once.
     #
     # @param recipients [Array<Hash>] 1 or more recipients, each a Hash with:
     #   - +to+ [String] the recipient's email address;
@@ -369,9 +367,7 @@ module PostHog
     #   - +idempotency_key+ [String] optional: 1 to 255 visible ASCII characters, a different one for each recipient.
     #     Without it, the client makes one that covers its own retries but not a second call, so pass keys you store
     #     when a batch may be cut off and run again: a rerun within 24 hours replays the emails that went out instead
-    #     of sending them twice. A send and a batch recipient with the same key and the same email replay each other.
-    #     Never reuse a key for another email: after a lost answer, the client reads the email by its key, and an
-    #     earlier email with that key gives its message ID as this one's;
+    #     of sending them twice. A send and a batch recipient with the same key and the same email replay each other;
     #   - +template_data+ [Hash] optional, only with +template_id+: values for this recipient, merged over the
     #     batch's +template_data+. A top-level key set here replaces the same key there.
     # @param template_id [String] Template form: the UUID of a template made transactional in PostHog.
@@ -535,7 +531,6 @@ module PostHog
           break
         end
       end
-      read_lost(run, secret_key)
       run.failure(error) if error
     end
 
@@ -559,30 +554,6 @@ module PostHog
         end
         run.answer(chunk, reply)
       end
-    end
-
-    # For an email without a message ID, only a status read by key tells whether PostHog accepted it. It reads each
-    # key once and stops at the first error but a 404, so a failing PostHog doesn't hold the caller up.
-    def read_lost(run, secret_key)
-      run.lost_keys.each do |index, key|
-        break unless still_admitted?
-
-        status = status_by_key(key, secret_key)
-        break if status == :stop
-
-        run.found(index, status) if status
-      end
-    end
-
-    def status_by_key(key, secret_key)
-      uri = URI("#{@app_host}#{STATUS_BY_KEY_PATH}?#{URI.encode_www_form(idempotency_key: key)}")
-      parse_status_reply(request(Net::HTTP::Get.new(uri), uri, secret_key, {}))
-    rescue EmailError => e
-      # A caller's deadline raised as Timeout::Error itself arrives as a network error. Net::HTTP's own timeouts are
-      # subclasses of it.
-      raise e.cause if e.cause.instance_of?(Timeout::Error)
-
-      e.status_code == 404 ? nil : :stop
     end
 
     def still_admitted?
