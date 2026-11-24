@@ -144,6 +144,7 @@ jobs:
         run: |
           bundle lock
           BUNDLE_GEMFILE=gemfiles/otel.gemfile bundle lock
+          BUNDLE_GEMFILE=gemfiles/rails-latest/Gemfile bundle lock
 
       - name: Check for version bump changes
         id: check-changes
