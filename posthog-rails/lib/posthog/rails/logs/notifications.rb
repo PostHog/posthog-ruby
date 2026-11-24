@@ -113,12 +113,12 @@ module PostHog
             Thread.current[Appender::REENTRANCY_KEY] = nil
           end
 
-          def emit_in_context(component, payload, &block)
+          def emit_in_context(component, payload, &)
             job = payload[:job]
             if component == :active_job && PostHog::Rails.config.auto_instrument_active_job &&
                job.respond_to?(:posthog_logs_context, true)
               Internal::Context.with_context(
-                job.send(:posthog_logs_context), fresh: true, owner: PostHog.client, enrich_current_span: false, &block
+                job.send(:posthog_logs_context), fresh: true, owner: PostHog.client, enrich_current_span: false, &
               )
             else
               yield

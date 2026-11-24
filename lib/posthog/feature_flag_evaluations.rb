@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'set'
 require 'posthog/feature_flag_error'
 
 module PostHog

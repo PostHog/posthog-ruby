@@ -14,7 +14,7 @@ Gem::Specification.new do |spec|
   spec.email = 'engineering@posthog.com'
   spec.homepage = 'https://github.com/PostHog/posthog-ruby'
   spec.license = 'MIT'
-  spec.required_ruby_version = '>= 3.0'
+  spec.required_ruby_version = '>= 3.2'
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Rails dependency - support Rails 5.2+

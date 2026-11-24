@@ -51,9 +51,9 @@ module PostHog
         end
       end
 
-      def with_context(&block)
+      def with_context(&)
         Internal::Context.with_context(context_data(connection_env), fresh: true, owner: PostHog.client,
-                                                                     enrich_current_span: false, &block)
+                                                                     enrich_current_span: false, &)
       end
 
       def report(exception)
@@ -181,8 +181,8 @@ module PostHog
     module ActionCableContext
       private
 
-      def with_posthog_cable_context(operation, connection: self, channel: nil, data: nil, &block)
-        ActionCableCapture.new(connection, operation, channel: channel, data: data).call(&block)
+      def with_posthog_cable_context(operation, connection: self, channel: nil, data: nil, &)
+        ActionCableCapture.new(connection, operation, channel: channel, data: data).call(&)
       end
     end
 

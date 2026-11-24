@@ -12,7 +12,6 @@ require 'posthog/flag_definition_cache'
 require 'posthog/unresolved_flag_reason'
 require 'posthog/flag_evaluation_errors'
 require 'digest'
-require 'set'
 
 module PostHog
   # Polls and evaluates feature flag definitions for {PostHog::Client}.
