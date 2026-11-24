@@ -226,7 +226,8 @@ module PostHog
     #   could send the email at once. It is `schedule_not_confirmed` when PostHog accepted the email without confirming
     #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
     #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
-    #   send again.
+    #   send again. When the logger raises while it logs the reply's warnings, its error propagates with this one as
+    #   its +cause+.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -259,19 +260,19 @@ module PostHog
         check_schedulable if due
         upload(files, secret_key, max_retries || @max_retries) unless files.empty?
         uri = URI(@app_host + SEND_PATH)
+        # A slow reply must not move a time that was more than a minute ahead into the send-now window.
+        sent_at = Time.now
         with_retries(max_retries || @max_retries) do
-          parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due)
+          parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due, sent_at)
         end
       end
       begin
+        raise unconfirmed if unconfirmed
+      ensure
+        # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
+        # keeps schedule_not_confirmed as its cause.
         result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-      rescue StandardError => e
-        # Timeout.timeout with an error class raises that class here, and the caller's deadline must win.
-        raise if e.is_a?(Timeout::Error)
-
-        raise unconfirmed || e
       end
-      raise unconfirmed if unconfirmed
 
       result
     end
@@ -694,7 +695,7 @@ module PostHog
       nil
     end
 
-    def parse_send_reply((status, payload, retry_after), due)
+    def parse_send_reply((status, payload, retry_after), due, sent_at)
       fields = payload.is_a?(Hash) ? payload : {}
       raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
 
@@ -706,16 +707,16 @@ module PostHog
 
       result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
                               scheduled_at: nil)
-      return [result, nil] if due.nil? || time_had_passed?(fields, due)
+      return [result, nil] if due.nil? || time_had_passed?(fields, due, sent_at)
       return [result, schedule_not_confirmed(id, status)] unless confirms?(fields, due)
 
       result.scheduled_at = due
       [result, nil]
     end
 
-    def time_had_passed?(fields, due)
+    def time_had_passed?(fields, due, sent_at)
       fields['status'] == 'queued' && fields.key?('scheduled_at') && fields['scheduled_at'].nil? &&
-        due <= Time.now + SEND_NOW_TOLERANCE_SECONDS
+        due <= sent_at + SEND_NOW_TOLERANCE_SECONDS
     end
 
     def confirms?(fields, due)

@@ -1210,6 +1210,19 @@ module PostHog
           }
           expect(a_request(:post, send_url)).to have_been_made.once
         end
+
+        it 'measures the minute from when the send went out, not from when the answer came' do
+          clock = now
+          allow(Time).to receive(:now) { clock }
+          stub_request(:post, send_url).to_return do
+            clock = now + 2
+            accept(message_id, status: 'queued', scheduled_at: nil)
+          end
+
+          expect { send_template(scheduled_at: now + 61) }.to raise_error(EmailError) { |error|
+            expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
+          }
+        end
       end
 
       it 'returns a replay of the same key with its original time' do
@@ -1268,37 +1281,28 @@ module PostHog
         }
       end
 
-      it "lets the caller's deadline stop the send while it logs warnings" do
+      it "lets the caller's deadline stop the send while it logs warnings, whatever its class" do
         stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        deadline = Class.new(StandardError)
         logger = Logger.new(File::NULL)
-        logging = Queue.new
+        events = Queue.new
         allow(logger).to receive(:warn) do
-          logging << true
+          events << :logging
           sleep 5
         end
         PostHog::Logging.logger = logger
 
-        expect { Timeout.timeout(0.5) { send_template(scheduled_at: due) } }.to raise_error(Timeout::Error)
-        expect(logging.size).to eq(1)
-      end
-
-      it "lets a caller's deadline with an error class stop the send while it logs warnings" do
-        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        logger = Logger.new(File::NULL)
-        logging = Queue.new
-        allow(logger).to receive(:warn) do
-          logging << true
-          sleep 5
+        sender = Thread.new do
+          send_template(scheduled_at: due)
+        ensure
+          events << :finished
         end
-        PostHog::Logging.logger = logger
-
-        sender = Thread.new { send_template(scheduled_at: due) }
         sender.report_on_exception = false
-        logging.pop
-        # Timeout.timeout(seconds, Timeout::Error) delivers its deadline the same way.
-        sender.raise(Timeout::Error, 'execution expired')
+        expect(events.pop).to eq(:logging)
+        # Timeout.timeout(seconds, deadline) delivers its deadline the same way.
+        sender.raise(deadline, 'execution expired')
 
-        expect { sender.value }.to raise_error(Timeout::Error, 'execution expired')
+        expect { sender.value }.to raise_error(deadline, 'execution expired')
       end
 
       it 'lets an interrupt while it logs warnings stop the send' do
@@ -1310,7 +1314,7 @@ module PostHog
         expect { send_template(scheduled_at: due) }.to raise_error(Interrupt)
       end
 
-      it 'logs warnings once the send settles, and keeps schedule_not_confirmed when the logger fails' do
+      it "logs warnings once the send settles, and keeps schedule_not_confirmed as a failing logger's cause" do
         stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
         logger = Logger.new(File::NULL)
         settled = []
@@ -1320,8 +1324,8 @@ module PostHog
         end
         PostHog::Logging.logger = logger
 
-        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
-          expect([error.code, error.message_id]).to eq(['schedule_not_confirmed', message_id])
+        expect { send_template(scheduled_at: due) }.to raise_error(IOError, 'log device closed') { |error|
+          expect([error.cause.code, error.cause.message_id]).to eq(['schedule_not_confirmed', message_id])
         }
         expect(settled).to eq([true])
       end
