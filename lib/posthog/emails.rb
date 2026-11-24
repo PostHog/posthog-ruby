@@ -276,10 +276,11 @@ module PostHog
         begin
           result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
         rescue Exception => e # rubocop:disable Lint/RescueException
-          # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email.
-          raise e, cause: unconfirmed if unconfirmed
+          raise if unconfirmed.nil? || e.cause.equal?(unconfirmed)
 
-          raise
+          # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email. A
+          # copy names this one and leaves the object an earlier caller holds alone.
+          raise e.dup, cause: unconfirmed
         end
       end
 
