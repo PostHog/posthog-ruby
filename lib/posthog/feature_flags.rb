@@ -789,6 +789,7 @@ module PostHog
         # An unsupported operator or malformed filter stays inconclusive, so it still falls back to the server.
         assert_filter_supported(property)
         operator = property[:operator] || property['operator'] || 'exact'
+        assert_condition_value_present(property, operator)
         return KnownAbsentPropertyKeys::MATCHING_OPERATORS.include?(operator)
       end
 
@@ -800,6 +801,17 @@ module PostHog
         raise
       end
     end
+
+    # An omitted or JSON null condition value leaves a value-requiring operator inconclusive, even for a
+    # known-absent key, because is_not would otherwise match.
+    def self.assert_condition_value_present(property, operator)
+      return if %w[is_set is_not_set].include?(operator)
+      return unless (property.key?(:value) ? property[:value] : property['value']).nil?
+
+      raise InconclusiveMatchError.new("Missing condition value for operator #{operator}",
+                                       reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+    end
+    private_class_method :assert_condition_value_present
 
     def self.match_property_value(property, property_values, property_matching_version)
       key = (property[:key] || property['key']).to_sym

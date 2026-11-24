@@ -216,6 +216,68 @@ module PostHog
         end
       end
 
+      [
+        ['is_not omitted', { operator: 'is_not' }],
+        ['is_not null', { operator: 'is_not', value: nil }],
+        ['exact null', { operator: 'exact', value: nil }],
+        ['gt null', { operator: 'gt', value: nil }]
+      ].each do |name, filter|
+        it "stays unsupported for #{name} condition value on a listed key" do
+          property = { key: 'plan', type: 'person' }.merge(filter)
+          expect do
+            FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])
+          end.to raise_error(InconclusiveMatchError) { |e|
+            expect(e.reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+          }
+        end
+      end
+
+      it 'stays unsupported for a JSON null condition value with a String-keyed filter' do
+        property = JSON.parse('{"key": "plan", "operator": "is_not", "value": null}')
+        expect do
+          FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])
+        end.to raise_error(InconclusiveMatchError) { |e|
+          expect(e.reason).to eq(UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+        }
+      end
+
+      { 'is_not_set' => true, 'is_set' => false }.each do |operator, expected|
+        it "still resolves #{operator} with a null condition value on a listed key" do
+          property = { key: 'plan', operator: operator, value: nil }
+          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])).to be(expected)
+        end
+      end
+
+      [
+        ['omitted', { key: 'plan', operator: 'is_not', type: 'person' }],
+        ['null', { key: 'plan', operator: 'is_not', type: 'person', value: nil }]
+      ].each do |name, property|
+        it "leave an #{name} is_not condition value unresolved in local-only mode" do
+          c = local_client(flag('no-value', property))
+
+          snapshot = c.evaluate_flags('user-1', flag_keys: ['no-value'], only_evaluate_locally: true,
+                                                person_property_keys_known_absent: ['plan'])
+
+          expect(snapshot.get_flag('no-value')).to be_nil
+          expect(snapshot.unresolved_flags).to eq('no-value' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+          expect(WebMock).not_to have_requested(:post, flags_endpoint)
+        end
+
+        it "fall back to /flags for an #{name} is_not condition value" do
+          c = local_client(flag('no-value', property))
+          stub_request(:post, flags_endpoint).to_return(
+            status: 200,
+            body: { flags: { 'no-value' => { key: 'no-value', enabled: false, variant: nil,
+                                             metadata: { id: 1 } } } }.to_json
+          )
+
+          snapshot = c.evaluate_flags('user-1', flag_keys: ['no-value'], person_property_keys_known_absent: ['plan'])
+
+          expect(snapshot.get_flag('no-value')).to be(false)
+          expect(flags_request_body['person_property_keys_known_absent']).to eq(['plan'])
+        end
+      end
+
       it 'fall back to /flags with the listed keys' do
         c = local_client(flag('multi', person('plan', 'not_icontains_multi', ['pro'])))
         stub_request(:post, flags_endpoint).to_return(
