@@ -51,10 +51,17 @@ module PostHog
       @chunks = split(JSON.generate(shared.merge(recipients: [])))
     end
 
-    def lost(chunk, error = nil)
+    # A refusal that may have queued the chunk is its recipients' error, or the later one of a recipient an earlier
+    # attempt already left unconfirmed.
+    def lost(chunk, error = nil, refusal = error)
       chunk.indices.each do |index|
-        # The first answer that left an email unconfirmed stays its error, and stop adds the last refusal.
-        next if @maybe_queued.include?(index)
+        if @maybe_queued.include?(index)
+          next unless refusal
+
+          earlier = @results[index]
+          set(index, 'unconfirmed', message_id: earlier.message_id, error: earlier.error, later_error: refusal)
+          next
+        end
 
         @maybe_queued << index
         message_id = @results[index]&.message_id
@@ -70,7 +77,7 @@ module PostHog
         if error.code == 'idempotency_key_in_flight'
           lost(chunk, error)
         elsif status >= 500
-          lost(chunk)
+          lost(chunk, nil, error)
         end
         raise error
       end

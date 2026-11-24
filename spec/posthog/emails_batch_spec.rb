@@ -232,7 +232,7 @@ module PostHog
         }
       end
 
-      it "gives a logger's reused exception the failed batch's error as its cause, and leaves the earlier one alone" do
+      it "raises the failed batch's error with a logger's reused exception as its cause" do
         recipients = Array.new(101) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
         slots = Array.new(100) { |index| queued("msg_#{index}") }
         first = answer(*slots, warnings: [{ code: 'unverified_link' }])
@@ -244,11 +244,10 @@ module PostHog
         PostHog::Logging.logger = logger
 
         expect { batch_template(recipients) }.to raise_error(reused)
-        earlier = reused.cause
-        expect { batch_template(recipients) }.to raise_error(IOError, 'log device closed') { |error|
-          expect(error.cause.code).to eq('not_found')
+        expect { batch_template(recipients) }.to raise_error(EmailBatchError) { |error|
+          expect([error.code, error.cause]).to eq(['not_found', reused])
         }
-        expect([reused.cause, earlier.code]).to eq([earlier, 'batch_unavailable'])
+        expect(reused.cause.code).to eq('batch_unavailable')
       end
 
       context 'when a request fails as a whole' do
@@ -299,17 +298,16 @@ module PostHog
           }
         end
 
-        [
-          [%w[delivery_unavailable idempotency_key_in_flight], [503, 409]],
-          [['idempotency_key_in_flight', nil], [409, 503]]
-        ].each do |(error_code, later_code), (first, second)|
-          it "keeps the first reason it can't confirm a recipient when a #{first} retry answers #{second}" do
-            stub_request(:post, batch_url).to_return(
-              refuse(first, first == 409 ? 'idempotency_key_in_flight' : 'delivery_unavailable'),
-              refuse(second, second == 409 ? 'idempotency_key_in_flight' : 'delivery_unavailable')
-            )
+        {
+          [503, 409] => %w[delivery_unavailable idempotency_key_in_flight],
+          [409, 503] => %w[idempotency_key_in_flight delivery_unavailable],
+          [409, 429, 503] => %w[idempotency_key_in_flight delivery_unavailable]
+        }.each do |statuses, (error_code, later_code)|
+          it "keeps the first reason it can't confirm a recipient and the last refusal after #{statuses.join(', ')}" do
+            codes = { 409 => 'idempotency_key_in_flight', 429 => 'rate_limited', 503 => 'delivery_unavailable' }
+            stub_request(:post, batch_url).to_return(*statuses.map { |status| refuse(status, codes[status]) })
 
-            expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+            expect { batch_template([ada], max_retries: statuses.size - 1) }.to raise_error(EmailBatchError) { |error|
               result = error.results.first
               expect([result.status, result.error.code, result.later_error&.code])
                 .to eq(['unconfirmed', error_code, later_code])

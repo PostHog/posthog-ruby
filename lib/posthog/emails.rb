@@ -284,7 +284,8 @@ module PostHog
     #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
     #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
     #   send again. When the logger raises while it logs the reply's warnings, its error propagates with this one as
-    #   its +cause+.
+    #   its +cause+. An exception object the logger raised before already has a cause, so this error propagates
+    #   instead, with the logger's as its +cause+.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -367,7 +368,9 @@ module PostHog
     #   {EmailError#code} is `batch_unavailable` when the project can't send batches yet, and `not_found` when the
     #   template doesn't exist or batch sends are off: send each email the batch didn't queue with {#send} and its
     #   recipient's +idempotency_key+. It is `client_closed` when the client shut down during the batch. When the
-    #   logger raises while it logs the warnings, its error propagates with this one as its +cause+.
+    #   logger raises while it logs the warnings, its error propagates with this one as its +cause+. An exception
+    #   object the logger raised before already has a cause, so this error propagates instead, with the logger's as
+    #   its +cause+.
     # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
     # @raise [ArgumentError] An argument has the wrong type or format, such as two recipients with the same
     #   +idempotency_key+.
@@ -542,21 +545,23 @@ module PostHog
     def log_warnings(warnings, failure)
       warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
     rescue Exception => e # rubocop:disable Lint/RescueException
-      raise if failure.nil? || e.cause.equal?(failure)
-
-      # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier call. A copy
-      # names this one and leaves the object an earlier caller holds alone. One that can't be copied becomes the
-      # cause of this call's error instead, but a caller's deadline that arrives during the copy propagates.
-      copy = begin
-        e.dup
-      rescue StandardError => copy_error
-        raise if copy_error.is_a?(Timeout::Error)
-
-        nil
-      end
-      raise copy, cause: failure if copy
+      # An error raised while the call's error propagates has it in its causes, and a caller's deadline that
+      # Thread#raise delivers has none. Ruby keeps the first cause of an exception object a logger raises again, which
+      # names an earlier call, and copying the object runs its own code, so the call's error propagates instead, with
+      # the logger's as its cause.
+      raise if failure.nil? || e.cause.nil? || caused_by?(e, failure)
 
       raise failure, cause: e
+    end
+
+    def caused_by?(error, cause)
+      seen = {}.compare_by_identity
+      while (error = error.cause) && !seen.key?(error)
+        return true if error.equal?(cause)
+
+        seen[error] = true
+      end
+      false
     end
 
     def still_admitted?
