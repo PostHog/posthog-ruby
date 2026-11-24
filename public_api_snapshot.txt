@@ -72,6 +72,7 @@ instance_method PostHog::EmailError#message_id()
 instance_method PostHog::EmailError#name()
 instance_method PostHog::EmailError#retry_after()
 instance_method PostHog::EmailError#status_code()
+instance_method PostHog::EmailError#warnings()
 instance_method PostHog::EmailError#why()
 class PostHog::Emails
 instance_method PostHog::Emails#get(message_id)

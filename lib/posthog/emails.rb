@@ -228,9 +228,7 @@ module PostHog
     #   could send the email at once. It is `schedule_not_confirmed` when PostHog accepted the email without confirming
     #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
     #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
-    #   send again. When the logger raises while it logs the reply's warnings, its error propagates with this one as
-    #   its +cause+. An exception object the logger raised before already has a cause, so this error propagates
-    #   instead, with the logger's as its +cause+.
+    #   send again. The reply's warnings are on {EmailError#warnings}, and the client logs none of them.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -269,23 +267,9 @@ module PostHog
           parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due, sent_at)
         end
       end
-      begin
-        raise unconfirmed if unconfirmed
-      ensure
-        # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
-        # keeps schedule_not_confirmed as its cause.
-        begin
-          result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-        rescue Exception => e # rubocop:disable Lint/RescueException
-          # An error raised while this send's error propagates has it in its causes, and a caller's deadline that
-          # Thread#raise delivers has none. Ruby keeps the first cause of an exception object a logger raises again,
-          # which names an earlier email, and copying the object runs its own code, so this send's error propagates
-          # instead, with the logger's as its cause.
-          raise if unconfirmed.nil? || e.cause.nil? || caused_by?(e, unconfirmed)
+      raise unconfirmed if unconfirmed
 
-          raise unconfirmed, cause: e
-        end
-      end
+      result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
 
       result
     end
@@ -327,16 +311,6 @@ module PostHog
     end
 
     private
-
-    def caused_by?(error, cause)
-      seen = {}.compare_by_identity
-      while (error = error.cause) && !seen.key?(error)
-        return true if error.equal?(cause)
-
-        seen[error] = true
-      end
-      false
-    end
 
     def check_options(timeout, max_retries, migrated_from)
       raise ArgumentError, 'email_request_timeout_seconds must be a positive number.' unless positive?(timeout)
@@ -731,7 +705,7 @@ module PostHog
       result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
                               scheduled_at: nil)
       return [result, nil] if due.nil? || time_had_passed?(fields, due, sent_at)
-      return [result, schedule_not_confirmed(id, status)] unless confirms?(fields, due)
+      return [result, schedule_not_confirmed(id, status, result.warnings)] unless confirms?(fields, due)
 
       result.scheduled_at = due
       [result, nil]
@@ -747,9 +721,10 @@ module PostHog
       fields['status'] == 'scheduled' && answered.is_a?(String) && offset_time(answered) == due
     end
 
-    def schedule_not_confirmed(message_id, status)
+    def schedule_not_confirmed(message_id, status, warnings)
       EmailError.new(
         code: 'schedule_not_confirmed', status_code: status, field: 'scheduled_at', message_id: message_id,
+        warnings: warnings,
         message: "PostHog accepted email #{message_id} without confirming its scheduled_at, so it may go out at " \
                  'another time.',
         fix: "Read what happened to the email with emails.get('#{message_id}') before you send it again: a send " \

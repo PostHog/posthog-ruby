@@ -28,10 +28,13 @@ module PostHog
     # @return [String, nil] The message ID of an email PostHog accepted although the call failed, such as an email
     #   whose `schedule_not_confirmed` means it may go out at another time. Read its status with {Emails#get}.
     attr_reader :message_id
+    # @return [Array<Emails::Warning>] PostHog's warnings about an email it accepted although the call failed. The
+    #   client logs warnings only for a call that succeeds.
+    attr_reader :warnings
 
     # @api private
     def initialize(code:, message:, status_code: nil, why: nil, fix: nil, docs_url: nil, field: nil, retry_after: nil,
-                   message_id: nil)
+                   message_id: nil, warnings: [])
       super(message)
       @name = self.class.name_for(status_code, code)
       @code = code
@@ -42,6 +45,7 @@ module PostHog
       @field = field
       @retry_after = retry_after
       @message_id = message_id
+      @warnings = warnings.dup.freeze
     end
 
     SDK_ERROR_NAMES = {
