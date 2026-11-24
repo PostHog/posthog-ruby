@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'set'
-
 module PostHog
   # Person and group property keys the caller knows are absent for one flag evaluation.
   #
