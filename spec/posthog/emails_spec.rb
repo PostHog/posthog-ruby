@@ -1350,29 +1350,10 @@ module PostHog
 
       let(:other_id) { '0f4c5b2e-9d3a-4e1f-8b7c-6a5d4e3f2a1b' }
 
-      it "gives a logger's reused exception the cause of the send that failed, and leaves the earlier one alone" do
+      it "raises this send's error with a logger's reused exception as its cause, and never copies that exception" do
         stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
                                                 accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        logger = Logger.new(File::NULL)
-        reused = IOError.new('log device closed')
-        allow(logger).to receive(:warn).and_raise(reused)
-        PostHog::Logging.logger = logger
-
-        first = begin
-          send_template(scheduled_at: due)
-        rescue IOError => e
-          e
-        end
-        expect { send_template(scheduled_at: due) }.to raise_error(IOError) { |error|
-          expect(error.cause.message_id).to eq(message_id)
-        }
-        expect(first.cause.message_id).to eq(other_id)
-      end
-
-      it "raises this send's error when the logger's reused exception can't be copied" do
-        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
-                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        uncopyable = Class.new(IOError) { def initialize_copy(_other) = raise(TypeError, "can't copy") }
+        uncopyable = Class.new(IOError) { def initialize_copy(_other) = raise(Timeout::Error, 'deadline') }
         reused = uncopyable.new('log device closed')
         logger = Logger.new(File::NULL)
         allow(logger).to receive(:warn).and_raise(reused)
@@ -1382,19 +1363,23 @@ module PostHog
         expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
           expect([error.code, error.message_id, error.cause]).to eq(['schedule_not_confirmed', message_id, reused])
         }
+        expect(reused.cause.message_id).to eq(other_id)
       end
 
-      it "lets a caller's deadline through when it arrives while the client copies the logger's exception" do
-        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
-                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        interrupted = Class.new(IOError) { def initialize_copy(_other) = raise(Timeout::Error, 'deadline') }
-        reused = interrupted.new('log device closed')
+      it "lets a logger's own error through when the logger raises it while handling another" do
+        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        log_error = Class.new(StandardError)
         logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(reused)
+        allow(logger).to receive(:warn) do
+          raise IOError, 'log device closed'
+        rescue IOError
+          raise log_error, 'could not log'
+        end
         PostHog::Logging.logger = logger
 
-        expect { send_template(scheduled_at: due) }.to raise_error(reused)
-        expect { send_template(scheduled_at: due) }.to raise_error(Timeout::Error, 'deadline')
+        expect { send_template(scheduled_at: due) }.to raise_error(log_error) { |error|
+          expect(error.cause.cause.message_id).to eq(message_id)
+        }
       end
 
       it 'names the send that failed when the logger raises its exception again while the caller handles it' do
@@ -1409,7 +1394,7 @@ module PostHog
         rescue IOError
           send_template(scheduled_at: due)
         end
-        expect(&send_again).to raise_error(IOError) { |error| expect(error.cause.message_id).to eq(message_id) }
+        expect(&send_again).to raise_error(EmailError) { |error| expect(error.message_id).to eq(message_id) }
       end
 
       it 'surfaces a refused time and never sends without it' do

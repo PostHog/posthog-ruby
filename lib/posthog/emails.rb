@@ -229,7 +229,8 @@ module PostHog
     #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
     #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
     #   send again. When the logger raises while it logs the reply's warnings, its error propagates with this one as
-    #   its +cause+.
+    #   its +cause+. An exception object the logger raised before already has a cause, so this error propagates
+    #   instead, with the logger's as its +cause+.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -276,20 +277,11 @@ module PostHog
         begin
           result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
         rescue Exception => e # rubocop:disable Lint/RescueException
-          raise if unconfirmed.nil? || e.cause.equal?(unconfirmed)
-
-          # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email. A
-          # copy names this one and leaves the object an earlier caller holds alone. One that can't be copied
-          # becomes the cause of this send's error instead, but a caller's deadline that arrives during the copy
-          # propagates.
-          copy = begin
-            e.dup
-          rescue StandardError => copy_error
-            raise if copy_error.is_a?(Timeout::Error)
-
-            nil
-          end
-          raise copy, cause: unconfirmed if copy
+          # An error raised while this send's error propagates has it in its causes, and a caller's deadline that
+          # Thread#raise delivers has none. Ruby keeps the first cause of an exception object a logger raises again,
+          # which names an earlier email, and copying the object runs its own code, so this send's error propagates
+          # instead, with the logger's as its cause.
+          raise if unconfirmed.nil? || e.cause.nil? || caused_by?(e, unconfirmed)
 
           raise unconfirmed, cause: e
         end
@@ -335,6 +327,16 @@ module PostHog
     end
 
     private
+
+    def caused_by?(error, cause)
+      seen = {}.compare_by_identity
+      while (error = error.cause) && !seen.key?(error)
+        return true if error.equal?(cause)
+
+        seen[error] = true
+      end
+      false
+    end
 
     def check_options(timeout, max_retries, migrated_from)
       raise ArgumentError, 'email_request_timeout_seconds must be a positive number.' unless positive?(timeout)
