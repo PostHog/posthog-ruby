@@ -37,6 +37,10 @@ module PostHog
     NUMERIC_OPERATORS = %w[gt gte lt lte].freeze
     DATE_OPERATORS = %w[is_date_before is_date_after].freeze
     SEMVER_COMPARISON_OPERATORS = %w[semver_eq semver_neq semver_gt semver_gte semver_lt semver_lte].freeze
+    # Every property-filter operator this SDK evaluates locally.
+    LOCAL_OPERATORS = (%w[exact is_not is_set is_not_set icontains not_icontains starts_with not_starts_with
+                          ends_with not_ends_with semver_tilde semver_caret semver_wildcard] +
+                       REGEX_OPERATORS + NUMERIC_OPERATORS + DATE_OPERATORS + SEMVER_COMPARISON_OPERATORS).freeze
 
     # @param polling_interval [Integer, nil] Seconds between local feature flag definition polls.
     #   Defaults to {Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS}.
@@ -786,9 +790,10 @@ module PostHog
       end
 
       if known_absent_keys&.include?((property[:key] || property['key']).to_s)
-        # An unsupported operator or malformed filter stays inconclusive, so it still falls back to the server.
-        assert_filter_supported(property)
+        # Like the flags service, a listed key resolves without parsing the condition value. An operator
+        # this SDK does not implement stays inconclusive, so it still falls back to the server.
         operator = property[:operator] || property['operator'] || 'exact'
+        assert_operator_supported(operator)
         assert_condition_value_present(property, operator)
         return KnownAbsentPropertyKeys::MATCHING_OPERATORS.include?(operator)
       end
@@ -903,15 +908,20 @@ module PostHog
     end
     private_class_method :match_property_value
 
+    def self.assert_operator_supported(operator)
+      return if LOCAL_OPERATORS.include?(operator)
+
+      raise InconclusiveMatchError.new("Unknown operator: #{operator}",
+                                       reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+    end
+
     # Raises an unsupported_definition error when local evaluation cannot use the filter, whatever
     # the call passes: an unknown operator, or a filter value that the operator cannot parse.
     def self.assert_filter_supported(property)
       value = property.key?(:value) ? property[:value] : property['value']
       operator = property[:operator] || property['operator'] || 'exact'
+      assert_operator_supported(operator)
       case operator
-      when 'exact', 'is_not', 'is_set', 'is_not_set', 'icontains', 'not_icontains', 'starts_with',
-           'not_starts_with', 'ends_with', 'not_ends_with'
-        nil
       when *REGEX_OPERATORS
         # An empty input is the most portable one, so this raises only for a pattern that needs the
         # server whatever the value. Compile without matching, so a server-supplied pattern never runs
@@ -930,9 +940,6 @@ module PostHog
         semver_caret_bounds(value)
       when 'semver_wildcard'
         semver_wildcard_bounds(value)
-      else
-        raise InconclusiveMatchError.new("Unknown operator: #{operator}",
-                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
     end
 
@@ -1418,7 +1425,7 @@ module PostHog
     end
 
     private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
-                         :property_group_items_match?, :assert_filter_supported,
+                         :property_group_items_match?, :assert_filter_supported, :assert_operator_supported,
                          :unsupported_property?, :unsupported_property_group?, :unsupported_filter?
 
     # Publish/capture all matching state together so a poll cannot switch semantics

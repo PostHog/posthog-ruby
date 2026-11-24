@@ -202,9 +202,9 @@ module PostHog
       [
         ['not_icontains_multi', ['pro']],
         ['not_between', [1, 2]],
-        ['future_operator', 'pro'],
-        %w[gt not-a-number],
-        ['not_regex', '(?=pro)']
+        ['icontains_multi', ['pro']],
+        ['between', [1, 2]],
+        %w[future_operator pro]
       ].each do |operator, value|
         it "stays unsupported for #{operator} #{value.inspect} on a listed key" do
           property = { key: 'plan', operator: operator, value: value }
@@ -289,6 +289,80 @@ module PostHog
 
         expect(snapshot.get_flag('multi')).to be(true)
         expect(flags_request_body['person_property_keys_known_absent']).to eq(['plan'])
+      end
+    end
+
+    describe 'condition values a listed key does not read' do
+      unusable_values = {
+        ['not_regex', '['] => true,
+        ['regex', '['] => false,
+        ['not_regex', '(?=pro)'] => true,
+        ['regex', '(?=pro)'] => false,
+        ['not_regex', '\p{L}'] => true,
+        ['regex', '\p{L}'] => false,
+        %w[gt not-a-number] => false,
+        %w[gte not-a-number] => false,
+        %w[lt not-a-number] => false,
+        %w[lte not-a-number] => false,
+        %w[semver_eq not-a-version] => false,
+        %w[semver_neq not-a-version] => false,
+        %w[semver_gt not-a-version] => false,
+        %w[semver_gte not-a-version] => false,
+        %w[semver_lt not-a-version] => false,
+        %w[semver_lte not-a-version] => false,
+        %w[semver_tilde not-a-version] => false,
+        %w[semver_caret not-a-version] => false,
+        %w[semver_wildcard not-a-version] => false,
+        %w[is_date_before not-a-date] => false,
+        %w[is_date_after not-a-date] => false
+      }
+
+      unusable_values.each do |(operator, value), expected|
+        it "resolves #{operator} #{value.inspect} to #{expected} on a listed key" do
+          property = { key: 'plan', operator: operator, value: value }
+          expect(FeatureFlagsPoller.match_property(property, {}, known_absent_keys: Set['plan'])).to be(expected)
+        end
+      end
+
+      def unusable_value_flags(values)
+        values.each_with_index.map do |((operator, value), _expected), index|
+          flag("unusable-#{index}", person('plan', operator, value))
+        end
+      end
+
+      def expected_unusable_values(values)
+        values.each_with_index.to_h { |(_filter, expected), index| ["unusable-#{index}", expected] }
+      end
+
+      it 'resolves the flags in local-only mode' do
+        c = local_client(*unusable_value_flags(unusable_values))
+        expected = expected_unusable_values(unusable_values)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: expected.keys, only_evaluate_locally: true,
+                                              person_property_keys_known_absent: ['plan'])
+
+        expect(expected.keys.to_h { |key| [key, snapshot.get_flag(key)] }).to eq(expected)
+        expect(snapshot.unresolved_flags).to eq({})
+      end
+
+      it 'resolves the flags with the default getter without a remote request' do
+        c = local_client(*unusable_value_flags(unusable_values))
+        expected = expected_unusable_values(unusable_values)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: expected.keys, person_property_keys_known_absent: ['plan'])
+
+        expect(expected.keys.to_h { |key| [key, snapshot.get_flag(key)] }).to eq(expected)
+        expect(WebMock).not_to have_requested(:post, flags_endpoint)
+      end
+
+      it 'still reads the condition value for a key that is not listed' do
+        c = local_client(flag('bad-number', person('plan', 'gt', 'not-a-number')))
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['bad-number'], only_evaluate_locally: true,
+                                              person_properties: { plan: 5 },
+                                              person_property_keys_known_absent: ['region'])
+
+        expect(snapshot.unresolved_flags).to eq('bad-number' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
     end
 
