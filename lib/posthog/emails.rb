@@ -280,10 +280,13 @@ module PostHog
 
           # Ruby keeps the first cause of an exception object a logger raises again, which names an earlier email. A
           # copy names this one and leaves the object an earlier caller holds alone. One that can't be copied
-          # becomes the cause of this send's error instead.
+          # becomes the cause of this send's error instead, but a caller's deadline that arrives during the copy
+          # propagates.
           copy = begin
             e.dup
-          rescue Exception # rubocop:disable Lint/RescueException
+          rescue StandardError => copy_error
+            raise if copy_error.is_a?(Timeout::Error)
+
             nil
           end
           raise copy, cause: unconfirmed if copy
