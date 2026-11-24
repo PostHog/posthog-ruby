@@ -114,9 +114,9 @@ module PostHog
     #   @return [String] One of:
     #     - `queued`: PostHog accepted the email. Read it with {Emails#get} to see whether it went out.
     #     - `failed`: PostHog didn't queue the email, and {#error} says why, such as a suppressed address.
-    #     - `unconfirmed`: the client can't tell whether PostHog queued the email, such as after a lost answer. It may
-    #       still go out. Send it again with the same +idempotency_key+ within 24 hours of the first request that
-    #       used it, so it goes out once.
+    #     - `unconfirmed`: the client can't tell whether PostHog queued the email, such as after a lost answer, also
+    #       when a retry's answer refused it. It may still go out. Send it again with the same +idempotency_key+
+    #       within 24 hours of the first request that used it, so it goes out once.
     # @!attribute [r] message_id
     #   @return [String, nil] The email's message ID, when PostHog named it.
     # @!attribute [r] replayed
@@ -332,8 +332,10 @@ module PostHog
     #
     # Pass the template form, with +template_id+, or the code form, with +template_key+, as {#send} takes them. The
     # client sends at most 100 recipients in one request and waits at least 45 seconds for the answer. PostHog
-    # refuses a batch it finds too large with `content_too_large`: split the recipients into smaller batches. A batch
-    # takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
+    # refuses a batch too large to take at once with a 413 `content_too_large`: split the recipients into smaller
+    # batches. A 400 `content_too_large` means the shared content or one recipient's +template_data+ is over
+    # PostHog's limit, which splitting doesn't change: make it smaller. A batch takes no +cc+, +bcc+, +attachments+
+    # or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
     # queues an email twice. Retries follow {#send}'s. Send each `unconfirmed` email again with its
@@ -358,11 +360,12 @@ module PostHog
     #   turns retries off.
     # @return [BatchResult] A result per recipient, in the order of +recipients+. Check each
     #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once.
-    # @raise [EmailBatchError] The request failed as a whole, such as a rate limit past its retries. The last attempt
-    #   decides the error. {EmailBatchError#results} holds every recipient: `failed` when PostHog refused the request
-    #   with a 4xx, and `unconfirmed` with a fix to send it again with the same key when the request may have queued
-    #   it: a 409 `idempotency_key_in_flight`, a 5xx, a lost answer, or `client_closed` when the client shut down
-    #   before a retry. {EmailError#code} is `content_too_large` (413) when PostHog finds the batch too large,
+    # @raise [EmailBatchError] The request failed as a whole, such as a rate limit past its retries. The error is the
+    #   last attempt's. {EmailBatchError#results} holds every recipient: `unconfirmed` with a fix to send it again
+    #   with the same key when any attempt may have queued it (a 409 `idempotency_key_in_flight`, a 5xx, a lost
+    #   answer, or `client_closed` when the client shut down before a retry), and `failed` when PostHog refused the
+    #   request with a 4xx and no earlier attempt may have queued it. {EmailError#code} is `content_too_large` with
+    #   PostHog's fix: a 413 for a batch to split into smaller batches, a 400 for content to make smaller. It is
     #   `batch_unavailable` when the project can't send batches yet, and `not_found` when the template doesn't
     #   exist or batch sends are off: send each email the batch didn't queue with {#send} and its recipient's
     #   +idempotency_key+. The warnings of an answer without a result for each recipient are on
@@ -505,8 +508,13 @@ module PostHog
                                message: "The PostHog client is shut down, so it didn't retry the batch.")
         end
 
-        run.answer(request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, run.body,
-                           read_timeout: read_timeout))
+        begin
+          run.answer(request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, run.body,
+                             read_timeout: read_timeout))
+        rescue EmailError => e
+          run.attempt_failed(e)
+          raise
+        end
       end
       [result, nil]
     rescue EmailError => e

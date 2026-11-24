@@ -25,7 +25,7 @@ module PostHog
     TOO_LARGE = {
       'code' => 'content_too_large',
       'detail' => 'PostHog refused the batch as too large, so no email was sent.',
-      'fix' => 'Split the recipients into smaller batches, or make the shared template_data smaller.'
+      'fix' => 'Split the recipients into smaller batches.'
     }.freeze
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
     private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
@@ -44,6 +44,7 @@ module PostHog
       @parse_warnings = parse_warnings
       @reply_error = reply_error
       @warnings = []
+      @maybe_queued = false
       empty = JSON.generate(shared.merge(recipients: []))
       @body = "#{empty.delete_suffix(']}')}#{members.map(&:wire).join(',')}]}"
     end
@@ -65,11 +66,17 @@ module PostHog
       Emails::BatchResult.new(results: results.freeze, warnings: @warnings.dup.freeze)
     end
 
-    # Every recipient of a request that failed as a whole is `unconfirmed` when the request may have queued it, and
+    # Remembers an attempt that failed, so a later attempt's refusal can't confirm what this one may have queued.
+    def attempt_failed(error)
+      @maybe_queued = true if maybe_queued?(error)
+    end
+
+    # Every recipient of a request that failed as a whole is `unconfirmed` when any attempt may have queued it, and
     # `failed` otherwise.
     def failure(error)
+      attempt_failed(error)
       results = @members.map do |member|
-        if maybe_queued?(error)
+        if @maybe_queued
           result(member, 'unconfirmed', error: resend(error))
         else
           result(member, 'failed', error: error)
@@ -86,7 +93,7 @@ module PostHog
       status = error.status_code.to_i
       return true unless status.between?(400, 499)
 
-      error.code == 'idempotency_key_in_flight'
+      status == 409 && error.code == 'idempotency_key_in_flight'
     end
 
     def settle(member, slot)
@@ -96,8 +103,12 @@ module PostHog
       end
 
       answer = slot_error(slot['error'], message_id)
-      status = UNCONFIRMED_CODES.include?(answer.code) ? 'unconfirmed' : 'failed'
-      result(member, status, message_id: message_id, error: answer)
+      # A refusal can't confirm an email that an earlier attempt of the request may have queued.
+      if UNCONFIRMED_CODES.include?(answer.code) || @maybe_queued
+        return result(member, 'unconfirmed', message_id: message_id, error: resend(answer))
+      end
+
+      result(member, 'failed', message_id: message_id, error: answer)
     end
 
     def result(member, status, **fields)
@@ -118,7 +129,7 @@ module PostHog
       fields = if status == 404
                  NOT_FOUND.merge(answered)
                elsif status == 413
-                 TOO_LARGE.merge(answered).merge('fix' => TOO_LARGE['fix'])
+                 TOO_LARGE.merge(answered.reject { |_, value| value == '' })
                else
                  answered
                end

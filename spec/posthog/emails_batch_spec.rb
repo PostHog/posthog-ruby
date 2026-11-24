@@ -137,6 +137,18 @@ module PostHog
         expect(results.map { |result| result.error.message_id }).to eq([nil, 'msg_2', nil])
       end
 
+      it 'keeps a recipient the retry refused unconfirmed when a lost answer may have queued it' do
+        stub_request(:post, batch_url).to_raise(Errno::ECONNRESET).then.to_return(
+          answer(queued('msg_ada'), slot_error('recipient_suppressed', 422, message_id: nil))
+        )
+
+        results = batch_template([ada, alan], max_retries: 1).results
+
+        expect(results.map(&:status)).to eq(%w[queued unconfirmed])
+        expect([results.last.error.code, resend_with_key(results.last)])
+          .to eq(['recipient_suppressed', ['unconfirmed', 'welcome:alan', true]])
+      end
+
       it 'leaves an unconfirmed email PostHog answered without an ID to be sent again with its key' do
         stub_request(:post, batch_url).to_return(
           answer(slot_error('delivery_unavailable', 503, message_id: 'msg_ada'),
@@ -201,22 +213,35 @@ module PostHog
         end
 
         {
-          'a 413 with its code' => {
-            status: 413, body: JSON.generate(code: 'content_too_large', detail: 'Too large.', fix: 'Split them.')
-          },
-          'a 413 without a JSON body' => { status: 413, body: '<html>Request Entity Too Large</html>' },
-          'a 413 with another fix' => { status: 413, body: JSON.generate(code: 'content_too_large', fix: 'Send less.') }
-        }.each do |name, reply|
-          it "surfaces #{name} as the error, with the fix to split the recipients" do
+          'a 413 with its code and fix' => [
+            { status: 413, body: JSON.generate(code: 'content_too_large', detail: 'Too large.', fix: 'Split them.') },
+            'Split them.'
+          ],
+          'a 413 without a JSON body' => [{ status: 413, body: '<html>Request Entity Too Large</html>' }, 'smaller'],
+          'a 413 with an empty code and fix' => [{ status: 413, body: JSON.generate(code: '', fix: '') }, 'smaller']
+        }.each do |name, (reply, fix)|
+          it "surfaces #{name} as content_too_large, with PostHog's fix or the advice to split the recipients" do
             stub_request(:post, batch_url).to_return(reply)
 
             expect { batch_template([ada, alan]) }.to raise_error(EmailBatchError) { |error|
               expect([error.code, error.status_code]).to eq(['content_too_large', 413])
-              expect(error.fix).to include('smaller batches')
+              expect(error.fix).to include(fix)
               expect(statuses(error.results)).to eq(%w[failed failed])
             }
             expect(a_request(:post, batch_url)).to have_been_made.once
           end
+        end
+
+        it "keeps a 400 content_too_large for content over PostHog's limit as PostHog sent it, without split advice" do
+          stub_request(:post, batch_url).to_return(
+            refuse(400, 'content_too_large', fix: 'Make template_data smaller.', attr: 'template_data')
+          )
+
+          expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
+            expect([error.code, error.status_code, error.fix])
+              .to eq(['content_too_large', 400, 'Make template_data smaller.'])
+            expect(statuses(error.results)).to eq(%w[failed])
+          }
         end
 
         it 'raises batch_unavailable with the fix to send each email on its own' do
@@ -266,6 +291,17 @@ module PostHog
           expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
         end
 
+        it 'keeps the recipients a lost answer may have queued unconfirmed when the retry is refused' do
+          stub_request(:post, batch_url).to_raise(Errno::ECONNRESET).then.to_return(refuse(429, 'rate_limited'))
+
+          expect { batch_template([ada, alan], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+            expect(error.code).to eq('rate_limited')
+            expect(error.results.map { |result| resend_with_key(result) })
+              .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
+          }
+          expect(a_request(:post, batch_url)).to have_been_made.twice
+        end
+
         it 'keeps every recipient unconfirmed when the answer has no result for each, and never retries it' do
           stub_request(:post, batch_url).to_return(answer(queued('msg_1')))
 
@@ -279,10 +315,11 @@ module PostHog
 
         {
           [503, 503] => %w[unconfirmed delivery_unavailable],
-          [503, 400] => %w[failed invalid_recipient],
-          [503, 429] => %w[failed rate_limited]
+          [503, 400] => %w[unconfirmed invalid_recipient],
+          [503, 429] => %w[unconfirmed rate_limited],
+          [429, 400] => %w[failed invalid_recipient]
         }.each do |statuses, (status, code)|
-          it "reports what the last attempt answered after #{statuses.join(', ')}" do
+          it "reports the last attempt's error after #{statuses.join(', ')}, unconfirmed if one may have queued" do
             codes = { 400 => 'invalid_recipient', 429 => 'rate_limited', 503 => 'delivery_unavailable' }
             stub_request(:post, batch_url).to_return(*statuses.map { |answered| refuse(answered, codes[answered]) })
 
@@ -297,7 +334,10 @@ module PostHog
         {
           'a 502 without a code' => [{ status: 502, body: '<html>Bad gateway</html>' }, 'unconfirmed'],
           'a 504 with a code' => [{ status: 504, body: JSON.generate(code: 'gateway_timeout') }, 'unconfirmed'],
-          'a 403 without a code' => [{ status: 403, body: '<html>Forbidden</html>' }, 'failed']
+          'a 403 without a code' => [{ status: 403, body: '<html>Forbidden</html>' }, 'failed'],
+          'a 403 naming keys in flight' => [
+            { status: 403, body: JSON.generate(code: 'idempotency_key_in_flight') }, 'failed'
+          ]
         }.each do |name, (reply, status)|
           it "leaves every recipient #{status} after #{name}, the status deciding whether it may have gone out" do
             stub_request(:post, batch_url).to_return(reply)
