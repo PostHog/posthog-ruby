@@ -10,6 +10,7 @@ require 'uri'
 require 'zlib'
 
 require 'posthog/email_attachments'
+require 'posthog/email_batch'
 require 'posthog/email_error'
 require 'posthog/logging'
 require 'posthog/utils'
@@ -55,6 +56,16 @@ module PostHog
   #   )
   #   result.status # => "scheduled"
   #   result.scheduled_at # => the time in UTC
+  #
+  # @example The same template for many recipients, one email each
+  #   result = posthog.emails.batch(
+  #     template_id: '0190f6d2-7c1e-7b3a-9f5e-1c2d3e4f5a6b',
+  #     recipients: [
+  #       { to: 'ada@example.com', idempotency_key: 'launch:ada', template_data: { name: 'Ada' } },
+  #       { to: 'alan@example.com', idempotency_key: 'launch:alan', template_data: { name: 'Alan' } }
+  #     ]
+  #   )
+  #   result.results.reject { |email| email.status == 'queued' } # => send these again with the same keys
   class Emails
     include PostHog::Logging
     include PostHog::Utils
@@ -91,9 +102,51 @@ module PostHog
     #     of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
 
+    # What happened to one recipient of {Emails#batch}.
+    #
+    # @!attribute [r] index
+    #   @return [Integer] The recipient's position in +recipients+.
+    # @!attribute [r] to
+    #   @return [String] The recipient's email address.
+    # @!attribute [r] idempotency_key
+    #   @return [String] The recipient's key, given or made by the client.
+    # @!attribute [r] status
+    #   @return [String] One of:
+    #     - `queued`: PostHog accepted the email. Read it with {Emails#get} to see whether it went out.
+    #     - `failed`: PostHog didn't queue the email, and {#error} says why, such as a suppressed address.
+    #     - `unconfirmed`: the client can't tell whether PostHog queued the email, such as after a lost answer. It may
+    #       still go out. Send it again with the same +idempotency_key+ within 24 hours, so it goes out once.
+    #     - `not_attempted`: an earlier request of the batch failed, so the client sent nothing for this recipient.
+    # @!attribute [r] message_id
+    #   @return [String, nil] The email's message ID, when PostHog named it.
+    # @!attribute [r] replayed
+    #   @return [Boolean] Whether an earlier send with the same key had already queued the email, so no new email
+    #     went out.
+    # @!attribute [r] error
+    #   @return [EmailError, nil] Why the email is not `queued`. For an `unconfirmed` email, {EmailError#code} is
+    #     `delivery_unavailable`, `idempotency_key_in_flight` or `api_error`.
+    # @!attribute [r] later_error
+    #   @return [EmailError, nil] For an `unconfirmed` email, what a retry in the same call answered about it, which
+    #     describes only that retry.
+    BatchEmailResult = Struct.new(:index, :to, :idempotency_key, :status, :message_id, :replayed, :error, :later_error,
+                                  keyword_init: true)
+
+    # The answer to {Emails#batch}.
+    #
+    # @!attribute [r] results
+    #   @return [Array<BatchEmailResult>] One result per recipient, in the order of +recipients+.
+    # @!attribute [r] warnings
+    #   @return [Array<Warning>] Warnings PostHog returned about the batch, each once.
+    BatchResult = Struct.new(:results, :warnings, keyword_init: true)
+
     SEND_PATH = '/api/messaging/send/email/'
     UPLOADS_PATH = '/api/messaging/attachments/uploads/'
     STATUS_PATH = '/api/messaging/emails/%<message_id>s/'
+    BATCH_PATH = '/api/messaging/send/email_batch/'
+    STATUS_BY_KEY_PATH = '/api/messaging/emails/status/'
+    # PostHog waits up to 30 seconds for its pipeline before it answers a batch.
+    BATCH_ATTEMPT_TIMEOUT_SECONDS = 45.0
+    BATCH_RECIPIENT_FIELDS = %w[to distinct_id idempotency_key template_data].freeze
     US_APP_HOST = 'https://us.posthog.com'
     EU_APP_HOST = 'https://eu.posthog.com'
     SCHEDULING_APP_HOSTS = [US_APP_HOST, EU_APP_HOST].freeze
@@ -130,7 +183,9 @@ module PostHog
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
     ].freeze
-    private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
+    private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :BATCH_PATH, :STATUS_BY_KEY_PATH,
+                     :BATCH_ATTEMPT_TIMEOUT_SECONDS, :BATCH_RECIPIENT_FIELDS, :US_APP_HOST, :EU_APP_HOST,
+                     :CLOUD_APP_HOSTS,
                      :SCHEDULING_APP_HOSTS, :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN,
                      :TEMPLATE_KEY_PATTERN, :HEADER_TOKEN_PATTERN, :SCHEDULED_AT_PATTERN, :SEND_NOW_TOLERANCE_SECONDS,
                      :SCHEDULED_AT_NEEDED,
@@ -277,6 +332,83 @@ module PostHog
       result
     end
 
+    # Queues the same email for many recipients, one email each, from a template made in PostHog or from content
+    # your code rendered.
+    #
+    # Pass the template form, with +template_id+, or the code form, with +template_key+, as {#send} takes them. The
+    # client sends the recipients in requests of at most 100 recipients and 4 MiB of JSON, one after another, and
+    # waits at least 45 seconds for each answer. A batch takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
+    #
+    # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
+    # queues an email twice. Retries follow {#send}'s. After a lost answer, the client reads each email that may have
+    # gone out by its key.
+    #
+    # @param recipients [Array<Hash>] 1 or more recipients, each a Hash with:
+    #   - +to+ [String] the recipient's email address;
+    #   - +distinct_id+ [String] optional: the recipient's distinct ID in your product;
+    #   - +idempotency_key+ [String] optional: 1 to 255 visible ASCII characters, a different one for each recipient.
+    #     Without it, the client makes one that covers its own retries but not a second call, so pass keys you store
+    #     when a batch may be cut off and run again: a rerun within 24 hours replays the emails that went out instead
+    #     of sending them twice. A send and a batch recipient with the same key and the same email replay each other.
+    #     Never reuse a key for another email: after a lost answer, the client reads the email by its key, and an
+    #     earlier email with that key reads as this one, `queued`;
+    #   - +template_data+ [Hash] optional, only with +template_id+: values for this recipient, merged over the
+    #     batch's +template_data+. A top-level key set here replaces the same key there.
+    # @param template_id [String] Template form: the UUID of a template made transactional in PostHog.
+    # @param template_data [Hash] Template form: values for the template, shared by every recipient.
+    # @param template_key [String] Code form: names the email, as {#send} takes it. Pass +subject+ and +html+, +text+
+    #   or both, and optionally +from+, +reply_to+, +sensitive+, +tracking+ and +capture_engagement+, the same for
+    #   every recipient. A recipient can't carry +template_data+: send personalized content with a +template_id+
+    #   batch, or with {#send}.
+    # @param max_retries [Integer] Overrides the client's `email_request_max_retries` for each request of the batch.
+    #   +0+ turns retries off.
+    # @return [BatchResult] A result per recipient, in the order of +recipients+. Check each
+    #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once.
+    # @raise [EmailBatchError] A request failed as a whole, such as a rate limit past its retries, so the batch
+    #   stopped. {EmailBatchError#results} holds every recipient, those not sent as `not_attempted`.
+    #   {EmailError#code} is `batch_unavailable` when the project can't send batches yet, and `not_found` when the
+    #   template doesn't exist or batch sends are off: send each email the batch didn't queue with {#send} and its
+    #   recipient's +idempotency_key+. It is `client_closed` when the client shut down during the batch. When the
+    #   logger raises while it logs the warnings, its error propagates with this one as its +cause+.
+    # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
+    # @raise [ArgumentError] An argument has the wrong type or format, such as two recipients with the same
+    #   +idempotency_key+.
+    def batch(
+      recipients:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil,
+      from: nil, reply_to: nil, sensitive: nil, tracking: nil, capture_engagement: nil, max_retries: nil, **unexpected
+    )
+      unless unexpected.empty?
+        raise ArgumentError, "A batch doesn't take #{unexpected.keys.join(', ')}, so no email was sent. A batch " \
+                             "takes no scheduled_at, cc, bcc or attachments, and each recipient's to goes in " \
+                             'recipients.'
+      end
+      unless max_retries.nil? || retry_count?(max_retries)
+        raise ArgumentError,
+              'max_retries must be a nonnegative integer.'
+      end
+
+      fields = {
+        template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
+        sensitive: sensitive, tracking: tracking, capture_engagement: capture_engagement
+      }.compact
+      shared = content(template_id, template_key, fields)
+      members = batch_members(recipients, template_key.nil?)
+      run = EmailBatch.new(shared, members, parse_warnings: method(:warnings), reply_error: method(:reply_error))
+
+      failure = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+        send_chunks(run, secret_key, max_retries || @max_retries)
+      end
+      result = failure || run.result
+      begin
+        raise failure if failure
+      ensure
+        # A logger's own error keeps the batch's error as its cause.
+        result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+      end
+
+      result
+    end
+
     # Reads what happened to an email that {#send} queued, for 30 days after the send.
     #
     # @param message_id [String] The {SendResult#id} that {#send} returned.
@@ -314,6 +446,129 @@ module PostHog
     end
 
     private
+
+    def batch_members(recipients, template_form)
+      unless recipients.is_a?(Array)
+        raise ArgumentError,
+              "recipients must be an Array of recipients, each a Hash with to, such as [{ to: 'user@example.com' }]."
+      end
+      raise ArgumentError, 'recipients must hold at least one recipient.' if recipients.empty?
+
+      first_with_key = {}
+      recipients.each_with_index.map do |recipient, index|
+        fields = batch_recipient_fields(recipient, index)
+        member = batch_member(fields, index, template_form)
+        first = first_with_key[member.idempotency_key] ||= index
+        unless first == index
+          raise ArgumentError, "recipients[#{index}] has the same idempotency_key as recipients[#{first}]. Give each " \
+                               'recipient its own key.'
+        end
+
+        member
+      end
+    end
+
+    def batch_recipient_fields(recipient, index)
+      fields = recipient.is_a?(Hash) ? recipient.transform_keys(&:to_s) : {}
+      unless fields.key?('to')
+        raise ArgumentError, "recipients[#{index}] must be a Hash with to, such as { to: 'user@example.com' }."
+      end
+
+      unknown = fields.keys - BATCH_RECIPIENT_FIELDS
+      return fields if unknown.empty?
+
+      raise ArgumentError, "recipients[#{index}] takes only to, distinct_id, idempotency_key and template_data, not " \
+                           "#{unknown.join(', ')}."
+    end
+
+    def batch_member(fields, index, template_form)
+      to, distinct_id, key, data = fields.values_at('to', 'distinct_id', 'idempotency_key', 'template_data')
+      begin
+        check_recipient(to, distinct_id, key, nil)
+      rescue ArgumentError => e
+        raise ArgumentError, "recipients[#{index}]: #{e.message}"
+      end
+      key ||= SecureRandom.uuid
+      wire = { to: to, idempotency_key: key }
+      wire[:distinct_id] = distinct_id unless distinct_id.nil?
+      unless data.nil?
+        unless template_form
+          raise ArgumentError, "recipients[#{index}] has template_data, but a batch with template_key sends the same " \
+                               'content to every recipient. Send personalized content with a template_id batch or ' \
+                               'with emails.send.'
+        end
+        raise ArgumentError, "recipients[#{index}]: template_data must be a Hash." unless data.is_a?(Hash)
+
+        wire[:message_data] = isoify_dates(data)
+      end
+      EmailBatch::Member.new(index: index, to: to, idempotency_key: key, wire: JSON.generate(wire))
+    end
+
+    # Sends the chunks one after another, and returns the EmailBatchError of the first that fails as a whole.
+    def send_chunks(run, secret_key, max_retries)
+      run.chunks.each_with_index do |chunk, position|
+        return run.failure(run.closed_at(position)) if position.positive? && !still_admitted?
+
+        begin
+          send_chunk(run, chunk, secret_key, max_retries)
+        rescue EmailError => e
+          run.stop(position, e)
+          read_lost(run, secret_key)
+          return run.failure(e)
+        end
+      end
+      nil
+    end
+
+    def send_chunk(run, chunk, secret_key, max_retries)
+      uri = URI(@app_host + BATCH_PATH)
+      timeout = [@timeout.to_f, BATCH_ATTEMPT_TIMEOUT_SECONDS].max
+      attempts = 0
+      with_retries(max_retries) do
+        attempts += 1
+        if attempts > 1 && !still_admitted?
+          raise EmailError.new(
+            code: 'client_closed',
+            message: "The PostHog client is shut down, so it didn't retry this request of the batch."
+          )
+        end
+
+        begin
+          reply = request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, chunk.body, timeout: timeout)
+        rescue EmailError
+          run.lost(chunk)
+          raise
+        end
+        run.answer(chunk, reply)
+      end
+    end
+
+    # After a lost answer, a status read by key tells whether PostHog accepted the email. It reads each key once and
+    # stops at the first error but a 404, so a failing PostHog doesn't hold the caller up.
+    def read_lost(run, secret_key)
+      run.lost_keys.each do |index, key|
+        break unless still_admitted?
+
+        status = status_by_key(key, secret_key)
+        break if status == :stop
+
+        run.accepted(index, status) if status
+      end
+    end
+
+    def status_by_key(key, secret_key)
+      uri = URI("#{@app_host}#{STATUS_BY_KEY_PATH}?#{URI.encode_www_form(idempotency_key: key)}")
+      parse_status_reply(request(Net::HTTP::Get.new(uri), uri, secret_key, {}))
+    rescue EmailError => e
+      e.status_code == 404 ? nil : :stop
+    end
+
+    def still_admitted?
+      @mutex.synchronize do
+        forget_parent_requests
+        !@closed
+      end
+    end
 
     def check_options(timeout, max_retries, migrated_from)
       raise ArgumentError, 'email_request_timeout_seconds must be a positive number.' unless positive?(timeout)
@@ -655,21 +910,21 @@ module PostHog
       )
     end
 
-    def request(request, uri, secret_key, headers, body = nil)
+    def request(request, uri, secret_key, headers, body = nil, timeout: @timeout)
       request['Authorization'] = "Bearer #{secret_key}"
       request['Accept'] = 'application/json'
       request['User-Agent'] = @user_agent if @user_agent
       request['X-PostHog-Migrated-From'] = @migrated_from if @migrated_from
-      status, answer, retry_after = exchange(request, uri, headers, body)
+      status, answer, retry_after = exchange(request, uri, headers, body, timeout: timeout)
       [status, parse_json(answer), retry_after]
     end
 
-    def exchange(request, uri, headers, body)
+    def exchange(request, uri, headers, body, timeout: @timeout)
       headers.each { |name, value| request[name] = value }
       request.body = body if body
 
       head = nil
-      response = Net::HTTP.start(uri.hostname, uri.port, connection_options(uri)) do |http|
+      response = Net::HTTP.start(uri.hostname, uri.port, connection_options(uri, timeout)) do |http|
         http.request(request) { |started| head = started }
       end
       [response.code.to_i, response.body, parse_retry_after(response['Retry-After'])]
@@ -679,9 +934,9 @@ module PostHog
                            retry_after: head && parse_retry_after(head['Retry-After']))
     end
 
-    def connection_options(uri)
+    def connection_options(uri, timeout)
       options = {
-        use_ssl: uri.scheme == 'https', open_timeout: @timeout, read_timeout: @timeout, write_timeout: @timeout,
+        use_ssl: uri.scheme == 'https', open_timeout: timeout, read_timeout: timeout, write_timeout: timeout,
         # Net::HTTP returns a body cut off by a closed connection as if it were whole. Raise instead.
         max_retries: 0, ignore_eof: false
       }

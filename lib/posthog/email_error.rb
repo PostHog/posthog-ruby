@@ -49,7 +49,9 @@ module PostHog
       'invalid_attachment' => 'validation_error',
       'too_many_attachments' => 'validation_error',
       'message_too_large' => 'validation_error',
-      'scheduling_requires_cloud' => 'validation_error'
+      'scheduling_requires_cloud' => 'validation_error',
+      'delivery_unavailable' => 'service_unavailable',
+      'content_too_large' => 'validation_error'
     }.freeze
     private_constant :SDK_ERROR_NAMES
 
@@ -69,6 +71,26 @@ module PostHog
       when 503 then 'service_unavailable'
       else 'application_error'
       end
+    end
+  end
+
+  # A request of {Emails#batch} failed as a whole, so the batch stopped.
+  #
+  # The other fields describe that request's error. {#results} holds every recipient: those of earlier requests as
+  # PostHog answered them, those of the failed request as `failed`, or `unconfirmed` where an earlier attempt may have
+  # queued them, and the rest as `not_attempted`.
+  class EmailBatchError < EmailError
+    # @return [Array<Emails::BatchEmailResult>] One result per recipient, in the order of the batch's recipients.
+    attr_reader :results
+    # @return [Array<Emails::Warning>] Warnings PostHog returned about the requests that went out, each once.
+    attr_reader :warnings
+
+    # @api private
+    def initialize(error, results:, warnings:)
+      super(code: error.code, message: error.message, status_code: error.status_code, why: error.why, fix: error.fix,
+            docs_url: error.docs_url, field: error.field, retry_after: error.retry_after, message_id: error.message_id)
+      @results = results
+      @warnings = warnings
     end
   end
 end
