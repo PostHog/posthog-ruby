@@ -165,9 +165,13 @@ module PostHog
       status = error['status'].is_a?(Integer) ? error['status'] : nil
       # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
       unconfirmed = UNCONFIRMED_CODES.include?(code)
+      fallback = if unconfirmed
+                   "PostHog couldn't confirm this email (#{code}), so it may still go out."
+                 else
+                   "PostHog didn't queue this email: #{code}."
+                 end
       EmailError.new(code: code, status_code: status, message_id: (message_id if unconfirmed),
-                     fix: (RESEND_FIX if unconfirmed),
-                     message: text(error['detail']) || "PostHog didn't queue this email: #{code}.")
+                     fix: (RESEND_FIX if unconfirmed), message: text(error['detail']) || fallback)
     end
 
     def text(value)

@@ -166,6 +166,17 @@ module PostHog
         expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
       end
 
+      it "doesn't tell an unconfirmed email without PostHog's detail that it wasn't queued" do
+        stub_request(:post, batch_url).to_return(
+          answer({ message_id: 'msg_ada', error: { code: 'delivery_unavailable', status: 503 } })
+        )
+
+        error = batch_template([ada]).results.first.error
+
+        expect(error.message).to include('may still go out')
+        expect(error.message).not_to include("didn't queue")
+      end
+
       it "logs the reply's warnings once each" do
         warning = { code: 'unverified_link', detail: 'A link points to an unverified domain.' }
         stub_request(:post, batch_url).to_return(answer(queued('msg_1'), warnings: [warning, warning]))
@@ -383,6 +394,7 @@ module PostHog
               expect(error.status_code).to eq(reply[:status])
               expect(resend_with_key(error.results.first)).to eq([status, 'welcome:ada', status == 'unconfirmed'])
               expect(error.results.first.error.message).to eq(error.message)
+              expect(error.message).not_to start_with('An earlier attempt')
             }
           end
         end
