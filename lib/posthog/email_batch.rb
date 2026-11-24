@@ -11,8 +11,6 @@ module PostHog
   class EmailBatch
     MAX_RECIPIENTS = 100
     UNCONFIRMED_CODES = %w[idempotency_key_in_flight delivery_unavailable api_error].freeze
-    # Codes of a whole request that may have queued its emails although the call failed.
-    MAYBE_QUEUED_CODES = (UNCONFIRMED_CODES + %w[network_error client_closed]).freeze
     RESEND_FIX = 'Send it again with the same idempotency_key within 24 hours of the first request that used it, so ' \
                  'it goes out once.'
     UNAVAILABLE_FIX = "Until batch sends are on for the project, send each email the batch didn't queue with " \
@@ -25,12 +23,12 @@ module PostHog
                'idempotency_key.'
     }.freeze
     TOO_LARGE = {
-      'code' => 'too_large',
+      'code' => 'content_too_large',
       'detail' => 'PostHog refused the batch as too large, so no email was sent.',
       'fix' => 'Split the recipients into smaller batches, or make the shared template_data smaller.'
     }.freeze
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
-    private_constant :UNCONFIRMED_CODES, :MAYBE_QUEUED_CODES, :RESEND_FIX, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
+    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
                      :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
@@ -71,7 +69,7 @@ module PostHog
     # `failed` otherwise.
     def failure(error)
       results = @members.map do |member|
-        if MAYBE_QUEUED_CODES.include?(error.code)
+        if maybe_queued?(error)
           result(member, 'unconfirmed', error: resend(error))
         else
           result(member, 'failed', error: error)
@@ -81,6 +79,15 @@ module PostHog
     end
 
     private
+
+    # The status, not the code, says whether PostHog may have queued the emails: a 4xx refused them, except a 409 for
+    # keys still in flight. No answer, a 5xx and a 2xx without a result for each recipient leave them unknown.
+    def maybe_queued?(error)
+      status = error.status_code.to_i
+      return true unless status.between?(400, 499)
+
+      error.code == 'idempotency_key_in_flight'
+    end
 
     def settle(member, slot)
       message_id = text(slot['message_id'])

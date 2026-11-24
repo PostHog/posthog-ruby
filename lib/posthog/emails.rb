@@ -332,8 +332,8 @@ module PostHog
     #
     # Pass the template form, with +template_id+, or the code form, with +template_key+, as {#send} takes them. The
     # client sends at most 100 recipients in one request and waits at least 45 seconds for the answer. PostHog
-    # refuses a batch it finds too large with `too_large`: split the recipients into smaller batches. A batch takes
-    # no +cc+, +bcc+, +attachments+ or +scheduled_at+.
+    # refuses a batch it finds too large with `content_too_large`: split the recipients into smaller batches. A batch
+    # takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
     # queues an email twice. Retries follow {#send}'s. Send each `unconfirmed` email again with its
@@ -359,13 +359,14 @@ module PostHog
     # @return [BatchResult] A result per recipient, in the order of +recipients+. Check each
     #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once.
     # @raise [EmailBatchError] The request failed as a whole, such as a rate limit past its retries. The last attempt
-    #   decides the error. {EmailBatchError#results} holds every recipient: `unconfirmed` with a fix to send it again
-    #   with the same key when the request may have queued it, such as `idempotency_key_in_flight`, a 5xx, a lost
-    #   answer or `client_closed` when the client shut down before a retry, and `failed` otherwise.
-    #   {EmailError#code} is `too_large` (413) when PostHog finds the batch too large, `batch_unavailable` when the
-    #   project can't send batches yet, and `not_found` when the template doesn't exist or batch sends are off: send
-    #   each email the batch didn't queue with {#send} and its recipient's +idempotency_key+. The warnings of an
-    #   answer without a result for each recipient are on {EmailError#warnings}, and the client logs none of them.
+    #   decides the error. {EmailBatchError#results} holds every recipient: `failed` when PostHog refused the request
+    #   with a 4xx, and `unconfirmed` with a fix to send it again with the same key when the request may have queued
+    #   it: a 409 `idempotency_key_in_flight`, a 5xx, a lost answer, or `client_closed` when the client shut down
+    #   before a retry. {EmailError#code} is `content_too_large` (413) when PostHog finds the batch too large,
+    #   `batch_unavailable` when the project can't send batches yet, and `not_found` when the template doesn't
+    #   exist or batch sends are off: send each email the batch didn't queue with {#send} and its recipient's
+    #   +idempotency_key+. The warnings of an answer without a result for each recipient are on
+    #   {EmailError#warnings}, and the client logs none of them.
     # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
     # @raise [ArgumentError] An argument has the wrong type or format, such as more than 100 recipients or two
     #   recipients with the same +idempotency_key+. No email was sent.

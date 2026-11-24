@@ -53,7 +53,7 @@ module PostHog
 
     def resend_with_key(result)
       [result.status, result.idempotency_key,
-       result.error.fix.include?('same idempotency_key within 24 hours of the first request that used it')]
+       result.error.fix.to_s.include?('same idempotency_key within 24 hours of the first request that used it')]
     end
     describe '#batch' do
       it 'sends one request and returns a result per recipient, in order' do
@@ -201,15 +201,17 @@ module PostHog
         end
 
         {
-          'a 413 with its code' => { status: 413, body: JSON.generate(code: 'too_large', detail: 'Too large.') },
+          'a 413 with its code' => {
+            status: 413, body: JSON.generate(code: 'content_too_large', detail: 'Too large.', fix: 'Split them.')
+          },
           'a 413 without a JSON body' => { status: 413, body: '<html>Request Entity Too Large</html>' },
-          'a 413 with its own fix' => { status: 413, body: JSON.generate(code: 'too_large', fix: 'Send less.') }
+          'a 413 with another fix' => { status: 413, body: JSON.generate(code: 'content_too_large', fix: 'Send less.') }
         }.each do |name, reply|
           it "surfaces #{name} as the error, with the fix to split the recipients" do
             stub_request(:post, batch_url).to_return(reply)
 
             expect { batch_template([ada, alan]) }.to raise_error(EmailBatchError) { |error|
-              expect([error.code, error.status_code]).to eq(['too_large', 413])
+              expect([error.code, error.status_code]).to eq(['content_too_large', 413])
               expect(error.fix).to include('smaller batches')
               expect(statuses(error.results)).to eq(%w[failed failed])
             }
@@ -292,13 +294,19 @@ module PostHog
           end
         end
 
-        it 'keeps every recipient unconfirmed after a 5xx without a code, to send again with its key' do
-          stub_request(:post, batch_url).to_return(status: 502, body: '<html>Bad gateway</html>')
+        {
+          'a 502 without a code' => [{ status: 502, body: '<html>Bad gateway</html>' }, 'unconfirmed'],
+          'a 504 with a code' => [{ status: 504, body: JSON.generate(code: 'gateway_timeout') }, 'unconfirmed'],
+          'a 403 without a code' => [{ status: 403, body: '<html>Forbidden</html>' }, 'failed']
+        }.each do |name, (reply, status)|
+          it "leaves every recipient #{status} after #{name}, the status deciding whether it may have gone out" do
+            stub_request(:post, batch_url).to_return(reply)
 
-          expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
-            expect(error.status_code).to eq(502)
-            expect(resend_with_key(error.results.first)).to eq(['unconfirmed', 'welcome:ada', true])
-          }
+            expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
+              expect(error.status_code).to eq(reply[:status])
+              expect(resend_with_key(error.results.first)).to eq([status, 'welcome:ada', status == 'unconfirmed'])
+            }
+          end
         end
 
         it "doesn't retry once the client shuts down, and leaves the recipients unconfirmed" do
