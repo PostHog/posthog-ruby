@@ -16,19 +16,20 @@ module PostHog
     # @return [Hash] Group properties to use for feature flag evaluation.
     attr_reader :group_properties
 
-    # @return [Array<String, Symbol>, nil] Person property keys known to be absent.
+    # @return [Array<String, Symbol>, Set<String, Symbol>, nil] Person property keys known to be absent.
     attr_reader :person_property_keys_known_absent
 
-    # @return [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property keys known to be absent,
-    #   by group type.
+    # @return [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil] Group property keys known to
+    #   be absent, by group type.
     attr_reader :group_property_keys_known_absent
 
     # @param only_evaluate_locally [Boolean, nil] Skip remote feature flag evaluation.
     # @param person_properties [Hash, nil] Person properties to use for feature flag evaluation.
     # @param group_properties [Hash, nil] Group properties to use for feature flag evaluation.
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be absent.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property keys
+    #   known to be absent.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type.
     def initialize(only_evaluate_locally: nil, person_properties: nil, group_properties: nil,
                    person_property_keys_known_absent: nil, group_property_keys_known_absent: nil)
       @only_evaluate_locally = only_evaluate_locally

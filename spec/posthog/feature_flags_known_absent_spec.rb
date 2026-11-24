@@ -684,6 +684,95 @@ module PostHog
       end
     end
 
+    describe 'capture(send_feature_flags:)' do
+      def group_filter(key, operator, value = nil)
+        filter = { key: key, operator: operator, type: 'group', group_type_index: 1 }
+        filter[:value] = value unless value.nil?
+        filter
+      end
+
+      before { allow(Kernel).to receive(:warn) }
+
+      it 'resolves a mixed-targeting group condition locally without group_properties' do
+        definition = flag('mixed')
+        definition[:filters][:groups] = [{
+          properties: [group_filter('tier', 'is_not_set')], rollout_percentage: 100, aggregation_group_type_index: 1
+        }]
+        c = local_client(definition, group_type_mapping: { '1' => 'project' })
+
+        c.capture(distinct_id: 'user-1', event: 'signed_up', groups: { project: 'p1' },
+                  send_feature_flags: { only_evaluate_locally: true,
+                                        group_property_keys_known_absent: { project: ['tier'] } })
+
+        properties = c.dequeue_last_message[:properties]
+        expect(properties['$feature/mixed']).to be(true)
+        expect(properties['$active_feature_flags']).to eq(['mixed'])
+        expect(WebMock).not_to have_requested(:post, flags_endpoint)
+      end
+
+      it 'resolves a group flag that also reads $group_key without group_properties' do
+        definition = flag('group-flag', group_filter('tier', 'is_not_set'), group_filter('$group_key', 'exact', 'acme'))
+        definition[:filters][:aggregation_group_type_index] = 1
+        c = local_client(definition, group_type_mapping: { '1' => 'project' })
+        options = SendFeatureFlagsOptions.new(only_evaluate_locally: true,
+                                              group_property_keys_known_absent: { project: ['tier'] })
+
+        c.capture(distinct_id: 'user-1', event: 'signed_up', groups: { project: 'acme' }, send_feature_flags: options)
+
+        message = c.dequeue_last_message
+        expect(message[:properties]['$feature/group-flag']).to be(true)
+        expect(message[:properties]['$groups']).to eq(project: 'acme')
+      end
+
+      it 'warns and still captures the event without flags for an invalid listing' do
+        c = local_client(flag('incomplete', person('plan', 'is_not_set')))
+        logger = instance_double(Logger, warn: nil)
+        allow(c).to receive(:logger).and_return(logger)
+
+        result = c.capture(distinct_id: 'user-1', event: 'signed_up',
+                           send_feature_flags: { person_property_keys_known_absent: 'plan' })
+
+        expect(result).to be(true)
+        message = c.dequeue_last_message
+        expect(message[:event]).to eq('signed_up')
+        expect(message[:properties]).not_to have_key('$feature/incomplete')
+        expect(logger).to have_received(:warn).with(/person_property_keys_known_absent must be an Array/)
+        expect(WebMock).not_to have_requested(:post, flags_endpoint)
+      end
+    end
+
+    describe 'other inputs' do
+      it 'accepts Set inputs for person and group keys' do
+        definition = flag('incomplete', person('plan', 'is_not_set'))
+        c = local_client(definition)
+
+        snapshot = c.evaluate_flags('user-1', only_evaluate_locally: true,
+                                              person_property_keys_known_absent: Set['plan'],
+                                              group_property_keys_known_absent: { organization: Set['tier'] })
+
+        expect(snapshot.get_flag('incomplete')).to be(true)
+      end
+
+      it 'resolves get_feature_flag_payload locally for a listed key' do
+        definition = flag('incomplete', person('plan', 'is_not_set'))
+        definition[:filters][:payloads] = { 'true' => '{"tier":"starter"}' }
+        c = local_client(definition)
+
+        payload = c.get_feature_flag_payload('incomplete', 'user-1', person_property_keys_known_absent: ['plan'])
+
+        expect(payload).to eq('{"tier":"starter"}')
+        expect(WebMock).not_to have_requested(:post, flags_endpoint)
+      end
+
+      it 'sends the listed keys when get_feature_flag_payload falls back to /flags' do
+        c = local_client(flag('incomplete', person('region', 'exact', 'eu')))
+
+        c.get_feature_flag_payload('incomplete', 'user-1', person_property_keys_known_absent: ['plan'])
+
+        expect(flags_request_body['person_property_keys_known_absent']).to eq(['plan'])
+      end
+    end
+
     describe 'limits' do
       let(:too_many) { Array.new(KnownAbsentPropertyKeys::MAX_KEYS + 1, 'plan') }
 

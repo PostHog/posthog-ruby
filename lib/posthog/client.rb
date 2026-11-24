@@ -384,41 +384,12 @@ module PostHog
           'avoids a second `/flags` request per capture and guarantees the event carries the ' \
           'exact flag values your code branched on.'
         )
-        # Handle different types of send_feature_flags parameter
-        case send_feature_flags_param
-        when true
-          # Backward compatibility: simple boolean
-          feature_variants = @feature_flags_poller.get_feature_variants(attrs[:distinct_id], attrs[:groups] || {})
-        when Hash
-          # Hash with options
-          options = SendFeatureFlagsOptions.from_hash(send_feature_flags_param)
-          feature_variants = @feature_flags_poller.get_feature_variants(
-            attrs[:distinct_id],
-            attrs[:groups] || {},
-            options ? options.person_properties : {},
-            options ? options.group_properties : {},
-            options ? options.only_evaluate_locally : false,
-            known_absent: KnownAbsentPropertyKeys.build(options&.person_property_keys_known_absent,
-                                                        options&.group_property_keys_known_absent)
-          )
-        when SendFeatureFlagsOptions
-          # SendFeatureFlagsOptions object
-          feature_variants = @feature_flags_poller.get_feature_variants(
-            attrs[:distinct_id],
-            attrs[:groups] || {},
-            send_feature_flags_param.person_properties,
-            send_feature_flags_param.group_properties,
-            send_feature_flags_param.only_evaluate_locally || false,
-            known_absent: KnownAbsentPropertyKeys.build(
-              send_feature_flags_param.person_property_keys_known_absent,
-              send_feature_flags_param.group_property_keys_known_absent
-            )
-          )
-        else
-          # Invalid type, treat as false
-          feature_variants = nil
-        end
-
+        options = case send_feature_flags_param
+                  when true then SendFeatureFlagsOptions.new
+                  when Hash then SendFeatureFlagsOptions.from_hash(send_feature_flags_param)
+                  when SendFeatureFlagsOptions then send_feature_flags_param
+                  end
+        feature_variants = options && _capture_feature_variants(attrs[:distinct_id], attrs[:groups], options)
         attrs[:feature_variants] = feature_variants if feature_variants
       end
 
@@ -541,10 +512,10 @@ module PostHog
     # @param person_properties [Hash] Properties to use when evaluating the user locally or remotely.
     # @param group_properties [Hash] Properties to use when evaluating groups locally or remotely.
     # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be
-    #   absent. See {#evaluate_flags}.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type. See {#evaluate_flags}.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property
+    #   keys known to be absent. See {#evaluate_flags}.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type. See {#evaluate_flags}.
     # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
     # @return [Boolean, nil] Whether the flag is enabled, or nil when the flag could not be evaluated.
     # TODO: In future version, rename to `feature_flag_enabled?`
@@ -596,10 +567,10 @@ module PostHog
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
     # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be
-    #   absent. See {#evaluate_flags}.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type. See {#evaluate_flags}.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property
+    #   keys known to be absent. See {#evaluate_flags}.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type. See {#evaluate_flags}.
     # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
     #
     # @return [String, Boolean, nil] The value of the feature flag
@@ -652,10 +623,10 @@ module PostHog
     # @param person_properties [Hash] Properties to use when evaluating the user locally or remotely.
     # @param group_properties [Hash] Properties to use when evaluating groups locally or remotely.
     # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be
-    #   absent. See {#evaluate_flags}.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type. See {#evaluate_flags}.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property
+    #   keys known to be absent. See {#evaluate_flags}.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type. See {#evaluate_flags}.
     # @param send_feature_flag_events [Boolean] Whether to capture `$feature_flag_called` for this access.
     # @return [PostHog::FeatureFlagResult, nil]
     def get_feature_flag_result(
@@ -706,16 +677,16 @@ module PostHog
     # @param [Array<String, Symbol>, nil] flag_keys When set, scopes evaluation to only these flag keys.
     #   An empty array returns an empty snapshot without evaluating flags; +nil+ evaluates all flags.
     #   Distinct from {FeatureFlagEvaluations#only}, which filters the already-fetched snapshot in memory.
-    # @param [Array<String, Symbol>, nil] person_property_keys_known_absent Person property keys the caller knows
-    #   are absent for this evaluation. A listed key is absent even when +person_properties+ has a value for it,
-    #   so local evaluation resolves it definitively: +is_not_set+ and the negated operators (+is_not+,
-    #   +not_icontains+, +not_starts_with+, +not_ends_with+, +not_regex+) match, and every other operator
-    #   doesn't. Keys starting with +__posthog_person_metadata__+ are ignored. Sent to +/flags+ on remote
+    # @param [Array<String, Symbol>, Set<String, Symbol>, nil] person_property_keys_known_absent Person property keys
+    #   the caller knows are absent for this evaluation. A listed key is absent even when +person_properties+
+    #   has a value for it, so local evaluation resolves it definitively: +is_not_set+ and the negated operators
+    #   (+is_not+, +not_icontains+, +not_starts_with+, +not_ends_with+, +not_regex+) match, and every other
+    #   operator doesn't. Keys starting with +__posthog_person_metadata__+ are ignored. Sent to +/flags+ on remote
     #   evaluation. At most 1000 keys, counting duplicates; a longer list raises +ArgumentError+ and is never
     #   truncated.
-    # @param [Hash{String, Symbol => Array<String, Symbol>}, nil] group_property_keys_known_absent Group property
-    #   keys known to be absent, by group type name. Each group type's keys apply only to that group type and
-    #   follow the same rules and 1000-key limit as +person_property_keys_known_absent+.
+    # @param [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil] group_property_keys_known_absent
+    #   Group property keys known to be absent, by group type name. Each group type's keys apply only to that
+    #   group type and follow the same rules and 1000-key limit as +person_property_keys_known_absent+.
     # @return [PostHog::FeatureFlagEvaluations]
     def evaluate_flags(
       distinct_id,
@@ -874,10 +845,10 @@ module PostHog
     # @param [Hash] person_properties key-value pairs of properties to associate with the user.
     # @param [Hash] group_properties
     # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be
-    #   absent. See {#evaluate_flags}.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type. See {#evaluate_flags}.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property
+    #   keys known to be absent. See {#evaluate_flags}.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type. See {#evaluate_flags}.
     #
     # @return [Hash] String (not symbol) key value pairs of flag and their values
     def get_all_flags(
@@ -912,10 +883,10 @@ module PostHog
     # @param person_properties [Hash] key-value pairs of properties to associate with the user.
     # @param group_properties [Hash]
     # @param only_evaluate_locally [Boolean]
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be
-    #   absent. See {#evaluate_flags}.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type. See {#evaluate_flags}.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property
+    #   keys known to be absent. See {#evaluate_flags}.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type. See {#evaluate_flags}.
     # @return [Object, nil] The parsed payload for the matched flag value.
     #
     # @deprecated Use {#evaluate_flags} and {FeatureFlagEvaluations#get_flag_payload} instead.
@@ -961,10 +932,10 @@ module PostHog
     # @param person_properties [Hash] key-value pairs of properties to associate with the user.
     # @param group_properties [Hash]
     # @param only_evaluate_locally [Boolean] Skip the remote /flags call.
-    # @param person_property_keys_known_absent [Array<String, Symbol>, nil] Person property keys known to be
-    #   absent. See {#evaluate_flags}.
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil] Group property
-    #   keys known to be absent, by group type. See {#evaluate_flags}.
+    # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil] Person property
+    #   keys known to be absent. See {#evaluate_flags}.
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
+    #   Group property keys known to be absent, by group type. See {#evaluate_flags}.
     #
     def get_all_flags_and_payloads(
       distinct_id,
@@ -1400,6 +1371,25 @@ module PostHog
 
     def shutdown?
       @shutdown_mutex.synchronize { @shutdown }
+    end
+
+    def _capture_feature_variants(distinct_id, groups, options)
+      begin
+        known_absent = KnownAbsentPropertyKeys.build(options.person_property_keys_known_absent,
+                                                     options.group_property_keys_known_absent)
+      rescue ArgumentError => e
+        # Capture is fire-and-forget, so an invalid listing drops the flags rather than the event.
+        logger.warn("[FEATURE FLAGS] Ignoring send_feature_flags on capture(): #{e.message}")
+        return nil
+      end
+
+      groups, person_properties, group_properties = add_local_person_and_group_properties(
+        groups, options.person_properties, options.group_properties
+      )
+      @feature_flags_poller.get_feature_variants(
+        distinct_id, groups, person_properties, group_properties, options.only_evaluate_locally || false,
+        known_absent: known_absent
+      )
     end
 
     def add_local_person_and_group_properties(groups, person_properties, group_properties)

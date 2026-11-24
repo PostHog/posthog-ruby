@@ -20,7 +20,7 @@ module PostHog
     # Validates and normalizes the public inputs.
     #
     # @param person_property_keys_known_absent [Array<String, Symbol>, Set<String, Symbol>, nil]
-    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>}, nil]
+    # @param group_property_keys_known_absent [Hash{String, Symbol => Array<String, Symbol>, Set<String, Symbol>}, nil]
     # @return [PostHog::KnownAbsentPropertyKeys, nil] nil when neither input was provided.
     # @raise [ArgumentError] when an input has the wrong type or a list holds more than {MAX_KEYS} keys.
     def self.build(person_property_keys_known_absent, group_property_keys_known_absent)
