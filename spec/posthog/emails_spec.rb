@@ -1276,9 +1276,9 @@ module PostHog
           status: 200, body: JSON.generate(id: message_id, status: 'queued', created_at: '2026-11-23T08:00:00Z',
                                            status_at: '2026-11-23T08:00:00Z')
         )
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(IOError, 'log device closed')
-        PostHog::Logging.logger = logger
+        log = StringIO.new
+        PostHog::Logging.logger = Logger.new(log, level: Logger::WARN,
+                                                  formatter: ->(*) { raise IOError, 'log device closed' })
 
         error = begin
           send_template(scheduled_at: due)
@@ -1288,7 +1288,7 @@ module PostHog
 
         expect([error.code, error.cause]).to eq(['schedule_not_confirmed', nil])
         expect(error.warnings).to eq([Emails::Warning.new(code: 'unverified_link', message: 'Check.', fix: 'Fix.')])
-        expect(logger).not_to have_received(:warn)
+        expect(log.string).to be_empty
         expect(emails.get(error.message_id).status).to eq('queued')
       end
 
@@ -1304,14 +1304,12 @@ module PostHog
       it "lets the caller's deadline stop the send while it logs warnings, whatever its class" do
         stub_request(:post, send_url).to_return(schedule(warnings: [{ code: 'unverified_link' }]))
         deadline = Class.new(StandardError)
-        logger = Logger.new(File::NULL)
         events = Queue.new
         never_released = Queue.new
-        allow(logger).to receive(:warn) do
+        PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN, formatter: lambda { |*|
           events << :logging
           never_released.pop
-        end
-        PostHog::Logging.logger = logger
+        })
 
         sender = Thread.new do
           send_template(scheduled_at: due)
@@ -1328,13 +1326,11 @@ module PostHog
 
       it 'logs warnings once the send settles, and lets a failing logger stop it with its own error' do
         stub_request(:post, send_url).to_return(schedule(warnings: [{ code: 'unverified_link' }]))
-        logger = Logger.new(File::NULL)
         settled = []
-        allow(logger).to receive(:warn) do
+        PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN, formatter: lambda { |*|
           settled << client.shutdown(timeout: 0)
           raise IOError, 'log device closed'
-        end
-        PostHog::Logging.logger = logger
+        })
 
         expect { send_template(scheduled_at: due) }.to raise_error(IOError, 'log device closed') { |error|
           expect(error.cause).to be_nil
