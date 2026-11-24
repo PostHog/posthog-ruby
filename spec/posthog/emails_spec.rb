@@ -1369,6 +1369,21 @@ module PostHog
         expect(first.cause.message_id).to eq(other_id)
       end
 
+      it "raises this send's error when the logger's reused exception can't be copied" do
+        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
+                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        uncopyable = Class.new(IOError) { def initialize_copy(_other) = raise(TypeError, "can't copy") }
+        reused = uncopyable.new('log device closed')
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn).and_raise(reused)
+        PostHog::Logging.logger = logger
+
+        expect { send_template(scheduled_at: due) }.to raise_error(reused)
+        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
+          expect([error.code, error.message_id, error.cause]).to eq(['schedule_not_confirmed', message_id, reused])
+        }
+      end
+
       it 'names the send that failed when the logger raises its exception again while the caller handles it' do
         stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
                                                 accept(message_id, warnings: [{ code: 'unverified_link' }]))
