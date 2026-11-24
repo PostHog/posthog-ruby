@@ -4997,7 +4997,7 @@ module PostHog
               { key: 'third-variant', name: 'Third Variant', rollout_percentage: 25 }
             ]
           },
-          payloads: { 'first-variant' => 'some-payload', 'third-variant' => { 'a' => 'json' } }
+          payloads: { 'first-variant' => '"some-payload"', 'third-variant' => { 'a' => 'json' } }
         }
       }
 
@@ -5026,7 +5026,7 @@ module PostHog
                'test_id',
                match_value: 'first-variant',
                person_properties: { email: 'test@posthog.com' }
-             )).to eq('some-payload')
+             )).to eq('"some-payload"')
       assert_not_requested :post, flags_endpoint
     end
 

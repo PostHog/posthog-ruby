@@ -111,18 +111,38 @@ module PostHog
       end
 
       context 'with non-JSON string payload' do
-        it 'returns the string as-is' do
+        it 'returns no payload instead of the raw string' do
           result = FeatureFlagResult.from_value_and_payload('test-flag', true, 'just a plain string')
 
-          expect(result.payload).to eq('just a plain string')
+          expect(result.payload).to be_nil
+        end
+
+        it 'keeps the flag value and logs the failure' do
+          expect(PostHog::Logging.logger).to receive(:warn).with(/not valid JSON/)
+
+          result = FeatureFlagResult.from_value_and_payload('test-flag', 'control', '{broken')
+
+          expect(result.value).to eq('control')
+          expect(result.enabled?).to be true
+          expect(result.payload).to be_nil
         end
       end
 
-      context 'with empty string payload' do
+      context 'with empty or whitespace-only string payload' do
         it 'returns nil' do
-          result = FeatureFlagResult.from_value_and_payload('test-flag', true, '')
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, '').payload).to be_nil
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, '   ').payload).to be_nil
+        end
+      end
 
-          expect(result.payload).to be_nil
+      context 'with scalar JSON payloads' do
+        it 'retains the decoded type and value' do
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, 'false').payload).to be false
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, '0').payload).to eq(0)
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, '"hello"').payload).to eq('hello')
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, '""').payload).to eq('')
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, '[1,false]').payload).to eq([1, false])
+          expect(FeatureFlagResult.from_value_and_payload('test-flag', true, 'null').payload).to be_nil
         end
       end
 
@@ -153,6 +173,26 @@ module PostHog
           expect(result.payload).to eq({ 'discount' => 10 })
           expect(result.value).to eq('control')
         end
+      end
+    end
+
+    describe '.validate_serialized_payload' do
+      it 'returns the serialized string unchanged when it decodes' do
+        expect(FeatureFlagResult.validate_serialized_payload('{"foo": "bar"}')).to eq('{"foo": "bar"}')
+        expect(FeatureFlagResult.validate_serialized_payload('false')).to eq('false')
+      end
+
+      it 'returns nil for a payload that is not valid JSON' do
+        allow(PostHog::Logging.logger).to receive(:warn)
+
+        expect(FeatureFlagResult.validate_serialized_payload('{broken')).to be_nil
+        expect(FeatureFlagResult.validate_serialized_payload('')).to be_nil
+        expect(FeatureFlagResult.validate_serialized_payload('   ')).to be_nil
+      end
+
+      it 'passes already-decoded payloads through' do
+        expect(FeatureFlagResult.validate_serialized_payload({ 'foo' => 'bar' })).to eq({ 'foo' => 'bar' })
+        expect(FeatureFlagResult.validate_serialized_payload(nil)).to be_nil
       end
     end
   end

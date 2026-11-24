@@ -151,15 +151,15 @@ RSpec.describe PostHog::FeatureFlagsPoller, 'property matching versions' do
 
   it 'retains the matching snapshot for payload lookup during a refresh' do
     data = definitions.merge(property_matching_version: 1)
-    data[:flags][0][:filters][:payloads] = { 'true' => 'old-payload' }
+    data[:flags][0][:filters][:payloads] = { 'true' => '"old-payload"' }
     poller._apply_flag_definitions(data)
     allow(poller).to receive(:_compute_flag_payload_locally).and_wrap_original do |original, *args, **kwargs|
-      data[:flags][0][:filters][:payloads] = { 'true' => 'new-payload' }
+      data[:flags][0][:filters][:payloads] = { 'true' => '"new-payload"' }
       poller._apply_flag_definitions(data.merge(property_matching_version: 2))
       original.call(*args, **kwargs)
     end
     expect(poller.get_feature_flag_payload('person', 'person-id', nil, {}, { value: 'banana' }, {}, true))
-      .to eq('old-payload')
+      .to eq('"old-payload"')
   end
 
   it 'captures the empty initial snapshot when the first load publishes immediately after the atomic read' do
