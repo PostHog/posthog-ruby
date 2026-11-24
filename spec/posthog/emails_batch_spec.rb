@@ -52,9 +52,9 @@ module PostHog
     end
 
     def resend_with_key(result)
-      [result.status, result.idempotency_key, result.error.fix.include?('same idempotency_key')]
+      [result.status, result.idempotency_key,
+       result.error.fix.include?('same idempotency_key within 24 hours of the first request that used it')]
     end
-
     describe '#batch' do
       it 'sends one request and returns a result per recipient, in order' do
         stub_request(:post, batch_url).to_return(answer(queued('msg_1'), queued('msg_2', replayed: true)))
@@ -63,9 +63,9 @@ module PostHog
 
         expect(result.results.map(&:to_h)).to eq(
           [{ index: 0, to: 'ada@example.com', idempotency_key: 'welcome:ada', status: 'queued', message_id: 'msg_1',
-             replayed: false, error: nil, later_error: nil },
+             replayed: false, error: nil },
            { index: 1, to: 'alan@example.com', idempotency_key: 'welcome:alan', status: 'queued',
-             message_id: 'msg_2', replayed: true, error: nil, later_error: nil }]
+             message_id: 'msg_2', replayed: true, error: nil }]
         )
         expect(batch_bodies).to eq(
           [{ 'template_id' => template_id, 'message_data' => { 'product' => 'Hog' },
@@ -106,17 +106,18 @@ module PostHog
         )
       end
 
-      it 'splits more than 100 recipients into requests of at most 100, one after another' do
-        recipients = Array.new(101) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
-        stub_request(:post, batch_url).to_return(
-          answer(*Array.new(100) { |index| queued("msg_#{index}") }), answer(queued('msg_100'))
-        )
+      it 'sends 100 recipients in one request, and refuses 101 before any request' do
+        hundred = Array.new(100) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
+        stub_request(:post, batch_url).to_return(answer(*Array.new(100) { |index| queued("msg_#{index}") }))
 
-        result = batch_template(recipients)
+        expect { batch_template(hundred + [{ to: 'user100@example.com' }]) }
+          .to raise_error(ArgumentError, /at most 100 recipients/)
+        expect(a_request(:post, batch_url)).not_to have_been_made
 
-        expect(batch_bodies.map { |body| body['recipients'].size }).to eq([100, 1])
-        expect(result.results.map(&:message_id)).to eq(Array.new(101) { |index| "msg_#{index}" })
-        expect(result.results.map(&:index)).to eq((0..100).to_a)
+        result = batch_template(hundred)
+
+        expect(batch_bodies.map { |body| body['recipients'].size }).to eq([100])
+        expect(result.results.map(&:message_id)).to eq(Array.new(100) { |index| "msg_#{index}" })
       end
 
       it "returns each recipient PostHog refused as failed and one it didn't confirm as unconfirmed" do
@@ -139,7 +140,7 @@ module PostHog
       it 'leaves an unconfirmed email PostHog answered without an ID to be sent again with its key' do
         stub_request(:post, batch_url).to_return(
           answer(slot_error('delivery_unavailable', 503, message_id: 'msg_ada'),
-                 slot_error('delivery_unavailable', 503, message_id: nil), 'not a result')
+                 slot_error('delivery_unavailable', 503, message_id: nil), { status: 'queued' })
         )
 
         results = batch_template([ada, alan, { to: 'grace@example.com', idempotency_key: 'welcome:grace' }]).results
@@ -152,121 +153,68 @@ module PostHog
         expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
       end
 
-      it 'fails a recipient too large for one request and sends the rest' do
-        stub_request(:post, batch_url).to_return(answer(queued('msg_2')))
-        huge = { to: 'ada@example.com', template_data: { note: 'x' * (4 * 1024 * 1024) } }
-
-        results = batch_template([huge, alan]).results
-
-        expect(statuses(results)).to eq(%w[failed queued])
-        expect([results.first.error.code, results.first.error.field]).to eq(%w[content_too_large recipients])
-        expect(batch_bodies.map { |body| body['recipients'].map { |recipient| recipient['to'] } })
-          .to eq([['alan@example.com']])
-      end
-
-      it 'fails every recipient when the shared content alone is too large, and sends nothing' do
-        results = batch_template([ada, alan], template_data: { note: 'x' * (4 * 1024 * 1024) }).results
-
-        expect(statuses(results)).to eq(%w[failed failed])
-        expect(results.map { |result| result.error.code }.uniq).to eq(['content_too_large'])
-        expect(results.first.error.fix).to eq("Make this recipient's template_data, or the batch's content, smaller.")
-        expect(a_request(:any, %r{/api/messaging/})).not_to have_been_made
-      end
-
-      it 'sends a request of exactly 4 MiB and splits one a byte larger' do
-        bodies = []
-        stub_request(:post, batch_url).to_return do |request|
-          bodies << request.body
-          answer(*JSON.parse(request.body)['recipients'].map { |recipient| queued("msg_#{recipient['to']}") })
-        end
-        # Three recipients, so each stays under the 1.5 MiB PostHog takes for one email.
-        trio = lambda do |sizes|
-          sizes.each_with_index.map do |size, index|
-            { to: "user#{index}@example.com", idempotency_key: "k-#{index}", template_data: { note: 'x' * size } }
-          end
-        end
-        batch_template(trio.call([1, 1, 1]))
-        fill = (4 * 1024 * 1024) - bodies.first.bytesize + 3
-        sizes = [fill / 3, fill / 3, fill - (2 * (fill / 3))]
-
-        batch_template(trio.call(sizes))
-        result = batch_template(trio.call([sizes[0], sizes[1], sizes[2] + 1]))
-
-        expect(sizes.max).to be < 1.5 * 1024 * 1024
-        expect(bodies.drop(1).map(&:bytesize).first).to eq(4 * 1024 * 1024)
-        expect(bodies.drop(1).map { |body| JSON.parse(body)['recipients'].size }).to eq([3, 2, 1])
-        notes = bodies.last(2).flat_map { |body| JSON.parse(body)['recipients'] }.map { |r| r['message_data']['note'] }
-        expect(notes.map(&:size)).to eq([sizes[0], sizes[1], sizes[2] + 1])
-        expect(statuses(result.results)).to eq(%w[queued queued queued])
-      end
-
-      it 'logs each warning once' do
+      it "logs the reply's warnings" do
         warning = { code: 'unverified_link', detail: 'A link points to an unverified domain.' }
-        recipients = Array.new(101) { |index| { to: "user#{index}@example.com" } }
-        stub_request(:post, batch_url).to_return(
-          answer(*Array.new(100) { |index| queued("msg_#{index}") }, warnings: [warning]),
-          answer(queued('msg_100'), warnings: [warning])
-        )
+        stub_request(:post, batch_url).to_return(answer(queued('msg_1'), warnings: [warning]))
         log = StringIO.new
-        PostHog::Logging.logger = Logger.new(log)
+        PostHog::Logging.logger = Logger.new(log, level: Logger::WARN)
 
-        result = batch_template(recipients)
+        result = batch_template([ada])
 
         expect(result.warnings.map(&:code)).to eq(['unverified_link'])
         expect(log.string.scan('PostHog email warning unverified_link').size).to eq(1)
       end
 
       it "carries a failed batch's warnings on its error and never logs them" do
-        recipients = Array.new(101) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
-        stub_request(:post, batch_url).to_return(
-          answer(*Array.new(100) { |index| queued("msg_#{index}") }, warnings: [{ code: 'unverified_link' }]),
-          refuse(409, 'batch_unavailable')
-        )
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(IOError, 'log device closed')
-        PostHog::Logging.logger = logger
+        stub_request(:post, batch_url).to_return(answer(warnings: [{ code: 'unverified_link' }]))
+        log = StringIO.new
+        PostHog::Logging.logger = Logger.new(log, level: Logger::WARN)
 
-        expect { batch_template(recipients) }.to raise_error(EmailBatchError) { |error|
-          expect([error.code, error.cause,
-                  error.warnings.map(&:code)]).to eq(['batch_unavailable', nil, ['unverified_link']])
-          expect(error.results.map(&:status).tally).to eq('queued' => 100, 'failed' => 1)
+        expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
+          expect([error.code, error.cause, error.warnings.map(&:code)]).to eq(['api_error', nil, ['unverified_link']])
         }
-        expect(logger).not_to have_received(:warn)
+        expect(log.string).to be_empty
       end
 
       it 'lets a failing logger stop a batch that succeeded with its own error' do
         stub_request(:post, batch_url).to_return(answer(queued('msg_0'), warnings: [{ code: 'unverified_link' }]))
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(IOError, 'log device closed')
-        PostHog::Logging.logger = logger
+        PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN,
+                                                           formatter: ->(*) { raise IOError, 'log device closed' })
 
         expect { batch_template([{ to: 'user@example.com' }]) }.to raise_error(IOError, 'log device closed') { |error|
           expect(error.cause).to be_nil
         }
       end
 
-      context 'when a request fails as a whole' do
-        let(:recipients) do
-          Array.new(201) do |index|
-            { to: "user#{index}@example.com", idempotency_key: "key-#{index}" }
-          end
-        end
-
-        it 'stops the batch and raises EmailBatchError with every recipient' do
+      context 'when the request fails as a whole' do
+        it 'raises EmailBatchError with every recipient failed and the field PostHog named' do
           stub_request(:post, batch_url).to_return(
-            answer(*Array.new(100) { |index| queued("msg_#{index}") }),
-            refuse(400, 'invalid_recipient', detail: 'A recipient is invalid.', attr: 'recipients__7__to')
+            refuse(400, 'invalid_recipient', detail: 'A recipient is invalid.', attr: 'recipients__1__to')
           )
 
-          expect { batch_template(recipients) }.to raise_error(EmailBatchError) { |error|
-            expect([error.code, error.status_code,
-                    error.field]).to eq(['invalid_recipient', 400, 'recipients__107__to'])
-            expect(error.results.size).to eq(201)
-            expect(error.results.map(&:status).tally).to eq('queued' => 100, 'failed' => 100, 'not_attempted' => 1)
-            expect(error.results[100].error.code).to eq('invalid_recipient')
-            expect(error.results[200].error.code).to eq('not_attempted')
+          expect { batch_template([ada, alan]) }.to raise_error(EmailBatchError) { |error|
+            expect([error.code, error.status_code, error.field]).to eq(['invalid_recipient', 400, 'recipients__1__to'])
+            expect(error.results.map { |result| [result.status, result.error.code] })
+              .to eq([%w[failed invalid_recipient], %w[failed invalid_recipient]])
           }
-          expect(a_request(:post, batch_url)).to have_been_made.twice
+          expect(a_request(:post, batch_url)).to have_been_made.once
+        end
+
+        {
+          'a 413 with its code' => { status: 413, body: JSON.generate(code: 'too_large', detail: 'Too large.') },
+          'a 413 without a JSON body' => { status: 413, body: '<html>Request Entity Too Large</html>' },
+          'a 413 with its own fix' => { status: 413, body: JSON.generate(code: 'too_large', fix: 'Send less.') }
+        }.each do |name, reply|
+          it "surfaces #{name} as the error, with the fix to split the recipients" do
+            stub_request(:post, batch_url).to_return(reply)
+
+            expect { batch_template([ada, alan]) }.to raise_error(EmailBatchError) { |error|
+              expect([error.code, error.status_code]).to eq(['too_large', 413])
+              expect(error.fix).to include('smaller batches')
+              expect(statuses(error.results)).to eq(%w[failed failed])
+            }
+            expect(a_request(:post, batch_url)).to have_been_made.once
+          end
         end
 
         it 'raises batch_unavailable with the fix to send each email on its own' do
@@ -280,47 +228,17 @@ module PostHog
           expect(a_request(:post, batch_url)).to have_been_made.once
         end
 
-        it 'keeps a recipient unconfirmed while PostHog holds its key, also after a later refusal' do
-          stub_request(:post, batch_url).to_return(
-            refuse(409, 'idempotency_key_in_flight'), refuse(400, 'invalid_recipient', attr: 'recipients__0__to')
-          )
+        ['', 'Wait a few seconds and try again.'].each do |fix|
+          it "keeps every recipient unconfirmed while PostHog holds the keys, with fix #{fix.inspect}" do
+            stub_request(:post, batch_url).to_return(refuse(409, 'idempotency_key_in_flight', fix: fix))
 
-          expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
-            result = error.results.first
-            expect([error.code, result.status, result.message_id]).to eq(['invalid_recipient', 'unconfirmed', nil])
-            expect([result.error.code, result.later_error.code]).to eq(%w[idempotency_key_in_flight invalid_recipient])
-            expect(resend_with_key(result)).to eq(['unconfirmed', 'welcome:ada', true])
-          }
-        end
-
-        {
-          [503, 409] => %w[delivery_unavailable idempotency_key_in_flight],
-          [409, 503] => %w[idempotency_key_in_flight delivery_unavailable],
-          [409, 429, 503] => %w[idempotency_key_in_flight delivery_unavailable],
-          [409, 429, :reset] => %w[idempotency_key_in_flight rate_limited]
-        }.each do |statuses, (error_code, later_code)|
-          it "keeps the first reason it can't confirm a recipient and the last refusal after #{statuses.join(', ')}" do
-            codes = { 409 => 'idempotency_key_in_flight', 429 => 'rate_limited', 503 => 'delivery_unavailable' }
-            stub = stub_request(:post, batch_url)
-                   .to_return(*statuses.grep(Integer).map { |status| refuse(status, codes[status]) })
-            stub.then.to_raise(Errno::ECONNRESET) if statuses.last == :reset
-
-            expect { batch_template([ada], max_retries: statuses.size - 1) }.to raise_error(EmailBatchError) { |error|
-              result = error.results.first
-              expect([result.status, result.error.code, result.later_error&.code])
-                .to eq(['unconfirmed', error_code, later_code])
+            expect { batch_template([ada, alan], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
+              expect([error.code, error.results.map(&:message_id)]).to eq(['idempotency_key_in_flight', [nil, nil]])
+              expect(error.results.map { |result| resend_with_key(result) })
+                .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
             }
+            expect(a_request(:post, batch_url)).to have_been_made.once
           end
-        end
-
-        it 'keeps a recipient unconfirmed when PostHog holds its key past the retries, to send again with it' do
-          stub_request(:post, batch_url).to_return(refuse(409, 'idempotency_key_in_flight', fix: ''))
-
-          expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
-            result = error.results.first
-            expect([error.code, result.message_id, result.later_error]).to eq(['idempotency_key_in_flight', nil, nil])
-            expect(resend_with_key(result)).to eq(['unconfirmed', 'welcome:ada', true])
-          }
         end
 
         it 'names a 404 as a missing template or batch sends that are off' do
@@ -337,51 +255,53 @@ module PostHog
 
           expect { batch_template([ada, alan], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
             expect(error.code).to eq('network_error')
-            expect(error.results.map(&:message_id)).to eq([nil, nil])
+            expect(error.results.map { |result| [result.message_id, result.error.code] })
+              .to eq([[nil, 'network_error'], [nil, 'network_error']])
             expect(error.results.map { |result| resend_with_key(result) })
               .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
-            expect(error.results.first.error.code).to eq('delivery_unavailable')
           }
           expect(a_request(:post, batch_url)).to have_been_made.twice
           expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
         end
 
-        it 'makes an answer without a result for each recipient their only error, since nothing retried it' do
-          stub_request(:post, batch_url).to_return(answer)
+        it 'keeps every recipient unconfirmed when the answer has no result for each, and never retries it' do
+          stub_request(:post, batch_url).to_return(answer(queued('msg_1')))
 
-          expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
-            result = error.results.first
-            expect([error.code, result.error.code, result.later_error]).to eq(['api_error', 'api_error', nil])
-            expect(resend_with_key(result)).to eq(['unconfirmed', 'welcome:ada', true])
+          expect { batch_template([ada, alan]) }.to raise_error(EmailBatchError) { |error|
+            expect(error.code).to eq('api_error')
+            expect(error.results.map { |result| resend_with_key(result) })
+              .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
           }
           expect(a_request(:post, batch_url)).to have_been_made.once
         end
 
-        it "keeps a retry's refusal as the later answer of a recipient it can't confirm" do
-          stub_request(:post, batch_url).to_return(refuse(503, 'delivery_unavailable'), refuse(429, 'rate_limited'))
+        {
+          [503, 503] => %w[unconfirmed delivery_unavailable],
+          [503, 400] => %w[failed invalid_recipient],
+          [503, 429] => %w[failed rate_limited]
+        }.each do |statuses, (status, code)|
+          it "reports what the last attempt answered after #{statuses.join(', ')}" do
+            codes = { 400 => 'invalid_recipient', 429 => 'rate_limited', 503 => 'delivery_unavailable' }
+            stub_request(:post, batch_url).to_return(*statuses.map { |answered| refuse(answered, codes[answered]) })
 
-          expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
-            result = error.results.first
-            expect([result.status, result.message_id]).to eq(['unconfirmed', nil])
-            expect([result.error.code, result.later_error.code]).to eq(%w[delivery_unavailable rate_limited])
+            expect { batch_template([ada], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+              result = error.results.first
+              expect([error.code, result.status, result.error.code]).to eq([code, status, code])
+            }
+            expect(a_request(:post, batch_url)).to have_been_made.twice
+          end
+        end
+
+        it 'keeps every recipient unconfirmed after a 5xx without a code, to send again with its key' do
+          stub_request(:post, batch_url).to_return(status: 502, body: '<html>Bad gateway</html>')
+
+          expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
+            expect(error.status_code).to eq(502)
+            expect(resend_with_key(error.results.first)).to eq(['unconfirmed', 'welcome:ada', true])
           }
         end
 
-        it 'keeps the first unconfirmed answer and adds what a later retry said' do
-          stub_request(:post, batch_url).to_return(
-            refuse(503, 'delivery_unavailable'),
-            answer(slot_error('idempotency_key_reused', 422, message_id: 'msg_1'))
-          )
-
-          result = batch_template([ada])
-
-          expect(result.results.first.to_h.slice(:status,
-                                                 :message_id)).to eq(status: 'unconfirmed', message_id: 'msg_1')
-          expect(result.results.first.error.code).to eq('delivery_unavailable')
-          expect(result.results.first.later_error.code).to eq('idempotency_key_reused')
-        end
-
-        it "doesn't retry once the client shuts down" do
+        it "doesn't retry once the client shuts down, and leaves the recipients unconfirmed" do
           stub_request(:post, batch_url).to_return do
             client.shutdown(timeout: 0)
             refuse(503, 'delivery_unavailable')
@@ -389,21 +309,7 @@ module PostHog
 
           expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
             expect(error.code).to eq('client_closed')
-            expect(statuses(error.results)).to eq(['unconfirmed'])
-          }
-          expect(a_request(:post, batch_url)).to have_been_made.once
-        end
-
-        it 'stops before the next request once the client shuts down' do
-          recipients = Array.new(101) { |index| { to: "user#{index}@example.com" } }
-          stub_request(:post, batch_url).to_return do
-            client.shutdown(timeout: 0)
-            answer(*Array.new(100) { |index| queued("msg_#{index}") })
-          end
-
-          expect { batch_template(recipients) }.to raise_error(EmailBatchError) { |error|
-            expect(error.code).to eq('client_closed')
-            expect(error.results.map(&:status).tally).to eq('queued' => 100, 'not_attempted' => 1)
+            expect(resend_with_key(error.results.first)).to eq(['unconfirmed', 'welcome:ada', true])
           }
           expect(a_request(:post, batch_url)).to have_been_made.once
         end

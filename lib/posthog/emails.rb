@@ -115,20 +115,18 @@ module PostHog
     #     - `queued`: PostHog accepted the email. Read it with {Emails#get} to see whether it went out.
     #     - `failed`: PostHog didn't queue the email, and {#error} says why, such as a suppressed address.
     #     - `unconfirmed`: the client can't tell whether PostHog queued the email, such as after a lost answer. It may
-    #       still go out. Send it again with the same +idempotency_key+ within 24 hours, so it goes out once.
-    #     - `not_attempted`: an earlier request of the batch failed, so the client sent nothing for this recipient.
+    #       still go out. Send it again with the same +idempotency_key+ within 24 hours of the first request that
+    #       used it, so it goes out once.
     # @!attribute [r] message_id
     #   @return [String, nil] The email's message ID, when PostHog named it.
     # @!attribute [r] replayed
     #   @return [Boolean] Whether an earlier send with the same key had already queued the email, so no new email
     #     went out.
     # @!attribute [r] error
-    #   @return [EmailError, nil] Why the email is not `queued`. For an `unconfirmed` email, {EmailError#code} is
-    #     `delivery_unavailable`, `idempotency_key_in_flight` or `api_error`.
-    # @!attribute [r] later_error
-    #   @return [EmailError, nil] For an `unconfirmed` email, the last refusal a retry in the same call answered
-    #     about it, which describes only that retry. A retry that got no answer leaves it as it was.
-    BatchEmailResult = Struct.new(:index, :to, :idempotency_key, :status, :message_id, :replayed, :error, :later_error,
+    #   @return [EmailError, nil] Why the email is not `queued`. For an `unconfirmed` email, {EmailError#code} names
+    #     what left it so, such as `idempotency_key_in_flight`, `delivery_unavailable`, `api_error` or
+    #     `network_error`, and {EmailError#fix} says to send it again with the same key.
+    BatchEmailResult = Struct.new(:index, :to, :idempotency_key, :status, :message_id, :replayed, :error,
                                   keyword_init: true)
 
     # The answer to {Emails#batch}.
@@ -333,14 +331,15 @@ module PostHog
     # your code rendered.
     #
     # Pass the template form, with +template_id+, or the code form, with +template_key+, as {#send} takes them. The
-    # client sends the recipients in requests of at most 100 recipients and 4 MiB of JSON, one after another, and
-    # waits at least 45 seconds for each answer. A batch takes no +cc+, +bcc+, +attachments+ or +scheduled_at+.
+    # client sends at most 100 recipients in one request and waits at least 45 seconds for the answer. PostHog
+    # refuses a batch it finds too large with `too_large`: split the recipients into smaller batches. A batch takes
+    # no +cc+, +bcc+, +attachments+ or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
     # queues an email twice. Retries follow {#send}'s. Send each `unconfirmed` email again with its
-    # +idempotency_key+ within 24 hours, so it goes out once.
+    # +idempotency_key+ within 24 hours of the first request that used it, so it goes out once.
     #
-    # @param recipients [Array<Hash>] 1 or more recipients, each a Hash with:
+    # @param recipients [Array<Hash>] 1 to 100 recipients, each a Hash with:
     #   - +to+ [String] the recipient's email address;
     #   - +distinct_id+ [String] optional: the recipient's distinct ID in your product;
     #   - +idempotency_key+ [String] optional: 1 to 255 visible ASCII characters, a different one for each recipient.
@@ -355,19 +354,21 @@ module PostHog
     #   or both, and optionally +from+, +reply_to+, +sensitive+, +tracking+ and +capture_engagement+, the same for
     #   every recipient. A recipient can't carry +template_data+: send personalized content with a +template_id+
     #   batch, or with {#send}.
-    # @param max_retries [Integer] Overrides the client's `email_request_max_retries` for each request of the batch.
-    #   +0+ turns retries off.
+    # @param max_retries [Integer] Overrides the client's `email_request_max_retries` for the batch's request. +0+
+    #   turns retries off.
     # @return [BatchResult] A result per recipient, in the order of +recipients+. Check each
     #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once.
-    # @raise [EmailBatchError] A request failed as a whole, such as a rate limit past its retries, so the batch
-    #   stopped. {EmailBatchError#results} holds every recipient, those not sent as `not_attempted`.
-    #   {EmailError#code} is `batch_unavailable` when the project can't send batches yet, and `not_found` when the
-    #   template doesn't exist or batch sends are off: send each email the batch didn't queue with {#send} and its
-    #   recipient's +idempotency_key+. It is `client_closed` when the client shut down during the batch. The warnings
-    #   of the requests that went out are on {EmailError#warnings}, and the client logs none of them.
+    # @raise [EmailBatchError] The request failed as a whole, such as a rate limit past its retries. The last attempt
+    #   decides the error. {EmailBatchError#results} holds every recipient: `unconfirmed` with a fix to send it again
+    #   with the same key when the request may have queued it, such as `idempotency_key_in_flight`, a 5xx, a lost
+    #   answer or `client_closed` when the client shut down before a retry, and `failed` otherwise.
+    #   {EmailError#code} is `too_large` (413) when PostHog finds the batch too large, `batch_unavailable` when the
+    #   project can't send batches yet, and `not_found` when the template doesn't exist or batch sends are off: send
+    #   each email the batch didn't queue with {#send} and its recipient's +idempotency_key+. The warnings of an
+    #   answer without a result for each recipient are on {EmailError#warnings}, and the client logs none of them.
     # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
-    # @raise [ArgumentError] An argument has the wrong type or format, such as two recipients with the same
-    #   +idempotency_key+.
+    # @raise [ArgumentError] An argument has the wrong type or format, such as more than 100 recipients or two
+    #   recipients with the same +idempotency_key+. No email was sent.
     def batch(
       recipients:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil,
       from: nil, reply_to: nil, sensitive: nil, tracking: nil, capture_engagement: nil, max_retries: nil
@@ -385,12 +386,11 @@ module PostHog
       members = batch_members(recipients, template_key.nil?)
       run = EmailBatch.new(shared, members, parse_warnings: method(:warnings), reply_error: method(:reply_error))
 
-      failure = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
-        send_chunks(run, secret_key, max_retries || @max_retries)
+      result, failure = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+        send_batch(run, secret_key, max_retries || @max_retries)
       end
       raise failure if failure
 
-      result = run.result
       log_warnings(result.warnings)
 
       result
@@ -440,6 +440,10 @@ module PostHog
               "recipients must be an Array of recipients, each a Hash with to, such as [{ to: 'user@example.com' }]."
       end
       raise ArgumentError, 'recipients must hold at least one recipient.' if recipients.empty?
+      if recipients.size > EmailBatch::MAX_RECIPIENTS
+        raise ArgumentError, "recipients must hold at most #{EmailBatch::MAX_RECIPIENTS} recipients, not " \
+                             "#{recipients.size}. Split them into smaller batches."
+      end
 
       first_with_key = {}
       recipients.each_with_index.map do |recipient, index|
@@ -491,49 +495,24 @@ module PostHog
       EmailBatch::Member.new(index: index, to: to, idempotency_key: key, wire: JSON.generate(wire))
     end
 
-    def send_chunks(run, secret_key, max_retries)
-      error = nil
-      run.chunks.each_with_index do |chunk, position|
-        if position.positive? && !still_admitted?
-          error = run.closed_at(position)
-          break
-        end
-
-        begin
-          send_chunk(run, chunk, secret_key, max_retries)
-        rescue EmailError => e
-          run.stop(position, e)
-          error = e
-          break
-        end
-      end
-      run.failure(error) if error
-    end
-
-    def send_chunk(run, chunk, secret_key, max_retries)
+    def send_batch(run, secret_key, max_retries)
       uri = URI(@app_host + BATCH_PATH)
       read_timeout = [@timeout.to_f, BATCH_ATTEMPT_TIMEOUT_SECONDS].max
-      body = chunk.body
-      with_retries(max_retries) do |attempt|
+      result = with_retries(max_retries) do |attempt|
         if attempt.positive? && !still_admitted?
-          raise EmailError.new(
-            code: 'client_closed',
-            message: "The PostHog client is shut down, so it didn't retry this request of the batch."
-          )
+          raise EmailError.new(code: 'client_closed',
+                               message: "The PostHog client is shut down, so it didn't retry the batch.")
         end
 
-        begin
-          reply = request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, body, read_timeout: read_timeout)
-        rescue EmailError
-          run.lost(chunk)
-          raise
-        end
-        run.answer(chunk, reply)
+        run.answer(request(Net::HTTP::Post.new(uri), uri, secret_key, JSON_CONTENT, run.body,
+                           read_timeout: read_timeout))
       end
+      [result, nil]
+    rescue EmailError => e
+      [nil, run.failure(e)]
     end
 
-    # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
-    # keeps the call's error as its cause.
+    # The client can't tell a failing logger from a caller's deadline, so either propagates.
     def log_warnings(warnings)
       warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
     end

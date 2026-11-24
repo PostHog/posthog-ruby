@@ -81,11 +81,10 @@ module PostHog
     end
   end
 
-  # A request of {Emails#batch} failed as a whole, so the batch stopped.
+  # The request of {Emails#batch} failed as a whole.
   #
-  # The other fields describe that request's error. {#results} holds every recipient: those of earlier requests as
-  # PostHog answered them, those of the failed request as `failed`, or `unconfirmed` where PostHog may have queued
-  # them, such as after a lost answer or while it held their key, and the rest as `not_attempted`.
+  # The other fields describe its error. {#results} holds every recipient: `unconfirmed` where PostHog may have queued
+  # them, such as after a lost answer or while it held their keys, and `failed` otherwise.
   class EmailBatchError < EmailError
     # @return [Array<Emails::BatchEmailResult>] One result per recipient, in the order of the batch's recipients.
     attr_reader :results
