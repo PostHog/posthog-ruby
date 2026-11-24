@@ -1269,15 +1269,16 @@ module PostHog
         end
       end
 
-      it "logs an unconfirmed acceptance's warnings, and its message ID reads the email" do
-        warnings = [{ code: 'unverified_link', detail: 'Check.' }]
+      it "carries an unconfirmed acceptance's warnings on its error and never logs them" do
+        warnings = [{ code: 'unverified_link', detail: 'Check.', fix: 'Fix.' }]
         stub_request(:post, send_url).to_return(accept(message_id, warnings: warnings))
         stub_request(:get, status_url).to_return(
           status: 200, body: JSON.generate(id: message_id, status: 'queued', created_at: '2026-11-23T08:00:00Z',
                                            status_at: '2026-11-23T08:00:00Z')
         )
-        log = StringIO.new
-        PostHog::Logging.logger = Logger.new(log, level: Logger::WARN)
+        logger = Logger.new(File::NULL)
+        allow(logger).to receive(:warn).and_raise(IOError, 'log device closed')
+        PostHog::Logging.logger = logger
 
         error = begin
           send_template(scheduled_at: due)
@@ -1285,7 +1286,9 @@ module PostHog
           e
         end
 
-        expect(log.string).to include('PostHog email warning unverified_link: Check.')
+        expect([error.code, error.cause]).to eq(['schedule_not_confirmed', nil])
+        expect(error.warnings).to eq([Emails::Warning.new(code: 'unverified_link', message: 'Check.', fix: 'Fix.')])
+        expect(logger).not_to have_received(:warn)
         expect(emails.get(error.message_id).status).to eq('queued')
       end
 
@@ -1299,7 +1302,7 @@ module PostHog
       end
 
       it "lets the caller's deadline stop the send while it logs warnings, whatever its class" do
-        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+        stub_request(:post, send_url).to_return(schedule(warnings: [{ code: 'unverified_link' }]))
         deadline = Class.new(StandardError)
         logger = Logger.new(File::NULL)
         events = Queue.new
@@ -1323,17 +1326,8 @@ module PostHog
         expect { sender.value }.to raise_error(deadline, 'execution expired')
       end
 
-      it 'lets an interrupt while it logs warnings stop the send' do
-        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(Interrupt)
-        PostHog::Logging.logger = logger
-
-        expect { send_template(scheduled_at: due) }.to raise_error(Interrupt)
-      end
-
-      it "logs warnings once the send settles, and keeps schedule_not_confirmed as a failing logger's cause" do
-        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
+      it 'logs warnings once the send settles, and lets a failing logger stop it with its own error' do
+        stub_request(:post, send_url).to_return(schedule(warnings: [{ code: 'unverified_link' }]))
         logger = Logger.new(File::NULL)
         settled = []
         allow(logger).to receive(:warn) do
@@ -1343,58 +1337,9 @@ module PostHog
         PostHog::Logging.logger = logger
 
         expect { send_template(scheduled_at: due) }.to raise_error(IOError, 'log device closed') { |error|
-          expect([error.cause.code, error.cause.message_id]).to eq(['schedule_not_confirmed', message_id])
+          expect(error.cause).to be_nil
         }
         expect(settled).to eq([true])
-      end
-
-      let(:other_id) { '0f4c5b2e-9d3a-4e1f-8b7c-6a5d4e3f2a1b' }
-
-      it "raises this send's error with a logger's reused exception as its cause, and never copies that exception" do
-        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
-                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        uncopyable = Class.new(IOError) { def initialize_copy(_other) = raise(Timeout::Error, 'deadline') }
-        reused = uncopyable.new('log device closed')
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(reused)
-        PostHog::Logging.logger = logger
-
-        expect { send_template(scheduled_at: due) }.to raise_error(reused)
-        expect { send_template(scheduled_at: due) }.to raise_error(EmailError) { |error|
-          expect([error.code, error.message_id, error.cause]).to eq(['schedule_not_confirmed', message_id, reused])
-        }
-        expect(reused.cause.message_id).to eq(other_id)
-      end
-
-      it "lets a logger's own error through when the logger raises it while handling another" do
-        stub_request(:post, send_url).to_return(accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        log_error = Class.new(StandardError)
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn) do
-          raise IOError, 'log device closed'
-        rescue IOError
-          raise log_error, 'could not log'
-        end
-        PostHog::Logging.logger = logger
-
-        expect { send_template(scheduled_at: due) }.to raise_error(log_error) { |error|
-          expect(error.cause.cause.message_id).to eq(message_id)
-        }
-      end
-
-      it 'names the send that failed when the logger raises its exception again while the caller handles it' do
-        stub_request(:post, send_url).to_return(accept(other_id, warnings: [{ code: 'unverified_link' }]),
-                                                accept(message_id, warnings: [{ code: 'unverified_link' }]))
-        logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(IOError.new('log device closed'))
-        PostHog::Logging.logger = logger
-
-        send_again = lambda do
-          send_template(scheduled_at: due)
-        rescue IOError
-          send_template(scheduled_at: due)
-        end
-        expect(&send_again).to raise_error(EmailError) { |error| expect(error.message_id).to eq(message_id) }
       end
 
       it 'surfaces a refused time and never sends without it' do

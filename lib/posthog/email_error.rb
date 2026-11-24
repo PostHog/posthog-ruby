@@ -28,10 +28,14 @@ module PostHog
     # @return [String, nil] The message ID of an email PostHog accepted although the call failed, such as an email
     #   whose `schedule_not_confirmed` means it may go out at another time. Read its status with {Emails#get}.
     attr_reader :message_id
+    # @return [Array<Emails::Warning>] PostHog's warnings about the emails it accepted although the call failed, each
+    #   once, such as those of a batch's requests that went out. The client logs warnings only for a call that
+    #   succeeds.
+    attr_reader :warnings
 
     # @api private
     def initialize(code:, message:, status_code: nil, why: nil, fix: nil, docs_url: nil, field: nil, retry_after: nil,
-                   message_id: nil)
+                   message_id: nil, warnings: [])
       super(message)
       @name = self.class.name_for(status_code, code)
       @code = code
@@ -42,6 +46,7 @@ module PostHog
       @field = field
       @retry_after = retry_after
       @message_id = message_id
+      @warnings = warnings.dup.freeze
     end
 
     SDK_ERROR_NAMES = {
@@ -84,15 +89,13 @@ module PostHog
   class EmailBatchError < EmailError
     # @return [Array<Emails::BatchEmailResult>] One result per recipient, in the order of the batch's recipients.
     attr_reader :results
-    # @return [Array<Emails::Warning>] Warnings PostHog returned about the requests that went out, each once.
-    attr_reader :warnings
 
     # @api private
     def initialize(error, results:, warnings:)
       super(code: error.code, message: error.message, status_code: error.status_code, why: error.why, fix: error.fix,
-            docs_url: error.docs_url, field: error.field, retry_after: error.retry_after, message_id: error.message_id)
+            docs_url: error.docs_url, field: error.field, retry_after: error.retry_after, message_id: error.message_id,
+            warnings: warnings)
       @results = results
-      @warnings = warnings
     end
   end
 end

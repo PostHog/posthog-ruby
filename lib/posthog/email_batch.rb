@@ -54,14 +54,9 @@ module PostHog
     # A refusal that may have queued the chunk is its recipients' error, or the later one of a recipient an earlier
     # attempt already left unconfirmed.
     def lost(chunk, error = nil, refusal = error)
+      refused(chunk, refusal) if refusal
       chunk.indices.each do |index|
-        if @maybe_queued.include?(index)
-          next unless refusal
-
-          earlier = @results[index]
-          set(index, 'unconfirmed', message_id: earlier.message_id, error: earlier.error, later_error: refusal)
-          next
-        end
+        next if @maybe_queued.include?(index)
 
         @maybe_queued << index
         message_id = @results[index]&.message_id
@@ -78,6 +73,8 @@ module PostHog
           lost(chunk, error)
         elsif status >= 500
           lost(chunk, nil, error)
+        else
+          refused(chunk, error)
         end
         raise error
       end
@@ -96,14 +93,8 @@ module PostHog
     end
 
     def stop(position, error)
-      later = error.status_code && error.status_code < 500 ? error : nil
       @chunks[position].indices.each do |index|
-        if !@maybe_queued.include?(index)
-          set(index, 'failed', error: error)
-        elsif later && !@results[index].error.equal?(later)
-          earlier = @results[index]
-          set(index, 'unconfirmed', message_id: earlier.message_id, error: earlier.error, later_error: later)
-        end
+        set(index, 'failed', error: error) unless @maybe_queued.include?(index)
       end
       skip_from(position + 1, EmailError.new(
                                 code: 'not_attempted',
@@ -128,6 +119,16 @@ module PostHog
     end
 
     private
+
+    # A refusal of a chunk that an earlier attempt may have queued is the later error of its recipients.
+    def refused(chunk, refusal)
+      chunk.indices.each do |index|
+        next unless @maybe_queued.include?(index)
+
+        earlier = @results[index]
+        set(index, 'unconfirmed', message_id: earlier.message_id, error: earlier.error, later_error: refusal)
+      end
+    end
 
     def split(empty)
       chunks = []

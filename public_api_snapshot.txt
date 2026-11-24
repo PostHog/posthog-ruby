@@ -65,7 +65,6 @@ constant PostHog::Defaults::Request::RETRIES: Integer
 constant PostHog::Defaults::Request::SSL: Boolean
 class PostHog::EmailBatchError < PostHog::EmailError
 instance_method PostHog::EmailBatchError#results()
-instance_method PostHog::EmailBatchError#warnings()
 class PostHog::EmailError < StandardError
 instance_method PostHog::EmailError#code()
 instance_method PostHog::EmailError#docs_url()
@@ -75,6 +74,7 @@ instance_method PostHog::EmailError#message_id()
 instance_method PostHog::EmailError#name()
 instance_method PostHog::EmailError#retry_after()
 instance_method PostHog::EmailError#status_code()
+instance_method PostHog::EmailError#warnings()
 instance_method PostHog::EmailError#why()
 class PostHog::Emails
 instance_method PostHog::Emails#batch(recipients:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., sensitive: ..., tracking: ..., capture_engagement: ..., max_retries: ...)

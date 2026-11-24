@@ -126,8 +126,8 @@ module PostHog
     #   @return [EmailError, nil] Why the email is not `queued`. For an `unconfirmed` email, {EmailError#code} is
     #     `delivery_unavailable`, `idempotency_key_in_flight` or `api_error`.
     # @!attribute [r] later_error
-    #   @return [EmailError, nil] For an `unconfirmed` email, what a retry in the same call answered about it, which
-    #     describes only that retry.
+    #   @return [EmailError, nil] For an `unconfirmed` email, the last refusal a retry in the same call answered
+    #     about it, which describes only that retry. A retry that got no answer leaves it as it was.
     BatchEmailResult = Struct.new(:index, :to, :idempotency_key, :status, :message_id, :replayed, :error, :later_error,
                                   keyword_init: true)
 
@@ -283,9 +283,7 @@ module PostHog
     #   could send the email at once. It is `schedule_not_confirmed` when PostHog accepted the email without confirming
     #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
     #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
-    #   send again. When the logger raises while it logs the reply's warnings, its error propagates with this one as
-    #   its +cause+. An exception object the logger raised before already has a cause, so this error propagates
-    #   instead, with the logger's as its +cause+.
+    #   send again. The reply's warnings are on {EmailError#warnings}, and the client logs none of them.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
@@ -324,11 +322,9 @@ module PostHog
           parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due, sent_at)
         end
       end
-      begin
-        raise unconfirmed if unconfirmed
-      ensure
-        log_warnings(result.warnings, unconfirmed)
-      end
+      raise unconfirmed if unconfirmed
+
+      log_warnings(result.warnings)
 
       result
     end
@@ -367,10 +363,8 @@ module PostHog
     #   stopped. {EmailBatchError#results} holds every recipient, those not sent as `not_attempted`.
     #   {EmailError#code} is `batch_unavailable` when the project can't send batches yet, and `not_found` when the
     #   template doesn't exist or batch sends are off: send each email the batch didn't queue with {#send} and its
-    #   recipient's +idempotency_key+. It is `client_closed` when the client shut down during the batch. When the
-    #   logger raises while it logs the warnings, its error propagates with this one as its +cause+. An exception
-    #   object the logger raised before already has a cause, so this error propagates instead, with the logger's as
-    #   its +cause+.
+    #   recipient's +idempotency_key+. It is `client_closed` when the client shut down during the batch. The warnings
+    #   of the requests that went out are on {EmailError#warnings}, and the client logs none of them.
     # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
     # @raise [ArgumentError] An argument has the wrong type or format, such as two recipients with the same
     #   +idempotency_key+.
@@ -394,12 +388,10 @@ module PostHog
       failure = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
         send_chunks(run, secret_key, max_retries || @max_retries)
       end
-      result = failure || run.result
-      begin
-        raise failure if failure
-      ensure
-        log_warnings(result.warnings, failure)
-      end
+      raise failure if failure
+
+      result = run.result
+      log_warnings(result.warnings)
 
       result
     end
@@ -542,26 +534,8 @@ module PostHog
 
     # The client can't tell a failing logger from a caller's deadline, so either propagates. A logger's own error
     # keeps the call's error as its cause.
-    def log_warnings(warnings, failure)
+    def log_warnings(warnings)
       warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
-    rescue Exception => e # rubocop:disable Lint/RescueException
-      # An error raised while the call's error propagates has it in its causes, and a caller's deadline that
-      # Thread#raise delivers has none. Ruby keeps the first cause of an exception object a logger raises again, which
-      # names an earlier call, and copying the object runs its own code, so the call's error propagates instead, with
-      # the logger's as its cause.
-      raise if failure.nil? || e.cause.nil? || caused_by?(e, failure)
-
-      raise failure, cause: e
-    end
-
-    def caused_by?(error, cause)
-      seen = {}.compare_by_identity
-      while (error = error.cause) && !seen.key?(error)
-        return true if error.equal?(cause)
-
-        seen[error] = true
-      end
-      false
     end
 
     def still_admitted?
@@ -964,7 +938,7 @@ module PostHog
       result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
                               scheduled_at: nil)
       return [result, nil] if due.nil? || time_had_passed?(fields, due, sent_at)
-      return [result, schedule_not_confirmed(id, status)] unless confirms?(fields, due)
+      return [result, schedule_not_confirmed(id, status, result.warnings)] unless confirms?(fields, due)
 
       result.scheduled_at = due
       [result, nil]
@@ -980,9 +954,10 @@ module PostHog
       fields['status'] == 'scheduled' && answered.is_a?(String) && offset_time(answered) == due
     end
 
-    def schedule_not_confirmed(message_id, status)
+    def schedule_not_confirmed(message_id, status, warnings)
       EmailError.new(
         code: 'schedule_not_confirmed', status_code: status, field: 'scheduled_at', message_id: message_id,
+        warnings: warnings,
         message: "PostHog accepted email #{message_id} without confirming its scheduled_at, so it may go out at " \
                  'another time.',
         fix: "Read what happened to the email with emails.get('#{message_id}') before you send it again: a send " \

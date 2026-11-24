@@ -216,7 +216,7 @@ module PostHog
         expect(log.string.scan('PostHog email warning unverified_link').size).to eq(1)
       end
 
-      it "lets the logger's error through, with a failed batch's error as its cause" do
+      it "carries a failed batch's warnings on its error and never logs them" do
         recipients = Array.new(101) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
         stub_request(:post, batch_url).to_return(
           answer(*Array.new(100) { |index| queued("msg_#{index}") }, warnings: [{ code: 'unverified_link' }]),
@@ -226,28 +226,23 @@ module PostHog
         allow(logger).to receive(:warn).and_raise(IOError, 'log device closed')
         PostHog::Logging.logger = logger
 
-        expect { batch_template(recipients) }.to raise_error(IOError, 'log device closed') { |error|
-          expect(error.cause).to be_a(EmailBatchError)
-          expect(error.cause.results.map(&:status).tally).to eq('queued' => 100, 'failed' => 1)
+        expect { batch_template(recipients) }.to raise_error(EmailBatchError) { |error|
+          expect([error.code, error.cause,
+                  error.warnings.map(&:code)]).to eq(['batch_unavailable', nil, ['unverified_link']])
+          expect(error.results.map(&:status).tally).to eq('queued' => 100, 'failed' => 1)
         }
+        expect(logger).not_to have_received(:warn)
       end
 
-      it "raises the failed batch's error with a logger's reused exception as its cause" do
-        recipients = Array.new(101) { |index| { to: "user#{index}@example.com", idempotency_key: "key-#{index}" } }
-        slots = Array.new(100) { |index| queued("msg_#{index}") }
-        first = answer(*slots, warnings: [{ code: 'unverified_link' }])
-        stub_request(:post, batch_url)
-          .to_return(first, refuse(409, 'batch_unavailable'), first, refuse(404, 'not_found'))
-        reused = IOError.new('log device closed')
+      it 'lets a failing logger stop a batch that succeeded with its own error' do
+        stub_request(:post, batch_url).to_return(answer(queued('msg_0'), warnings: [{ code: 'unverified_link' }]))
         logger = Logger.new(File::NULL)
-        allow(logger).to receive(:warn).and_raise(reused)
+        allow(logger).to receive(:warn).and_raise(IOError, 'log device closed')
         PostHog::Logging.logger = logger
 
-        expect { batch_template(recipients) }.to raise_error(reused)
-        expect { batch_template(recipients) }.to raise_error(EmailBatchError) { |error|
-          expect([error.code, error.cause]).to eq(['not_found', reused])
+        expect { batch_template([{ to: 'user@example.com' }]) }.to raise_error(IOError, 'log device closed') { |error|
+          expect(error.cause).to be_nil
         }
-        expect(reused.cause.code).to eq('batch_unavailable')
       end
 
       context 'when a request fails as a whole' do
@@ -301,11 +296,14 @@ module PostHog
         {
           [503, 409] => %w[delivery_unavailable idempotency_key_in_flight],
           [409, 503] => %w[idempotency_key_in_flight delivery_unavailable],
-          [409, 429, 503] => %w[idempotency_key_in_flight delivery_unavailable]
+          [409, 429, 503] => %w[idempotency_key_in_flight delivery_unavailable],
+          [409, 429, :reset] => %w[idempotency_key_in_flight rate_limited]
         }.each do |statuses, (error_code, later_code)|
           it "keeps the first reason it can't confirm a recipient and the last refusal after #{statuses.join(', ')}" do
             codes = { 409 => 'idempotency_key_in_flight', 429 => 'rate_limited', 503 => 'delivery_unavailable' }
-            stub_request(:post, batch_url).to_return(*statuses.map { |status| refuse(status, codes[status]) })
+            stub = stub_request(:post, batch_url)
+                   .to_return(*statuses.grep(Integer).map { |status| refuse(status, codes[status]) })
+            stub.then.to_raise(Errno::ECONNRESET) if statuses.last == :reset
 
             expect { batch_template([ada], max_retries: statuses.size - 1) }.to raise_error(EmailBatchError) { |error|
               result = error.results.first
@@ -411,7 +409,7 @@ module PostHog
         end
       end
 
-      it "waits at least 45 seconds for each answer, and connects and writes within the client's timeout" do
+      it "hands Net::HTTP a read wait of at least 45 seconds and the client's connect and write timeouts" do
         stub_request(:post, batch_url).to_return(answer(queued('msg_1')))
         allow(Net::HTTP).to receive(:start).and_call_original
         options[:email_request_timeout_seconds] = 3
