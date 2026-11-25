@@ -54,8 +54,7 @@ module PostHog
     end
 
     # Identity resolution: runs the `identify` option and merges the result into
-    # the per-server cache. Every event carries the identity, so no standalone
-    # `$identify` event is sent.
+    # the per-server cache.
     #
     # @api private
     module Identity
