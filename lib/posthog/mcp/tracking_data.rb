@@ -9,8 +9,8 @@ module PostHog
     class TrackingData
       attr_reader :options, :sink, :server_name, :server_version, :identified_sessions,
                   :tool_descriptions, :tool_categories, :tool_output_instructions, :tool_owned_params
-      attr_accessor :session_id, :session_source, :last_mcp_session_id, :last_activity, :warned_no_stateless_session,
-                    :virtual_tool, :http_transport_seen, :warned_unscoped_capture
+      attr_accessor :session_id, :session_source, :last_mcp_session_id, :last_tool_call_end,
+                    :warned_no_stateless_session, :virtual_tool, :http_transport_seen, :warned_unscoped_capture
 
       def initialize(options:, sink:, server_name: nil, server_version: nil)
         @options = options
@@ -18,10 +18,11 @@ module PostHog
         @server_name = server_name
         @server_version = server_version
         @mutex = Mutex.new
-        @session_id = nil
+        # A one-client connection's session, generated when the server starts.
+        @session_id = Session.new_session_id
         @session_source = 'generated'
         @last_mcp_session_id = nil
-        @last_activity = Time.now
+        @last_tool_call_end = Time.now
         @warned_no_stateless_session = false
         # Set once a request arrives over HTTP: from then on the server-wide session
         # is never a safe fallback for a capture that lost its request scope.

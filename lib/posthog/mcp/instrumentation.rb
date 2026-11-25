@@ -145,6 +145,7 @@ module PostHog
         end
       ensure
         safely { release_custom_events(@scope[:session_id]) }
+        Session.end_tool_call(@data) if @kind == :tools_call && !http?
       end
 
       def enclosing_invocation?
@@ -154,6 +155,7 @@ module PostHog
       # --- dispatchers -------------------------------------------------------
 
       def dispatch_tool_call
+        Session.rotate_if_idle(@data) unless http?
         name = fetch(@params, :name)
         arguments = fetch(@params, :arguments)
         arguments = nil unless arguments.is_a?(Hash)
@@ -515,7 +517,6 @@ module PostHog
                                                                            request_session_id: request_session_id)
         @session_sources[session_id] = source
         warn_stateless_session_not_wired if source == 'generated' && http?
-        Session.touch_connection(@data) if (@client_conversation || conversation_id) && !http?
 
         # A tool call prepares twice: once before the body to pin the session, and
         # once after it, when the conversation anchor is known. A customer's
