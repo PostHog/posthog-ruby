@@ -39,8 +39,7 @@ module PostHog
 
         env = request.respond_to?(:env) ? request.env : {}
 
-        stateless = instance_variable_defined?(:@stateless) && @stateless
-        RequestScope.with(headers: RequestScope.headers_from_env(env), stateless: stateless) do |scope|
+        RequestScope.with(headers: RequestScope.headers_from_env(env)) do |scope|
           response = super
           mint = scope[:mint]
           if mint && response.is_a?(Array) && response[1].is_a?(Hash) &&

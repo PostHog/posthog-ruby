@@ -574,10 +574,12 @@ module PostHog
         SessionToken.read_header(@headers)
       end
 
-      # The transport's own session id (never our token). A stateless transport's
-      # session is assigned afresh to every request, so it groups nothing.
+      # The transport's own session id (never our token). A 2026-07-28 request
+      # carries none: the session the gem gives it is assigned afresh to each request.
       def mcp_session_id(token)
-        transport_id = @session.session_id if @session.respond_to?(:session_id) && !@scope[:stateless]
+        if @session.respond_to?(:session_id) && self.class.legacy_era?(protocol_version)
+          transport_id = @session.session_id
+        end
         return transport_id if transport_id.is_a?(String) && !transport_id.empty?
 
         token ? nil : header_session_id
@@ -651,11 +653,11 @@ module PostHog
         params.is_a?(Hash) ? params : {}
       end
 
-      # A client conversation id only groups the call; its value is never sent.
+      # A recognized client's conversation id only groups the call; its value is never sent.
       def request_with_arguments(arguments)
         params = @params.merge(SchemaMutation.key_for(@params, :arguments) => arguments)
         meta = envelope_meta
-        if @client_conversation && meta
+        if client_row && meta
           params = params.merge(SchemaMutation.key_for(@params, :_meta) => meta.except(client_row.key,
                                                                                        client_row.key.to_sym))
         end

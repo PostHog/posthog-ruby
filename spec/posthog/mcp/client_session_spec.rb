@@ -180,6 +180,18 @@ module PostHogMcpClientSessionVectors
         expect(calls.map { |call| call['$session_id'] }.uniq.size).to eq(2)
         expect(calls.map { |call| call['$session_id'] }).to all(match(/\Ases_\h{8}-\h{4}-7/))
       end
+
+      next if meta.empty?
+
+      it "mints a handle for a sessionless #{era} request on a stateful transport" do
+        stateful = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: false, enable_json_response: true)
+        instrument
+        params = { name: 'search_docs', arguments: { query: 'flags' }, _meta: meta }
+        texts = parse(stateful.call(env_for(rpc(2, 'tools/call', params), headers)))['result']['content'].map { |block| block['text'] }
+
+        expect(texts.last).to match(HANDLE_BLOCK)
+        expect(tool_calls.first['$mcp_session_source']).to eq('conversation')
+      end
     end
 
     it 'labels a replayed token as transport and mints no handle beside it' do
@@ -194,7 +206,8 @@ module PostHogMcpClientSessionVectors
 
     {
       'ChatGPT' => [CHATGPT, { 'openai/session' => 'v1/conv-canary-0001' }],
-      'Codex' => [CODEX, { 'sessionId' => '019a4f2e-1c3d-7b8a-9e0f-cafecafecafe' }]
+      'Codex' => [CODEX, { 'sessionId' => '019a4f2e-1c3d-7b8a-9e0f-cafecafecafe' }],
+      'invalid Codex' => [CODEX, { 'sessionId' => 'not-a-uuid-canary' }]
     }.each do |name, (user_agent, meta)|
       it "sends no #{name} conversation id in any property" do
         instrument(identify: ->(_request, _extra) { { distinct_id: 'user-1' } })
@@ -214,25 +227,25 @@ module PostHogMcpClientSessionVectors
       expect(identify[:properties]['$mcp_session_source']).to eq('client_metadata')
     end
 
-    it 'counts a call with a client id as activity on a one-client connection' do
-      instrument(enable_conversation_id: false)
-      start = Time.now
-      stdio_call = lambda do |minutes, meta = nil|
-        allow(Time).to receive(:now).and_return(start + (minutes * 60))
-        params = { name: 'search_docs', arguments: { query: 'flags' } }
-        params[:_meta] = meta if meta
-        server.handle(rpc(minutes, 'tools/call', params))
-      end
-      server.handle(rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {},
-                                           clientInfo: { name: 'Visual Studio Code', version: '1' } }))
-      stdio_call.call(0)
-      vscode = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
-      stdio_call.call(20, vscode)
-      stdio_call.call(40, vscode)
-      stdio_call.call(45)
+    {
+      'keeps a connection session a client-id call kept active' => [[0, 20, 40, 45], true],
+      'rolls a connection session over after 30 idle minutes, even under a client-id call' => [[0, 40, 41], false]
+    }.each do |behavior, (minutes, same)|
+      it behavior do
+        instrument(enable_conversation_id: false)
+        start = Time.now
+        server.handle(rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {},
+                                             clientInfo: { name: 'Visual Studio Code', version: '1' } }))
+        minutes.each_with_index do |minute, index|
+          allow(Time).to receive(:now).and_return(start + (minute * 60))
+          params = { name: 'search_docs', arguments: { query: 'flags' } }
+          params[:_meta] = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' } unless [0, minutes.size - 1].include?(index)
+          server.handle(rpc(index + 2, 'tools/call', params))
+        end
 
-      sessions = tool_calls.map { |call| call['$session_id'] }
-      expect(sessions.first).to eq(sessions.last)
+        sessions = tool_calls.map { |call| call['$session_id'] }
+        expect(sessions.first == sessions.last).to eq(same)
+      end
     end
 
     context 'custom events captured during a call' do

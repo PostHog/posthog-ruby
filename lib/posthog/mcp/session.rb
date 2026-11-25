@@ -60,8 +60,7 @@ module PostHog
             return [data.session_id, 'mcp']
           end
 
-          stale = (now - data.last_activity) > (INACTIVITY_TIMEOUT_MINUTES * 60)
-          if data.session_source != 'generated' || stale || data.session_id.nil?
+          if data.session_source != 'generated' || stale?(data, now) || data.session_id.nil?
             data.session_id = new_session_id
             data.session_source = 'generated'
           end
@@ -73,7 +72,17 @@ module PostHog
       # A call grouped by its client or agent is still activity on a one-client
       # connection, so the connection's own session does not roll over under it.
       def touch_connection(data)
-        data.synchronize { data.last_activity = Time.now if data.session_source == 'generated' }
+        data.synchronize do
+          next unless data.session_source == 'generated'
+
+          now = Time.now
+          data.session_id = new_session_id if stale?(data, now)
+          data.last_activity = now
+        end
+      end
+
+      def stale?(data, now)
+        (now - data.last_activity) > (INACTIVITY_TIMEOUT_MINUTES * 60)
       end
 
       def present?(value)
