@@ -39,7 +39,8 @@ module PostHog
     attr_reader :body
 
     # @param shared [Hash] The batch's email without its recipients.
-    # @param members [Array<Member>] Every recipient, with its JSON as the request carries it.
+    # @param members [Array<Member>] Every recipient, with its JSON as the request carries it. The body takes it
+    #   over, so each member's +wire+ is +nil+ afterwards.
     # @param parse_warnings [#call] Turns a reply's warnings into {Emails::Warning}s.
     # @param reply_error [#call] Turns a refused reply into an {EmailError}.
     def initialize(shared, members, parse_warnings:, reply_error:)
@@ -49,8 +50,17 @@ module PostHog
       @warnings = []
       @maybe_queued = false
       @attempt_error = nil
-      empty = JSON.generate(shared.merge(recipients: []))
-      @body = "#{empty.delete_suffix(']}')}#{members.map(&:wire).join(',')}]}"
+      head = JSON.generate(shared.merge(recipients: [])).delete_suffix(']}')
+      # A buffer of the exact size, and each recipient's JSON dropped once copied, so the request body is the only copy
+      # of the batch through every retry.
+      size = head.bytesize + members.sum { |member| member.wire.bytesize + 1 } + 1
+      @body = String.new(head, capacity: size, encoding: Encoding::UTF_8)
+      members.each_with_index do |member, index|
+        @body << ',' unless index.zero?
+        @body << member.wire
+        member.wire = nil
+      end
+      @body << ']}'
     end
 
     # @return [Emails::BatchResult] The result of an answer with a result for each recipient.
