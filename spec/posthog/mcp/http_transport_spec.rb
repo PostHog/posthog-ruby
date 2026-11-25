@@ -92,7 +92,6 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
 
         events = drain_events(client)
         expect(events_named(events, '$mcp_tool_call').map { |e| e[:distinct_id] }).to eq(['user-1'])
-        expect(events_named(events, '$identify').size).to eq(1)
         expect(events.map { |e| JSON.generate(e) }.grep(/#{secret}/)).to eq([])
       end
     end

@@ -523,17 +523,13 @@ module PostHog
         # `identify` callback runs once per session per request, so preparing
         # twice never asks it the same question twice.
         unless @identified_in_request.key?(session_id)
-          identify_event, actor = Identity.identify_for_request(@data, session_id, request, extra)
+          actor = Identity.resolve(@data, session_id, request, extra)
           # Pin what this request resolved. Every event it emits afterwards -
           # including one a tool body captures through {Analytics} - is attributed
           # to this, never to a re-read of the cache another request may have
           # overwritten while the handler ran.
           @identified_in_request[session_id] = actor
           @scope[:actor] = actor if @scope.is_a?(Hash)
-          if identify_event
-            self.class.capture_event(@data, identify_event.merge('session_source' => source),
-                                     actor: actor)
-          end
         end
         session_id
       end

@@ -468,7 +468,7 @@ RSpec.describe PostHog::MCP do
   describe 'identify, event_properties and before_send' do
     before { allow(Kernel).to receive(:warn) }
 
-    it 'identifies once per session, sets $set/$groups and turns person processing on' do
+    it 'sets $set/$groups from identify and turns person processing on' do
       calls = 0
       identify = lambda do |_request, _extra|
         calls += 1
@@ -480,15 +480,12 @@ RSpec.describe PostHog::MCP do
       server.handle(initialize_request)
       3.times { |i| server.handle(rpc(i + 2, 'tools/call', { name: 'echo', arguments: { message: 'x' } })) }
       events = drain_events(client)
-      expect(events.count { |e| e[:event] == '$identify' }).to eq(1)
       expect(calls).to eq(4)
       call = events.find { |e| e[:event] == '$mcp_tool_call' }
       expect(call[:distinct_id]).to eq('user-1')
       expect(call[:properties]).to include('$set' => { 'name' => 'Alice' }, '$groups' => { 'organization' => 'org_123' },
                                            'env' => 'production')
       expect(call[:properties]).not_to have_key('$process_person_profile')
-      identify_event = events.find { |e| e[:event] == '$identify' }
-      expect(identify_event[:properties]['$mcp_resource_name']).to eq('Unknown')
     end
 
     it 'runs before_send per payload, dropping and mutating' do
