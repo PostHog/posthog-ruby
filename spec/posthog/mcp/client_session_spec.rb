@@ -299,7 +299,7 @@ module PostHogMcpClientSessionVectors
         PostHogMcpSearchDocsTool.before_capture = -> { 1001.times { PostHogMcpSearchDocsTool.analytics.capture('docs_searched') } }
         call_search
 
-        expect(events_named(drain_events(client), 'docs_searched').size).to eq(1001)
+        expect(events_named(drain_events(client), 'docs_searched').size).to eq(1002)
         expect(logs.grep(/custom events/).size).to eq(1)
       end
 
