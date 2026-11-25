@@ -517,6 +517,12 @@ module PostHog
 
     # Class methods
 
+    # A usable group key is a non-empty string or a number. Any other key counts as no key, matching
+    # the server: conditions aggregated on that group type are skipped.
+    def self.usable_group_key?(group_key)
+      (group_key.is_a?(String) && !group_key.empty?) || group_key.is_a?(Numeric)
+    end
+
     def self.pick_unresolved_reason(current, reason)
       return reason if current.nil?
 
@@ -1477,8 +1483,8 @@ module PostHog
 
       group_name_symbol = group_name.to_sym
 
-      unless groups.key?(group_name_symbol)
-        # Group flags are never enabled if appropriate `groups` aren't passed in
+      unless FeatureFlagsPoller.usable_group_key?(groups[group_name_symbol])
+        # Group flags are never enabled if a usable group key isn't passed in
         # don't failover to `/flags/`, since response will be the same
         logger.warn "[FEATURE FLAGS] Can't compute group feature flag: #{flag[:key]} without group names passed in"
         return false
@@ -1544,7 +1550,7 @@ module PostHog
             # Person condition under a mixed flag — caller already passed person props/bucketing.
           else
             group_name = snapshot[:group_type_mapping][condition_aggregation.to_s.to_sym]
-            if group_name.nil? || !groups.key?(group_name.to_sym)
+            if group_name.nil? || !FeatureFlagsPoller.usable_group_key?(groups[group_name.to_sym])
               logger.debug do
                 "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
                   "group type index #{condition_aggregation} not available"
