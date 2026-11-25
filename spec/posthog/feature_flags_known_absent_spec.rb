@@ -551,8 +551,8 @@ module PostHog
                                               person_property_keys_known_absent: ['tier'],
                                               only_evaluate_locally: true)
 
-        expect(snapshot.get_flag('person-child')).to be_nil
-        expect(snapshot.unresolved_flags).to eq('person-child' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+        expect(snapshot.get_flag('person-child')).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
       end
 
       it 'do not leak group keys into a person-aggregated flag dependency' do
@@ -565,8 +565,8 @@ module PostHog
                                               group_property_keys_known_absent: { organization: ['tier'] },
                                               only_evaluate_locally: true)
 
-        expect(snapshot.get_flag('org-child')).to be_nil
-        expect(snapshot.unresolved_flags).to eq('org-child' => UnresolvedFlagReason::UNRESOLVED_DEPENDENCY)
+        expect(snapshot.get_flag('org-child')).to be(false)
+        expect(snapshot.unresolved_flags).to eq({})
       end
 
       it 'apply the group keys of a group-aggregated dependency instead of person values' do
@@ -583,6 +583,82 @@ module PostHog
 
         expect(snapshot.get_flag('org-parent')).to be(false)
         expect(snapshot.get_flag('person-child')).to be(false)
+      end
+
+      it 'evaluate a group-aggregated dependency as false when its group is not passed' do
+        org_parent = group_flag('org-parent', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                                group_type_index: 0 })
+        c = local_client(org_parent, flag('person-child', flag_dependency('org-parent')),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: %w[person-child org-parent], groups: {},
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('org-parent')).to be(false)
+        expect(snapshot.get_flag('person-child')).to be(false)
+      end
+
+      it 'evaluate a group-aggregated dependency with its group properties, not person properties' do
+        org_parent = group_flag('org-parent',
+                                { key: 'tier', operator: 'is_not_set', type: 'group', group_type_index: 0 },
+                                { key: 'region', operator: 'exact', value: 'us', type: 'group', group_type_index: 0 })
+        c = local_client(org_parent, flag('person-child', flag_dependency('org-parent')),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: %w[person-child org-parent],
+                                              groups: { organization: 'acme' },
+                                              person_properties: { region: 'us' },
+                                              group_properties: { organization: { region: 'eu' } },
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('org-parent')).to be(false)
+        expect(snapshot.get_flag('person-child')).to be(false)
+      end
+
+      it 'evaluate a person-aggregated dependency with person properties, not group properties' do
+        person_parent = flag('person-parent', person('plan', 'is_not_set'), person('region', 'exact', 'us'))
+        c = local_client(person_parent, group_flag('org-child', flag_dependency('person-parent')),
+                         group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: %w[org-child person-parent],
+                                              groups: { organization: 'acme' },
+                                              person_properties: { region: 'us' },
+                                              group_properties: { organization: { region: 'eu' } },
+                                              person_property_keys_known_absent: ['plan'],
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('person-parent')).to be(true)
+        expect(snapshot.get_flag('org-child')).to be(true)
+      end
+
+      it 'apply group keys to a legacy group filter without group_type_index' do
+        legacy_exact = group_flag('legacy-exact', { key: 'tier', operator: 'exact', value: 'enterprise',
+                                                    type: 'group' })
+        legacy_unset = group_flag('legacy-unset', { key: 'tier', operator: 'is_not_set', type: 'group' })
+        c = local_client(legacy_exact, legacy_unset, group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: %w[legacy-exact legacy-unset],
+                                              groups: { organization: 'acme' },
+                                              group_properties: { organization: { tier: 'enterprise' } },
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.get_flag('legacy-exact')).to be(false)
+        expect(snapshot.get_flag('legacy-unset')).to be(true)
+      end
+
+      it 'do not apply group keys to a group filter for another group type' do
+        other_type = group_flag('other-type', { key: 'tier', operator: 'is_not_set', type: 'group',
+                                                group_type_index: 1 })
+        c = local_client(other_type, group_type_mapping: group_type_mapping)
+
+        snapshot = c.evaluate_flags('user-1', flag_keys: ['other-type'], groups: { organization: 'acme' },
+                                              group_property_keys_known_absent: { organization: ['tier'] },
+                                              only_evaluate_locally: true)
+
+        expect(snapshot.unresolved_flags).to eq('other-type' => UnresolvedFlagReason::MISSING_CONTEXT)
       end
 
       it 'apply group keys to a dependency with the same group aggregation' do

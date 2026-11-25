@@ -119,7 +119,8 @@ module PostHog
         return type == 'person' if @group_type_index.nil?
 
         filter_group_type_index = property[:group_type_index] || property['group_type_index']
-        type == 'group' && !filter_group_type_index.nil? && aggregation?(filter_group_type_index)
+        # Like the flags service, a group filter without its own index reads the scope it is evaluated in.
+        type == 'group' && (filter_group_type_index.nil? || aggregation?(filter_group_type_index))
       end
     end
 

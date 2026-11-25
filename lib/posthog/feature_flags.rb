@@ -1223,11 +1223,14 @@ module PostHog
     # @param distinct_id [String] The distinct ID being evaluated
     # @param properties [Hash] Person properties for evaluation
     # @param cohort_properties [Hash] Cohort properties for evaluation
-    # @param known_absent_scope [PostHog::KnownAbsentPropertyKeys::Scope, nil] Keys of properties known to be
-    #   absent. A dependency aggregated differently uses the listing for its own aggregation instead.
+    # @param context [Hash, nil] The evaluation inputs of the top-level flag. Each dependency is evaluated from
+    #   them like a standalone flag, with its own aggregation, bucketing identifier and properties, as the flags
+    #   service does.
     # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
-    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties,
-                                 snapshot: _evaluation_snapshot, known_absent: nil, known_absent_scope: nil)
+    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, _cohort_properties = {},
+                                 snapshot: _evaluation_snapshot, context: nil)
+      context ||= { distinct_id: distinct_id, groups: {}, person_properties: properties, group_properties: {},
+                    known_absent: nil }
       if snapshot[:flags_by_key].nil? || evaluation_cache.nil?
         # Cannot evaluate flag dependencies without required context
         raise InconclusiveMatchError.new(
@@ -1263,16 +1266,10 @@ module PostHog
           else
             # Recursively evaluate the dependency using existing instance method
             begin
-              dep_result = match_feature_flag_properties(
-                dep_flag,
-                distinct_id,
-                properties,
-                evaluation_cache,
-                cohort_properties,
-                snapshot: snapshot,
-                known_absent: known_absent,
-                known_absent_scope: dependency_known_absent_scope(dep_flag, known_absent, known_absent_scope,
-                                                                  snapshot)
+              dep_result = _compute_flag_locally(
+                dep_flag, context[:distinct_id], context[:groups], context[:person_properties],
+                context[:group_properties],
+                snapshot: snapshot, known_absent: context[:known_absent], evaluation_cache: evaluation_cache
               )
               evaluation_cache[dep_flag_key] = dep_result
             rescue RequiresServerEvaluation => e
@@ -1307,18 +1304,6 @@ module PostHog
       actual_value = evaluation_cache[property[:key]]
 
       self.class.matches_dependency_value(expected_value, actual_value)
-    end
-
-    # A dependency uses the listing for its own aggregation, so a listing for one scope never resolves a
-    # filter on another. It has none when its group type index is unknown.
-    def dependency_known_absent_scope(dep_flag, known_absent, known_absent_scope, snapshot)
-      dep_aggregation = dep_flag.dig(:filters, :aggregation_group_type_index)
-      return known_absent_scope if known_absent_scope&.aggregation?(dep_aggregation)
-      return nil if known_absent.nil?
-      return known_absent.person_scope if dep_aggregation.nil?
-
-      group_name = snapshot[:group_type_mapping][dep_aggregation.to_s.to_sym]
-      group_name.nil? ? nil : known_absent.group_scope(group_name, dep_aggregation)
     end
 
     def self.matches_dependency_value(expected_value, actual_value)
@@ -1450,7 +1435,7 @@ module PostHog
     end
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {},
-                              snapshot: _evaluation_snapshot, known_absent: nil)
+                              snapshot: _evaluation_snapshot, known_absent: nil, evaluation_cache: nil)
       # An inactive flag is false whatever its experience continuity setting.
       return false unless flag[:active]
 
@@ -1459,8 +1444,9 @@ module PostHog
                                            reason: UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
       end
 
-      # Create evaluation cache for flag dependencies
-      evaluation_cache = {}
+      evaluation_cache ||= {}
+      context = { distinct_id: distinct_id, groups: groups, person_properties: person_properties,
+                  group_properties: group_properties, known_absent: known_absent }
 
       flag_filters = flag[:filters] || {}
 
@@ -1474,7 +1460,8 @@ module PostHog
         return match_feature_flag_properties(flag, distinct_id, local_person_properties, evaluation_cache,
                                              snapshot[:cohorts], groups: groups, group_properties: group_properties,
                                                                  snapshot: snapshot, known_absent: known_absent,
-                                                                 known_absent_scope: known_absent&.person_scope)
+                                                                 known_absent_scope: known_absent&.person_scope,
+                                                                 context: context)
       end
 
       group_name = snapshot[:group_type_mapping][aggregation_group_type_index.to_s.to_sym]
@@ -1503,7 +1490,7 @@ module PostHog
                                                         snapshot: snapshot, known_absent: known_absent,
                                                         known_absent_scope: known_absent&.group_scope(
                                                           group_name, aggregation_group_type_index
-                                                        ))
+                                                        ), context: context)
     end
 
     def _compute_flag_payload_locally(key, match_value, snapshot: _evaluation_snapshot)
@@ -1523,7 +1510,7 @@ module PostHog
     # condition aggregated by another group type can use that group type's keys.
     def match_feature_flag_properties(flag, distinct_id, properties, evaluation_cache, cohort_properties = {},
                                       groups: {}, group_properties: {}, snapshot: _evaluation_snapshot,
-                                      known_absent: nil, known_absent_scope: nil)
+                                      known_absent: nil, known_absent_scope: nil, context: nil)
       flag_filters = flag[:filters] || {}
 
       # Holdouts precede release conditions: a held-out identifier is excluded from
@@ -1577,7 +1564,7 @@ module PostHog
         end
 
         case condition_match_outcome(flag, effective_bucketing, condition, effective_properties, evaluation_cache,
-                                     cohort_properties, snapshot: snapshot, known_absent: known_absent,
+                                     cohort_properties, snapshot: snapshot, context: context,
                                                         known_absent_scope: effective_known_absent_scope)
         when :match
           variant_override = condition[:variant]
@@ -1639,7 +1626,7 @@ module PostHog
     # Distinguishing :no_match from :out_of_rollout_bound lets the caller implement the
     # early_exit behavior (mirrors the server-side Rust evaluation engine).
     def condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {},
-                                snapshot: _evaluation_snapshot, known_absent: nil, known_absent_scope: nil)
+                                snapshot: _evaluation_snapshot, known_absent_scope: nil, context: nil)
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
@@ -1651,8 +1638,7 @@ module PostHog
           matches =
             if prop[:type] == 'flag'
               evaluate_flag_dependency(prop, evaluation_cache, distinct_id, properties, cohort_properties,
-                                       snapshot: snapshot, known_absent: known_absent,
-                                       known_absent_scope: known_absent_scope)
+                                       snapshot: snapshot, context: context)
             else
               FeatureFlagsPoller.match_property(prop, properties, cohort_properties,
                                                 property_matching_version: snapshot[:property_matching_version],
