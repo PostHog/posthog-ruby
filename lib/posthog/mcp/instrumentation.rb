@@ -149,12 +149,13 @@ module PostHog
         # Resolution reads the stripped values, never `original_arguments`: only an
         # argument this layer injected is ours to interpret. A `conversation_id` or
         # `context` the tool declares itself stays application data and is left to it.
-        request = request_with_arguments(original_arguments)
         handle_free = safely(false) { client_row&.handle_free }
         @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) }
+        request = request_with_arguments(original_arguments)
         conversation_id, minted = safely([nil, false]) do
           ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
-                                 stripped[ConversationId::PARAM_NAME], name, missing_name, mint: !handle_free)
+                                 stripped[ConversationId::PARAM_NAME], name, missing_name,
+                                 mint: !handle_free && !carries_session?)
         end
 
         if virtual_tool?(name)
@@ -499,6 +500,7 @@ module PostHog
                                                                            request_session_id: request_session_id)
         @session_sources[session_id] = source
         warn_stateless_session_not_wired if source == 'generated' && http?
+        Session.touch_connection(@data) if (@client_conversation || conversation_id) && !http?
 
         # A tool call prepares twice: once before the body to pin the session, and
         # once after it, when the conversation anchor is known. A customer's
@@ -512,7 +514,10 @@ module PostHog
           # overwritten while the handler ran.
           @identified_in_request[session_id] = actor
           @scope[:actor] = actor if @scope.is_a?(Hash)
-          self.class.capture_event(@data, identify_event, actor: actor) if identify_event
+          if identify_event
+            self.class.capture_event(@data, identify_event.merge('session_source' => source),
+                                     actor: actor)
+          end
         end
         session_id
       end
@@ -533,6 +538,10 @@ module PostHog
         )
         @scope[:mint] = SessionToken.encode(payload)
         payload
+      end
+
+      def carries_session?
+        !@token.nil? || !mcp_session_id(@token).nil?
       end
 
       def request_session_id
@@ -565,9 +574,10 @@ module PostHog
         SessionToken.read_header(@headers)
       end
 
-      # The transport's own session id (never our token).
+      # The transport's own session id (never our token). A stateless transport's
+      # session is assigned afresh to every request, so it groups nothing.
       def mcp_session_id(token)
-        transport_id = @session.respond_to?(:session_id) ? @session.session_id : nil
+        transport_id = @session.session_id if @session.respond_to?(:session_id) && !@scope[:stateless]
         return transport_id if transport_id.is_a?(String) && !transport_id.empty?
 
         token ? nil : header_session_id
@@ -641,8 +651,14 @@ module PostHog
         params.is_a?(Hash) ? params : {}
       end
 
+      # A client conversation id only groups the call; its value is never sent.
       def request_with_arguments(arguments)
         params = @params.merge(SchemaMutation.key_for(@params, :arguments) => arguments)
+        meta = envelope_meta
+        if @client_conversation && meta
+          params = params.merge(SchemaMutation.key_for(@params, :_meta) => meta.except(client_row.key,
+                                                                                       client_row.key.to_sym))
+        end
         @request.merge(SchemaMutation.key_for(@request, :params) => params)
       end
 

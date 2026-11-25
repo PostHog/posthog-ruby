@@ -65,9 +65,10 @@ module PostHog
       # @param headers [Hash{String => String}] lowercase header names
       # @param transport [Symbol] `:http` for the Streamable HTTP transport, `:other`
       #   for a transport that publishes no headers (stdio, a custom dispatcher)
-      def with(headers:, transport: :http)
+      # @param stateless [Boolean] the transport assigns each request a session of its own
+      def with(headers:, transport: :http, stateless: false)
         previous = current
-        self.current = { headers: headers, transport: transport, mint: nil, session_id: nil }
+        self.current = { headers: headers, transport: transport, stateless: stateless, mint: nil, session_id: nil }
         yield current
       ensure
         self.current = previous

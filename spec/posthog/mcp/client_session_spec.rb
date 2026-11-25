@@ -162,23 +162,77 @@ module PostHogMcpClientSessionVectors
       expect(sessions.map { |session| session == CODEX_SESSION }).to eq([true, false, false])
     end
 
-    it 'gives every sessionless stateless HTTP request a fresh generated session' do
-      instrument(enable_conversation_id: false)
-      call_search
-      call_search(id: 3)
+    {
+      'legacy' => [{}, {}],
+      '2026-07-28' => [
+        { 'io.modelcontextprotocol/protocolVersion' => '2026-07-28', 'io.modelcontextprotocol/clientCapabilities' => {},
+          'io.modelcontextprotocol/clientInfo' => { 'name' => 'example-client', 'version' => '1' } },
+        { 'mcp-protocol-version' => '2026-07-28', 'mcp-method' => 'tools/call', 'mcp-name' => 'search_docs' }
+      ]
+    }.each do |era, (meta, headers)|
+      it "gives every sessionless #{era} stateless HTTP request a fresh generated session" do
+        instrument(enable_conversation_id: false)
+        call_search(meta: meta, headers: headers)
+        call_search(meta: meta, headers: headers, id: 3)
 
-      calls = tool_calls
-      expect(calls.map { |call| call['$mcp_session_source'] }).to eq(%w[generated generated])
-      expect(calls.map { |call| call['$session_id'] }.uniq.size).to eq(2)
+        calls = tool_calls
+        expect(calls.map { |call| call['$mcp_session_source'] }).to eq(%w[generated generated])
+        expect(calls.map { |call| call['$session_id'] }.uniq.size).to eq(2)
+        expect(calls.map { |call| call['$session_id'] }).to all(match(/\Ases_\h{8}-\h{4}-7/))
+      end
     end
 
-    it 'labels a replayed token and a transport session id as transport' do
-      instrument(enable_conversation_id: false)
+    it 'labels a replayed token as transport and mints no handle beside it' do
+      instrument
       token = PostHog::MCP.encode_session_id(PostHog::MCP::SessionTokenPayload.new(session_id: 'ses_first'))
-      call_search(headers: { 'mcp-session-id' => token })
+      texts = call_search(headers: { 'mcp-session-id' => token })
 
+      expect(texts).to eq(['found'])
       call = tool_calls.first
       expect(call.values_at('$session_id', '$mcp_session_source')).to eq(%w[ses_first transport])
+    end
+
+    {
+      'ChatGPT' => [CHATGPT, { 'openai/session' => 'v1/conv-canary-0001' }],
+      'Codex' => [CODEX, { 'sessionId' => '019a4f2e-1c3d-7b8a-9e0f-cafecafecafe' }]
+    }.each do |name, (user_agent, meta)|
+      it "sends no #{name} conversation id in any property" do
+        instrument(identify: ->(_request, _extra) { { distinct_id: 'user-1' } })
+        call_search(user_agent: user_agent, meta: meta)
+
+        events = drain_events(client)
+        expect(events_named(events, '$mcp_tool_call').size).to eq(1)
+        expect(events.map { |event| JSON.generate(event) }.grep(/#{Regexp.escape(meta.values.first)}/)).to eq([])
+      end
+    end
+
+    it 'labels the $identify event with the session source' do
+      instrument(identify: ->(_request, _extra) { { distinct_id: 'user-1' } })
+      call_search(user_agent: CHATGPT, meta: { 'openai/session' => 'v1/conv-example-0001' })
+
+      identify = events_named(drain_events(client), '$identify').first
+      expect(identify[:properties]['$mcp_session_source']).to eq('client_metadata')
+    end
+
+    it 'counts a call with a client id as activity on a one-client connection' do
+      instrument(enable_conversation_id: false)
+      start = Time.now
+      stdio_call = lambda do |minutes, meta = nil|
+        allow(Time).to receive(:now).and_return(start + (minutes * 60))
+        params = { name: 'search_docs', arguments: { query: 'flags' } }
+        params[:_meta] = meta if meta
+        server.handle(rpc(minutes, 'tools/call', params))
+      end
+      server.handle(rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {},
+                                           clientInfo: { name: 'Visual Studio Code', version: '1' } }))
+      stdio_call.call(0)
+      vscode = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
+      stdio_call.call(20, vscode)
+      stdio_call.call(40, vscode)
+      stdio_call.call(45)
+
+      sessions = tool_calls.map { |call| call['$session_id'] }
+      expect(sessions.first).to eq(sessions.last)
     end
 
     context 'custom events captured during a call' do
@@ -224,6 +278,16 @@ module PostHogMcpClientSessionVectors
         expect(custom_events(events)).to eq([[PostHog::MCP.derive_session_id_from_conversation(handle), 'conversation']])
         expect(custom_events(events)).to eq(call_sessions(events))
         expect(events_named(events, 'docs_searched').map { |event| event[:distinct_id] }).to eq(['user-1'])
+      end
+
+      it 'warns once when a call holds more custom events than it keeps' do
+        logs = []
+        instrument(logger: ->(message) { logs << message })
+        PostHogMcpSearchDocsTool.before_capture = -> { 1001.times { PostHogMcpSearchDocsTool.analytics.capture('docs_searched') } }
+        call_search
+
+        expect(events_named(drain_events(client), 'docs_searched').size).to eq(1000)
+        expect(logs.grep(/custom events/).size).to eq(1)
       end
 
       it 'carries the session the call recorded when the tool raises before delivering its handle' do

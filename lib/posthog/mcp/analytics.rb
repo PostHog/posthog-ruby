@@ -99,9 +99,10 @@ module PostHog
 
           if held.size < MAX_HELD_EVENTS
             held << input.merge('properties' => input['properties'].dup, 'duration' => 0)
-          else
-            Log.debug(data.options, "analytics.capture(#{input['event_name']}) dropped: the call holds " \
-                                    "#{MAX_HELD_EVENTS} events already")
+          elsif !scope[:dropped_held]
+            scope[:dropped_held] = true
+            Log.warn(data.options, "Warning: a tool call captured more than #{MAX_HELD_EVENTS} custom events " \
+                                   'before its conversation handle was delivered; dropping the rest')
           end
           true
         end

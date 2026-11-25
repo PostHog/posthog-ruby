@@ -70,6 +70,12 @@ module PostHog
         end
       end
 
+      # A call grouped by its client or agent is still activity on a one-client
+      # connection, so the connection's own session does not roll over under it.
+      def touch_connection(data)
+        data.synchronize { data.last_activity = Time.now if data.session_source == 'generated' }
+      end
+
       def present?(value)
         value.is_a?(String) && !value.empty?
       end
