@@ -488,7 +488,7 @@ module PostHog
         ENV['TZ'] = previous_tz
       end
 
-      it 'does not normalize arbitrary Time properties to UTC' do
+      it 'normalizes Time properties to UTC' do
         property_time = Time.new(2024, 7, 16, 13, 30, Rational(123, 1000), '+09:30')
 
         client.capture(
@@ -497,7 +497,7 @@ module PostHog
           properties: { caller_time: property_time }
         )
 
-        expect(client.dequeue_last_message[:properties][:caller_time]).to eq('2024-07-16T13:30:00.123+09:30')
+        expect(client.dequeue_last_message[:properties][:caller_time]).to eq('2024-07-16T04:00:00.123Z')
       end
 
       [
