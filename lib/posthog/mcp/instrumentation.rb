@@ -171,6 +171,8 @@ module PostHog
           ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
                                  stripped[ConversationId::PARAM_NAME], mint: !handle_free && !carries_session?)
         end
+        # A minted handle anchors the call only once a result delivers it.
+        anchored = minted ? nil : conversation_id
 
         if virtual_tool?(name)
           # Run the gem's own handler so validation, in-flight tracking and
@@ -178,7 +180,7 @@ module PostHog
           begin
             result = yield
           rescue StandardError
-            safely { record_missing_capability(name, original_arguments, request, minted ? nil : conversation_id) }
+            safely { record_missing_capability(name, original_arguments, request, anchored) }
             raise
           end
           result, cid = deliver_handle(result, name, conversation_id, minted, handle_free)
@@ -190,19 +192,18 @@ module PostHog
           begin
             result = yield
           ensure
-            safely { record_unknown_tool(name, request, minted ? nil : conversation_id) }
+            safely { record_unknown_tool(name, request, anchored) }
           end
           return result
         end
 
-        safely { prime_session(request, minted ? nil : conversation_id, hold_custom_events: minted) }
+        safely { prime_session(request, anchored, hold_custom_events: minted) }
         begin
           result = yield
         rescue StandardError => e
           safely do
-            cid = minted ? nil : conversation_id
-            session_id = prepare_request(request, conversation_id: cid)
-            record_tool_call(session_id, name, request, error: e, conversation_id: cid, stripped: stripped)
+            session_id = prepare_request(request, conversation_id: anchored)
+            record_tool_call(session_id, name, request, error: e, conversation_id: anchored, stripped: stripped)
           end
           raise
         end
