@@ -200,14 +200,23 @@ module PostHog
         expect(log.string).to be_empty
       end
 
-      it 'lets a failing logger stop a batch that succeeded with its own error' do
+      it 'returns a batch that went through whatever error the logger raises, so no resend gets new keys' do
         stub_request(:post, batch_url).to_return(answer(queued('msg_0'), warnings: [{ code: 'unverified_link' }]))
         PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN,
                                                            formatter: ->(*) { raise IOError, 'log device closed' })
 
-        expect { batch_template([{ to: 'user@example.com' }]) }.to raise_error(IOError, 'log device closed') { |error|
-          expect(error.cause).to be_nil
-        }
+        result = batch_template([{ to: 'user@example.com' }])
+
+        expect(result.results.map { |email| [email.status, email.message_id] }).to eq([%w[queued msg_0]])
+        expect(result.results.first.idempotency_key).to match(/\A\h{8}-/)
+        expect(result.warnings.map(&:code)).to eq(['unverified_link'])
+      end
+
+      it 'lets an interrupt raised while logging stop a batch that went through' do
+        stub_request(:post, batch_url).to_return(answer(queued('msg_0'), warnings: [{ code: 'unverified_link' }]))
+        PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN, formatter: ->(*) { raise Interrupt })
+
+        expect { batch_template([ada]) }.to raise_error(Interrupt)
       end
 
       context 'when the request fails as a whole' do
@@ -382,6 +391,7 @@ module PostHog
           'a 502 without a code' => [{ status: 502, body: '<html>Bad gateway</html>' }, 'unconfirmed'],
           'a 504 with a code' => [{ status: 504, body: JSON.generate(code: 'gateway_timeout') }, 'unconfirmed'],
           'a 503 with client_closed' => [{ status: 503, body: JSON.generate(code: 'client_closed') }, 'unconfirmed'],
+          'a 409 without a readable body' => [{ status: 409, body: '<html>Conflict</html>' }, 'unconfirmed'],
           'a 403 without a code' => [{ status: 403, body: '<html>Forbidden</html>' }, 'failed'],
           'a 403 naming keys in flight' => [
             { status: 403, body: JSON.generate(code: 'idempotency_key_in_flight') }, 'failed'

@@ -100,7 +100,8 @@ module PostHog
       status = error.status_code.to_i
       return true unless status.between?(400, 499)
 
-      status == 409 && error.code == 'idempotency_key_in_flight'
+      # PostHog's only other 409 is batch_unavailable, so a 409 whose body didn't name it may hold keys in flight.
+      status == 409 && error.code != 'batch_unavailable'
     end
 
     def settle(member, slot)

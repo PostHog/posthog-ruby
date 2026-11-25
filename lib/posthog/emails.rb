@@ -361,10 +361,11 @@ module PostHog
     # @param max_retries [Integer] Overrides the client's `email_request_max_retries` for the batch's request. +0+
     #   turns retries off.
     # @return [BatchResult] A result per recipient, in the order of +recipients+. Check each
-    #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once.
+    #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once. A
+    #   logger that raises a StandardError while logging the warnings doesn't lose the result.
     # @raise [EmailBatchError] The request failed as a whole, such as a rate limit past its retries. The error is the
     #   last attempt's. {EmailBatchError#results} holds every recipient: `unconfirmed` with a fix to send it again
-    #   with the same key when any attempt may have queued it (a 409 `idempotency_key_in_flight`, a 5xx, or a lost
+    #   with the same key when any attempt may have queued it (a 409 other than `batch_unavailable`, a 5xx, or a lost
     #   answer), and `failed` when PostHog refused the request with a 4xx and no earlier attempt may have queued it.
     #   When only an earlier attempt may have queued them, the error's message says so, and its fix is the same-key
     #   one. The error is `client_closed` when the client shut down before a retry. {EmailError#code} is
@@ -399,7 +400,12 @@ module PostHog
       end
       raise failure if failure
 
-      log_warnings(result.warnings)
+      begin
+        log_warnings(result.warnings)
+      rescue StandardError
+        # PostHog queued the emails and the result holds the warnings. Raising here loses the derived keys, and a
+        # resend without them sends each email twice.
+      end
 
       result
     end
