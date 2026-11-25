@@ -53,7 +53,7 @@ module PostHog
 
           return [data.session_id, 'mcp'] if data.session_source == 'mcp' && data.last_mcp_session_id
 
-          if data.session_source != 'generated' || data.session_id.nil?
+          if data.session_source != 'generated'
             data.session_id = new_session_id
             data.session_source = 'generated'
           end
@@ -66,11 +66,9 @@ module PostHog
       # a desktop app can keep one stdio process alive across many chats.
       def rotate_if_idle(data)
         data.synchronize do
-          idle = Time.now - data.last_tool_call_end
-          if data.session_id.nil? || (data.session_source == 'generated' && idle >= INACTIVITY_TIMEOUT_MINUTES * 60)
-            data.session_id = new_session_id
-            data.session_source = 'generated'
-          end
+          next unless data.session_source == 'generated'
+
+          data.session_id = new_session_id if Time.now - data.last_tool_call_end >= INACTIVITY_TIMEOUT_MINUTES * 60
         end
       end
 

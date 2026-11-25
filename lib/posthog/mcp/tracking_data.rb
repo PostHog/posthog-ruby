@@ -18,7 +18,6 @@ module PostHog
         @server_name = server_name
         @server_version = server_version
         @mutex = Mutex.new
-        # A one-client connection's session, generated when the server starts.
         @session_id = Session.new_session_id
         @session_source = 'generated'
         @last_mcp_session_id = nil
