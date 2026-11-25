@@ -14,6 +14,7 @@ require 'posthog/mcp/exceptions'
 require 'posthog/mcp/sanitization'
 require 'posthog/mcp/truncation'
 require 'posthog/mcp/conversation_id'
+require 'posthog/mcp/input_required'
 require 'posthog/mcp/intent'
 require 'posthog/mcp/schema_mutation'
 require 'posthog/mcp/event_builder'
@@ -132,6 +133,16 @@ module PostHog
       # @return [String]
       def derive_session_id_from_conversation(conversation_id)
         Session.derive_session_id_from_conversation(conversation_id)
+      end
+
+      # The method of each request in an `input_required` round, ordered by
+      # request key, for {PostHog::MCP::Client#capture_input_required}; nil when
+      # the result is not a round.
+      #
+      # @param result [Hash, MCP::Server::InputRequiredResult] a tool's result
+      # @return [Array<String>, nil]
+      def input_request_methods(result)
+        InputRequired.request_methods(result)
       end
 
       # The canned `get_more_tools` result for custom dispatchers.

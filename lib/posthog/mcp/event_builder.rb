@@ -70,10 +70,18 @@ module PostHog
         event['event_type'] == EventType::MCP_UNKNOWN_TOOL
       end
 
+      def input_required?(event)
+        event['event_type'] == EventType::MCP_INPUT_REQUIRED
+      end
+
       def add_common_properties(event, properties)
+        properties[Property::INPUT_REQUEST_METHODS] = event['input_request_methods'] || [] if input_required?(event)
         if present(event['resource_name'])
-          properties[Property::RESOURCE_NAME] = event['resource_name']
-          properties[Property::TOOL_NAME] = event['resource_name'] if tool_call?(event) || unknown_tool?(event)
+          # A round is not a tool call, so it names the tool without `$mcp_resource_name`.
+          properties[Property::RESOURCE_NAME] = event['resource_name'] unless input_required?(event)
+          if tool_call?(event) || unknown_tool?(event) || input_required?(event)
+            properties[Property::TOOL_NAME] = event['resource_name']
+          end
         end
         if present(event['tool_description']) && tool_call?(event)
           properties[Property::TOOL_DESCRIPTION] =
