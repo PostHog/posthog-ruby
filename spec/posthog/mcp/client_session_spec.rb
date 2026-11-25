@@ -303,6 +303,31 @@ module PostHogMcpClientSessionVectors
         expect(logs.grep(/custom events/).size).to eq(1)
       end
 
+      it 'keeps a held event\'s nested properties as they were when captured' do
+        instrument
+        filters = ['flags']
+        PostHogMcpSearchDocsTool.before_capture = lambda do
+          PostHogMcpSearchDocsTool.analytics.capture('filtered', { filters: filters })
+          filters << 'changed after capture'
+        end
+        call_search
+
+        filtered = events_named(drain_events(client), 'filtered').first
+        expect(filtered[:properties]['filters']).to eq(['flags'])
+      end
+
+      it 'sends custom events past the held byte budget at once' do
+        instrument
+        PostHogMcpSearchDocsTool.before_capture = lambda do
+          300.times { PostHogMcpSearchDocsTool.analytics.capture('bulky', { blob: 'x' * 65_536 }) }
+        end
+        call_search
+
+        sources = events_named(drain_events(client), 'bulky').map { |event| event[:properties]['$mcp_session_source'] }
+        expect(sources.size).to eq(300)
+        expect(sources.tally.keys).to contain_exactly('conversation', 'generated')
+      end
+
       it 'carries the session the call recorded when the tool raises before delivering its handle' do
         instrument
         PostHogMcpSearchDocsTool.before_capture = lambda do

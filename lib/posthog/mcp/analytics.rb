@@ -10,7 +10,8 @@ module PostHog
       FLUSH_TIMEOUT_SECONDS = 10
       private_constant :FLUSH_TIMEOUT_SECONDS
       MAX_HELD_EVENTS = 1000
-      private_constant :MAX_HELD_EVENTS
+      MAX_HELD_BYTES = 4 * 1024 * 1024
+      private_constant :MAX_HELD_EVENTS, :MAX_HELD_BYTES
 
       # @api private
       def initialize(server)
@@ -90,26 +91,41 @@ module PostHog
         [Session.new_session_id, 'generated']
       end
 
+      # The sink's own sanitize and truncate steps run at capture, so a held event
+      # is a snapshot no later change to its properties reaches, and its size is bounded.
       def hold(data, scope, input)
         return false unless scope&.key?(:held)
 
+        snapshot = Truncation.truncate_event(Sanitization.sanitize_event(
+                                               Sanitization.stringify_keys(input.merge('duration' => 0))
+                                             ))
+        bytes = JSON.generate(snapshot['properties'] || {}).bytesize
         data.synchronize do
           held = scope[:held]
           next false unless held
 
-          if held.size < MAX_HELD_EVENTS
-            held << input.merge('properties' => input['properties'].dup, 'duration' => 0)
+          held_bytes = scope.fetch(:held_bytes, 0) + bytes
+          if held.size < MAX_HELD_EVENTS && held_bytes <= MAX_HELD_BYTES
+            held << snapshot
+            scope[:held_bytes] = held_bytes
             next true
           end
 
-          unless scope[:overflowed_held]
-            scope[:overflowed_held] = true
-            Log.warn(data.options, "Warning: a tool call captured more than #{MAX_HELD_EVENTS} custom events " \
-                                   'before its conversation handle was delivered; sending the rest with the ' \
-                                   'session the call has so far')
-          end
+          warn_overflow(data, scope)
           false
         end
+      rescue StandardError => e
+        Log.debug(data.options, "analytics.capture could not hold its event, sending it now: #{e.message}")
+        false
+      end
+
+      def warn_overflow(data, scope)
+        return if scope[:overflowed_held]
+
+        scope[:overflowed_held] = true
+        Log.warn(data.options, "Warning: a tool call captured more than #{MAX_HELD_EVENTS} custom events or " \
+                               "#{MAX_HELD_BYTES / 1024 / 1024} MiB of them before its conversation handle was " \
+                               'delivered; sending the rest with the session the call has so far')
       end
 
       # The identity the in-flight request resolved, which {Instrumentation} pinned
