@@ -44,14 +44,13 @@ RSpec.describe PostHog::MCP::Client do
 
   let(:client) { described_class.new(api_key: 'phc_test', test_mode: true) }
 
-  it 'captures tool calls with $lib override, anonymous distinct id and error scalars' do
+  it 'captures tool calls with $lib override, the session as anonymous distinct id, and error scalars' do
     client.capture_tool_call('execute-sql', is_error: false, response: { ok: true })
     event = client.dequeue_last_message
     expect(event[:event]).to eq('$mcp_tool_call')
-    expect(event[:distinct_id]).to eq('anonymous')
+    expect(event[:distinct_id]).to eq(event[:properties]['$session_id'])
     expect(event[:properties]).to include('$process_person_profile' => false, '$lib' => 'posthog-ruby-mcp',
                                           '$lib_version' => PostHog::VERSION, '$mcp_is_error' => false)
-    expect(event[:properties]).not_to have_key('$session_id')
 
     client.capture_tool_call('add', is_error: true, error: ArgumentError.new('bad input'), distinct_id: 'user-123',
                                     set_properties: { email: 'a@b.com' }, groups: { organization: 'org_1' })
@@ -233,5 +232,59 @@ RSpec.describe PostHog::MCP::Client do
     expect(stripped.intent).to eq('agent intent')
 
     expect(client.prepare_tool_call('search', { context: 'application data' }).args).to eq({})
+  end
+end
+
+RSpec.describe PostHog::MCP::Client, 'sessions' do
+  let(:client) { described_class.new(api_key: 'phc_test', test_mode: true) }
+  let(:chatgpt) { 'openai-mcp/1.0.0 (ChatGPT)' }
+  let(:meta) { { 'openai/session' => 'v1/conv-example-0001' } }
+
+  def sent
+    drain_events(client).map do |event|
+      [event[:distinct_id], *event[:properties].values_at('$session_id', '$mcp_session_source')]
+    end
+  end
+
+  {
+    'capture_tool_call' => ->(c, **kw) { c.capture_tool_call('search_docs', **kw) },
+    'capture_initialize' => ->(c, **kw) { c.capture_initialize(**kw) },
+    'capture_tools_list' => ->(c, **kw) { c.capture_tools_list(**kw) },
+    'capture_missing_capability' => ->(c, **kw) { c.capture_missing_capability(**kw) }
+  }.each do |method, capture|
+    it "#{method} gives a call without a session a fresh one of its own" do
+      2.times { capture.call(client) }
+
+      events = sent
+      expect(events.map { |(_, session, source)| [session[/\Ases_\h{8}-\h{4}-7/].nil?, source] })
+        .to eq([[false, 'generated'], [false, 'generated']])
+      expect(events.map { |(_, session, _)| session }.uniq.size).to eq(2)
+      expect(events.map { |(distinct_id, session, _)| distinct_id == session }).to eq([true, true])
+    end
+
+    it "#{method} sends a session the caller passes unchanged" do
+      capture.call(client, session_id: 'ses_mine')
+
+      expect(sent).to eq([%w[ses_mine ses_mine transport]])
+    end
+  end
+
+  {
+    'with the client\'s User-Agent' => [{ client_user_agent: 'openai-mcp/1.0.0 (ChatGPT)' }, true],
+    'with the client\'s name' => [{ client_name: 'Visual Studio Code' }, false],
+    'without anything that recognizes the client' => [{}, false]
+  }.each do |recognition, (keywords, grouped)|
+    it "groups a tool call by the client conversation id in its _meta #{recognition}" do
+      client.capture_tool_call('search_docs', session_id: 'ses_mine', request_meta: meta, **keywords)
+
+      expect(sent.first[1] == 'ses_2f5d35b7108d17c807766f2f769a1e8c').to eq(grouped)
+    end
+  end
+
+  it 'groups a VS Code tool call recognized by its client name' do
+    vscode_meta = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
+    client.capture_tool_call('search_docs', request_meta: vscode_meta, client_name: 'Visual Studio Code')
+
+    expect(sent.first[1..]).to eq(%w[ses_0571acb894e6753d33e37e5c2b327c59 client_metadata])
   end
 end
