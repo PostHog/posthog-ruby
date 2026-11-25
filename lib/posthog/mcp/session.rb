@@ -26,23 +26,14 @@ module PostHog
         Ids.deterministic_prefixed_id('ses', conversation_id)
       end
 
-      # `data.session_source` names what the server's own session came from;
-      # `$mcp_session_source` files a token and a transport id alike.
-      WIRE_SOURCES = { 'token' => 'transport', 'mcp' => 'transport' }.freeze
-
-      # @return [String] the `$mcp_session_source` of the server's own session
-      def server_source(data)
-        WIRE_SOURCES.fetch(data.session_source, data.session_source)
-      end
-
       # A client conversation id and a handle name one chat, so they never touch
       # the server's shared state: a concurrent request would read them.
       #
       # @param client_conversation [String, nil] `"<_meta key>:<id>"`, see {ClientConversation.read}
       # @param request_session_id [String, nil] the session a request that carries
       #   none gets on a transport every client shares; never stored either
-      # @return [Array(String, String)] `[session_id, source]`, the source as
-      #   `$mcp_session_source` names it
+      # @return [Array(String, String)] `[session_id, source]` where source is one of
+      #   `client_metadata`, `conversation`, `token`, `mcp`, `generated`
       def resolve(data, mcp_session_id, token: nil, conversation_id: nil, client_conversation: nil,
                   request_session_id: nil)
         if present?(client_conversation)
@@ -57,7 +48,7 @@ module PostHog
             data.session_id = token.session_id
             data.session_source = 'token'
             data.last_activity = now
-            return [data.session_id, 'transport']
+            return [data.session_id, 'token']
           end
 
           if present?(mcp_session_id)
@@ -65,14 +56,14 @@ module PostHog
             data.last_mcp_session_id = mcp_session_id
             data.session_source = 'mcp'
             data.last_activity = now
-            return [data.session_id, 'transport']
+            return [data.session_id, 'mcp']
           end
 
           return [request_session_id, 'generated'] if present?(request_session_id)
 
           if data.session_source == 'mcp' && data.last_mcp_session_id
             data.last_activity = now
-            return [data.session_id, 'transport']
+            return [data.session_id, 'mcp']
           end
 
           stale = (now - data.last_activity) > (INACTIVITY_TIMEOUT_MINUTES * 60)

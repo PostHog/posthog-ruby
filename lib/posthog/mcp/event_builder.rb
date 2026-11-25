@@ -8,6 +8,9 @@ module PostHog
     #
     # @api private
     module EventBuilder
+      # A replayed token and a transport session id are both carried by the transport.
+      WIRE_SESSION_SOURCES = { 'token' => 'transport', 'mcp' => 'transport' }.freeze
+
       module_function
 
       # @return [Array<Hash>] payloads `{'event', 'distinct_id', 'properties', 'timestamp'}`
@@ -44,7 +47,8 @@ module PostHog
       def add_session_id(event, properties)
         session_id = event['session_id']
         properties[Property::SESSION_ID] = session_id if session_id.is_a?(String) && !session_id.empty?
-        properties[Property::SESSION_SOURCE] = event['session_source'] if event['session_source']
+        source = event['session_source']
+        properties[Property::SESSION_SOURCE] = WIRE_SESSION_SOURCES.fetch(source, source) if source
       end
 
       def add_conversation_id(event, properties)

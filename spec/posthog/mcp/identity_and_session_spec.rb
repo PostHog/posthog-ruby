@@ -118,17 +118,16 @@ RSpec.describe PostHog::MCP::Session do
 
   it 'uses a token session verbatim, hashes transport sessions stickily, and generates otherwise' do
     token = PostHog::MCP::SessionTokenPayload.new(session_id: 'ses_tok')
-    expect(described_class.resolve(data, 'ignored-raw', token: token)).to eq(%w[ses_tok transport])
+    expect(described_class.resolve(data, 'ignored-raw', token: token)).to eq(%w[ses_tok token])
     generated, source = described_class.resolve(data, nil)
     expect(source).to eq('generated')
     expect(generated).not_to eq('ses_tok')
 
     expect(described_class.resolve(data,
                                    'mcp-123')).to eq([PostHog::MCP.derive_session_id_from_mcp_session('mcp-123'),
-                                                      'transport'])
+                                                      'mcp'])
     expect(described_class.resolve(data,
-                                   nil)).to eq([PostHog::MCP.derive_session_id_from_mcp_session('mcp-123'),
-                                                'transport'])
+                                   nil)).to eq([PostHog::MCP.derive_session_id_from_mcp_session('mcp-123'), 'mcp'])
   end
 
   it 'rolls generated sessions over after 30 minutes of inactivity' do

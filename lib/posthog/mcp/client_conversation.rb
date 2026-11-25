@@ -13,34 +13,34 @@ module PostHog
     #
     # @api private
     module ClientConversation
-      # `handle_free`: the client sends its id on every call, so it is advertised
-      # no `conversation_id` and minted no handle.
-      Row = Struct.new(:key, :value, :user_agent, :client_names, :handle_free, keyword_init: true) do
+      # `id` returns the id when a value is the row's shape. `handle_free`: the
+      # client sends its id on every call, so it is advertised no
+      # `conversation_id` and minted no handle.
+      Row = Struct.new(:key, :id, :user_agent, :client_names, :handle_free, keyword_init: true) do
         def recognizes?(user_agent, client_name)
           return true if user_agent.is_a?(String) && self.user_agent.match?(user_agent)
 
           client_name.is_a?(String) && client_names.any? { |name| name.casecmp?(client_name) }
-        end
-
-        # @return [String, nil] the id in `meta` when it is this row's shape
-        def read(meta)
-          id = meta[key] || meta[key.to_sym]
-          ClientConversation.public_send(value, id) if id.is_a?(String)
         end
       end
 
       UUID = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
       NIL_UUID = '00000000-0000-0000-0000-000000000000'
       PRINTABLE_ASCII = /\A[\x20-\x7e]{1,128}\z/
-      VSCODE_NAMES = ['Visual Studio Code', 'Visual Studio Code - Insiders'].freeze
+
+      uuid = lambda do |value|
+        lowered = value.downcase
+        lowered if UUID.match?(lowered) && lowered != NIL_UUID
+      end
 
       ROWS = [
-        Row.new(key: 'openai/session', value: :printable_ascii, handle_free: true, client_names: [],
-                user_agent: %r{\Aopenai-mcp/[^\s(]*\s*\(\s*chatgpt\s*[;,)]}i),
-        Row.new(key: 'sessionId', value: :uuid, handle_free: false, client_names: ['codex-mcp-client'],
-                user_agent: %r{\Acodex-mcp-client/}i),
-        Row.new(key: 'vscode.conversationId', value: :uuid, handle_free: false, client_names: VSCODE_NAMES,
-                user_agent: /\A(?:#{VSCODE_NAMES.map { |name| Regexp.escape("#{name}/") }.join('|')})/i)
+        Row.new(key: 'openai/session', id: ->(value) { value if PRINTABLE_ASCII.match?(value) }, handle_free: true,
+                user_agent: %r{\Aopenai-mcp/[^\s(]*\s*\(\s*chatgpt\s*[;,)]}i, client_names: []),
+        Row.new(key: 'sessionId', id: uuid, handle_free: false,
+                user_agent: %r{\Acodex-mcp-client/}i, client_names: ['codex-mcp-client']),
+        Row.new(key: 'vscode.conversationId', id: uuid, handle_free: false,
+                user_agent: %r{\AVisual Studio Code(?: - Insiders)?/}i,
+                client_names: ['Visual Studio Code', 'Visual Studio Code - Insiders'])
       ].freeze
 
       module_function
@@ -52,19 +52,9 @@ module PostHog
 
       # @return [String, nil] `"<key>:<id>"`, what the session is derived from
       def read(row, meta)
-        return nil unless row && meta.is_a?(Hash)
-
-        id = row.read(meta)
+        value = row && SchemaMutation.fetch(meta, row.key)
+        id = row.id.call(value) if value.is_a?(String)
         id && "#{row.key}:#{id}"
-      end
-
-      def uuid(value)
-        lowered = value.downcase
-        lowered if UUID.match?(lowered) && lowered != NIL_UUID
-      end
-
-      def printable_ascii(value)
-        value if PRINTABLE_ASCII.match?(value)
       end
     end
   end

@@ -151,17 +151,12 @@ module PostHog
         # argument this layer injected is ours to interpret. A `conversation_id` or
         # `context` the tool declares itself stays application data and is left to it.
         request = request_with_arguments(original_arguments)
-        handle_free = safely(false) { client_row(request)&.handle_free }
-        @client_conversation = safely { ClientConversation.read(client_row(request), envelope_meta) }
+        handle_free = safely(false) { client_row&.handle_free }
+        @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) }
+        # The client's own id outranks a handle the agent echoes.
         conversation_id, minted = safely([nil, false]) do
-          ConversationId.resolve(@options.enable_conversation_id, stripped[ConversationId::PARAM_NAME], name,
-                                 missing_name)
-        end
-        # The client's own id outranks a handle, and a handle-free client names its
-        # conversation itself, so neither is minted one.
-        if @client_conversation || (minted && handle_free)
-          conversation_id = nil
-          minted = false
+          ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
+                                 stripped[ConversationId::PARAM_NAME], name, missing_name, mint: !handle_free)
         end
 
         if virtual_tool?(name)
@@ -241,7 +236,7 @@ module PostHog
           if tools.is_a?(Array)
             names = tools.map { |tool| fetch(tool, :name) }.compact
             empty = tools.empty?
-            advertise_handle = !client_row(@request)&.handle_free
+            advertise_handle = !client_row&.handle_free
             mutated = tools.map { |tool| mutate_tool(tool, advertise_handle) }
             result = result.merge(SchemaMutation.key_for(result, :tools) => mutated)
           end
@@ -486,6 +481,8 @@ module PostHog
       # recorded, and let later ones (from threads the tool left running) go out
       # with it directly. Runs once per call; later runs find nothing held.
       def release_custom_events(session_id)
+        return unless @scope.key?(:held)
+
         held = @data.synchronize do
           next nil unless @scope.key?(:held)
 
@@ -494,10 +491,11 @@ module PostHog
           @scope[:actor] = actor_for(session_id)
           @scope.delete(:held)
         end
+        actor = actor_for(session_id)
         held&.each do |input|
           self.class.capture_event(@data, input.merge('session_id' => session_id,
                                                       'session_source' => @session_sources[session_id]),
-                                   actor: actor_for(session_id))
+                                   actor: actor)
         end
       end
 
@@ -554,10 +552,10 @@ module PostHog
       end
 
       # The row of the client this request comes from, see {ClientConversation}.
-      def client_row(request)
+      def client_row
         return @client_row if defined?(@client_row)
 
-        @client_row = ClientConversation.recognize(@headers['user-agent'], client_identity(request)[0])
+        @client_row = ClientConversation.recognize(@headers['user-agent'], client_identity(@request)[0])
       end
 
       def warn_stateless_session_not_wired
@@ -598,10 +596,9 @@ module PostHog
       end
 
       def client_identity(request)
-        info = envelope_client_info || session_client
-        info = fetch(request_params(request), :clientInfo) if info.nil? && @kind == :initialize
         # One instance serves every stateless HTTP client, so its handshake may be another client's.
-        info = server_client if info.nil? && !http?
+        info = envelope_client_info || session_client || (server_client unless http?)
+        info = fetch(request_params(request), :clientInfo) if info.nil? && @kind == :initialize
         name = info.is_a?(Hash) ? fetch(info, :name) : nil
         version = info.is_a?(Hash) ? fetch(info, :version) : nil
         name ||= @token&.client_name

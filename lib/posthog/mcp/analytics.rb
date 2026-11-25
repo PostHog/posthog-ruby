@@ -84,7 +84,7 @@ module PostHog
       # server only ever talks to one client, so the fallback stays.
       def current_session(data, scope)
         return scope.values_at(:session_id, :session_source) if scope&.[](:session_id)
-        return [data.session_id, Session.server_source(data)] unless data.http_transport_seen
+        return [data.session_id, data.session_source] unless data.http_transport_seen
 
         warn_unscoped_capture(data)
         [Session.new_session_id, 'generated']
@@ -94,8 +94,10 @@ module PostHog
       # events until it records (see {Instrumentation#prime_session}). Each is fixed
       # when captured, its properties copied and its duration zero.
       def hold(data, scope, input)
+        return false unless scope&.key?(:held)
+
         data.synchronize do
-          held = scope&.[](:held)
+          held = scope[:held]
           next false unless held
 
           if held.size < MAX_HELD_EVENTS

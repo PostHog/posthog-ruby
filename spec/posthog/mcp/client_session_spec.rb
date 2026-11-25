@@ -43,23 +43,12 @@ module PostHogMcpClientSessionVectors
       PostHogMcpSearchDocsTool.analytics = PostHog::MCP.instrument(server, client, **options)
     end
 
-    def env_for(body, headers = {})
-      env = {
-        'REQUEST_METHOD' => 'POST', 'PATH_INFO' => '/', 'SCRIPT_NAME' => '', 'QUERY_STRING' => '',
-        'SERVER_NAME' => 'localhost', 'SERVER_PORT' => '80', 'HTTP_HOST' => 'localhost', 'rack.url_scheme' => 'http',
-        'HTTP_ACCEPT' => 'application/json, text/event-stream', 'CONTENT_TYPE' => 'application/json',
-        'rack.input' => StringIO.new(JSON.generate(body)), 'rack.errors' => StringIO.new
-      }
-      headers.each { |name, value| env["HTTP_#{name.upcase.tr('-', '_')}"] = value }
-      env
-    end
-
     def call_search(user_agent: nil, meta: nil, arguments: { query: 'flags' }, headers: {}, id: 2)
       params = { name: 'search_docs', arguments: arguments }
       params[:_meta] = meta if meta
       headers = headers.merge('user-agent' => user_agent) if user_agent
       response = transport.call(env_for(rpc(id, 'tools/call', params), headers))
-      body = JSON.parse(response[2].join)
+      body = parse(response)
       raise body.inspect unless body['result']
 
       body['result']['content'].map { |block| block['text'] }
@@ -67,7 +56,7 @@ module PostHogMcpClientSessionVectors
 
     def list_tools(user_agent)
       response = transport.call(env_for(rpc(9, 'tools/list'), 'user-agent' => user_agent))
-      JSON.parse(response[2].join)['result']['tools'].to_h { |tool| [tool['name'], tool['inputSchema']['properties'].keys] }
+      parse(response)['result']['tools'].to_h { |tool| [tool['name'], tool['inputSchema']['properties'].keys] }
     end
 
     def tool_calls
