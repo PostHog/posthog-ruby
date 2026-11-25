@@ -237,8 +237,6 @@ end
 
 RSpec.describe PostHog::MCP::Client, 'sessions' do
   let(:client) { described_class.new(api_key: 'phc_test', test_mode: true) }
-  let(:chatgpt) { 'openai-mcp/1.0.0 (ChatGPT)' }
-  let(:meta) { { 'openai/session' => 'v1/conv-example-0001' } }
 
   def sent
     drain_events(client).map do |event|
@@ -269,22 +267,22 @@ RSpec.describe PostHog::MCP::Client, 'sessions' do
     end
   end
 
+  vscode_meta = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
   {
-    'with the client\'s User-Agent' => [{ client_user_agent: 'openai-mcp/1.0.0 (ChatGPT)' }, true],
-    'with the client\'s name' => [{ client_name: 'Visual Studio Code' }, false],
-    'without anything that recognizes the client' => [{}, false]
-  }.each do |recognition, (keywords, grouped)|
-    it "groups a tool call by the client conversation id in its _meta #{recognition}" do
-      client.capture_tool_call('search_docs', session_id: 'ses_mine', request_meta: meta, **keywords)
+    'ChatGPT recognized by its User-Agent' =>
+      [{ 'openai/session' => 'v1/conv-example-0001' }, { client_user_agent: 'openai-mcp/1.0.0 (ChatGPT)' },
+       %w[ses_2f5d35b7108d17c807766f2f769a1e8c client_metadata]],
+    'VS Code recognized by its client name' =>
+      [vscode_meta, { client_name: 'Visual Studio Code' }, %w[ses_0571acb894e6753d33e37e5c2b327c59 client_metadata]],
+    'a key its recognized client does not define' =>
+      [{ 'openai/session' => 'v1/conv-example-0001' }, { client_name: 'Visual Studio Code' }, %w[ses_mine transport]],
+    'a client nothing recognizes' =>
+      [{ 'openai/session' => 'v1/conv-example-0001' }, {}, %w[ses_mine transport]]
+  }.each do |case_name, (request_meta, keywords, session)|
+    it "groups a tool call by its _meta conversation id only for #{case_name}" do
+      client.capture_tool_call('search_docs', session_id: 'ses_mine', request_meta: request_meta, **keywords)
 
-      expect(sent.first[1] == 'ses_2f5d35b7108d17c807766f2f769a1e8c').to eq(grouped)
+      expect(sent.first[1..]).to eq(session)
     end
-  end
-
-  it 'groups a VS Code tool call recognized by its client name' do
-    vscode_meta = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
-    client.capture_tool_call('search_docs', request_meta: vscode_meta, client_name: 'Visual Studio Code')
-
-    expect(sent.first[1..]).to eq(%w[ses_0571acb894e6753d33e37e5c2b327c59 client_metadata])
   end
 end

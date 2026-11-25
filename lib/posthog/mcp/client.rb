@@ -207,9 +207,10 @@ module PostHog
       def base_event(event_type, distinct_id, session_id, set_properties, groups, properties, timestamp,
                      client_user_agent, vendor_client, session_source: nil)
         session_source ||= session_id.is_a?(String) && !session_id.empty? ? 'transport' : 'generated'
+        session_id = Session.new_session_id if session_source == 'generated'
         event = {
           'event_type' => event_type,
-          'session_id' => session_source == 'generated' ? Session.new_session_id : session_id,
+          'session_id' => session_id,
           'session_source' => session_source,
           'timestamp' => timestamp || Time.now.utc,
           'properties' => properties,
