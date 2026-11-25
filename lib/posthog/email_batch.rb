@@ -100,14 +100,9 @@ module PostHog
     def failure(error)
       # Only an attempt's error says what PostHog may have queued; the client raises client_closed without a request.
       refused = !(@attempt_error.equal?(error) && maybe_queued?(error))
-      error = resend(error, earlier: true) if @maybe_queued && refused
-      results = @members.map do |member|
-        if @maybe_queued
-          result(member, 'unconfirmed', error: resend(error))
-        else
-          result(member, 'failed', error: error)
-        end
-      end
+      error = resend(error, earlier: refused) if @maybe_queued
+      status = @maybe_queued ? 'unconfirmed' : 'failed'
+      results = @members.map { |member| result(member, status, error: error) }
       EmailBatchError.new(error, results: results.freeze, warnings: @warnings.dup.freeze)
     end
 

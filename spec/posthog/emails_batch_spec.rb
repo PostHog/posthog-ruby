@@ -306,6 +306,7 @@ module PostHog
 
             expect { batch_template([ada, alan], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
               expect([error.code, error.results.map(&:message_id)]).to eq(['idempotency_key_in_flight', [nil, nil]])
+              expect(error.fix).to eq(error.results.first.error.fix)
               expect(error.results.map { |result| resend_with_key(result) })
                 .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
             }
