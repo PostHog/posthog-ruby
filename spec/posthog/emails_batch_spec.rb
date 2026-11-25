@@ -212,11 +212,14 @@ module PostHog
         expect(result.warnings.map(&:code)).to eq(['unverified_link'])
       end
 
-      it 'lets an interrupt raised while logging stop a batch that went through' do
-        stub_request(:post, batch_url).to_return(answer(queued('msg_0'), warnings: [{ code: 'unverified_link' }]))
-        PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN, formatter: ->(*) { raise Interrupt })
+      # Timeout.timeout with Timeout::Error as its class raises it in the thread, here in the logger.
+      [Interrupt, Timeout::Error].each do |deadline|
+        it "lets #{deadline} raised while logging stop a batch that went through" do
+          stub_request(:post, batch_url).to_return(answer(queued('msg_0'), warnings: [{ code: 'unverified_link' }]))
+          PostHog::Logging.logger = Logger.new(StringIO.new, level: Logger::WARN, formatter: ->(*) { raise deadline })
 
-        expect { batch_template([ada]) }.to raise_error(Interrupt)
+          expect { batch_template([ada]) }.to raise_error(deadline)
+        end
       end
 
       context 'when the request fails as a whole' do

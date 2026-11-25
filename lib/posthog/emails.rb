@@ -334,10 +334,10 @@ module PostHog
     # Pass the template form, with +template_id+, or the code form, with +template_key+, as {#send} takes them. The
     # client sends at most 100 recipients in one request and waits at least 45 seconds for the answer. PostHog
     # refuses a batch too large to take at once with a 413 `content_too_large`: split the recipients into smaller
-    # batches. A 400 `content_too_large` means the shared content is over PostHog's limit, which splitting doesn't
-    # change: make it smaller. A recipient whose own +template_data+ is over it comes back `failed` with
-    # `content_too_large` in its result, while the others go out. A batch takes no +cc+, +bcc+, +attachments+ or
-    # +scheduled_at+.
+    # batches, or, for one recipient, make the email smaller. A 400 `content_too_large` means the shared content is
+    # over PostHog's limit, which splitting doesn't change: make it smaller. A recipient whose own +template_data+ is
+    # over it comes back `failed` with `content_too_large` in its result, while the others go out. A batch takes no
+    # +cc+, +bcc+, +attachments+ or +scheduled_at+.
     #
     # Each recipient has an +idempotency_key+, given or made by the client, that every retry reuses, so a retry never
     # queues an email twice. Retries follow {#send}'s. Send each `unconfirmed` email again with its
@@ -362,7 +362,8 @@ module PostHog
     #   turns retries off.
     # @return [BatchResult] A result per recipient, in the order of +recipients+. Check each
     #   {BatchEmailResult#status}, and send an `unconfirmed` email again with the same key so it goes out once. A
-    #   logger that raises a StandardError while logging the warnings doesn't lose the result.
+    #   logger that raises a StandardError other than Timeout::Error while logging the warnings doesn't lose the
+    #   result.
     # @raise [EmailBatchError] The request failed as a whole, such as a rate limit past its retries. The error is the
     #   last attempt's. {EmailBatchError#results} holds every recipient: `unconfirmed` with a fix to send it again
     #   with the same key when any attempt may have queued it (a 409 other than `batch_unavailable`, a 5xx, or a lost
@@ -402,6 +403,9 @@ module PostHog
 
       begin
         log_warnings(result.warnings)
+      rescue Timeout::Error
+        # A caller's deadline, from Timeout.timeout with this class, still ends the call.
+        raise
       rescue StandardError
         # PostHog queued the emails and the result holds the warnings. Raising here loses the derived keys, and a
         # resend without them sends each email twice.
