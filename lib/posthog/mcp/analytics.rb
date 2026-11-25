@@ -99,12 +99,16 @@ module PostHog
 
           if held.size < MAX_HELD_EVENTS
             held << input.merge('properties' => input['properties'].dup, 'duration' => 0)
-          elsif !scope[:dropped_held]
-            scope[:dropped_held] = true
-            Log.warn(data.options, "Warning: a tool call captured more than #{MAX_HELD_EVENTS} custom events " \
-                                   'before its conversation handle was delivered; dropping the rest')
+            next true
           end
-          true
+
+          unless scope[:overflowed_held]
+            scope[:overflowed_held] = true
+            Log.warn(data.options, "Warning: a tool call captured more than #{MAX_HELD_EVENTS} custom events " \
+                                   'before its conversation handle was delivered; sending the rest with the ' \
+                                   'session the call has so far')
+          end
+          false
         end
       end
 

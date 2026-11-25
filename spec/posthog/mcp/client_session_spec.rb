@@ -293,13 +293,13 @@ module PostHogMcpClientSessionVectors
         expect(events_named(events, 'docs_searched').map { |event| event[:distinct_id] }).to eq(['user-1'])
       end
 
-      it 'warns once when a call holds more custom events than it keeps' do
+      it 'sends custom events past the hold bound at once, and warns once' do
         logs = []
         instrument(logger: ->(message) { logs << message })
         PostHogMcpSearchDocsTool.before_capture = -> { 1001.times { PostHogMcpSearchDocsTool.analytics.capture('docs_searched') } }
         call_search
 
-        expect(events_named(drain_events(client), 'docs_searched').size).to eq(1000)
+        expect(events_named(drain_events(client), 'docs_searched').size).to eq(1001)
         expect(logs.grep(/custom events/).size).to eq(1)
       end
 
