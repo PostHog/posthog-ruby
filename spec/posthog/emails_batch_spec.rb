@@ -340,7 +340,7 @@ module PostHog
             expect { emails.batch(**code) }.to raise_error(EmailBatchError) { |error|
               expect([error.code, error.status_code]).to eq(['not_found', 404])
               expect(error.message).to include("aren't available for this project")
-              expect(error.fix).to include('on its own')
+              expect(error.fix).to include('If this project can send email from code', 'on its own')
               expect("#{error.message} #{error.why} #{error.fix}")
                 .not_to match(/template_id|update|upgrade|server|version/i)
             }
@@ -369,17 +369,25 @@ module PostHog
           expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
         end
 
-        it 'keeps the recipients a lost answer may have queued unconfirmed when the retry is refused' do
-          stub_request(:post, batch_url).to_raise(Errno::ECONNRESET).then.to_return(refuse(429, 'rate_limited'))
+        {
+          'a 429' => [{ status: 429, body: JSON.generate(code: 'rate_limited') }, 'rate_limited'],
+          'a 404 without a field' => [
+            { status: 404, body: JSON.generate(code: 'not_found', detail: 'Not found.') }, 'not_found'
+          ]
+        }.each do |name, (refusal, code)|
+          it "keeps the recipients a lost answer may have queued unconfirmed when the retry gets #{name}" do
+            stub_request(:post, batch_url).to_raise(Errno::ECONNRESET).then.to_return(refusal)
 
-          expect { batch_template([ada, alan], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
-            expect(error.code).to eq('rate_limited')
-            expect(error.message).to start_with('An earlier attempt of this batch may have queued')
-            expect(error.results.first.error.message).to start_with('An earlier attempt of this batch may have queued')
-            expect(error.results.map { |result| resend_with_key(result) })
-              .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
-          }
-          expect(a_request(:post, batch_url)).to have_been_made.twice
+            expect { batch_template([ada, alan], max_retries: 1) }.to raise_error(EmailBatchError) { |error|
+              expect(error.code).to eq(code)
+              expect(error.message).to start_with('An earlier attempt of this batch may have queued')
+              expect(error.results.first.error.message)
+                .to start_with('An earlier attempt of this batch may have queued')
+              expect(error.results.map { |result| resend_with_key(result) })
+                .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
+            }
+            expect(a_request(:post, batch_url)).to have_been_made.twice
+          end
         end
 
         it "doesn't say no email was sent, or advise a split, when a size refusal follows a lost answer" do

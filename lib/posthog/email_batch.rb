@@ -24,9 +24,10 @@ module PostHog
     }.freeze
     NO_CODE_BATCH = {
       'code' => 'not_found',
-      'detail' => "Batch sends from code aren't available for this project, so PostHog sent no email of this request.",
-      'fix' => 'Send each recipient on its own with emails.send and its idempotency_key until batch sends are ' \
-               'available.'
+      'detail' => "Batch sends, or sends from code, aren't available for this project, so PostHog sent no email of " \
+                  'this request.',
+      'fix' => 'If this project can send email from code, send each recipient on its own with emails.send and its ' \
+               'idempotency_key until batch sends are available.'
     }.freeze
     TOO_LARGE = {
       'code' => 'content_too_large',
