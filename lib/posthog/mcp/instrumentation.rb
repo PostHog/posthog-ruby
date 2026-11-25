@@ -133,7 +133,6 @@ module PostHog
         else dispatch_generic(&)
         end
       ensure
-        # A call that recorded nothing still sends what it held, with the session it arrived with.
         safely { release_custom_events(@scope[:session_id]) }
       end
 
@@ -153,7 +152,6 @@ module PostHog
         request = request_with_arguments(original_arguments)
         handle_free = safely(false) { client_row&.handle_free }
         @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) }
-        # The client's own id outranks a handle the agent echoes.
         conversation_id, minted = safely([nil, false]) do
           ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
                                  stripped[ConversationId::PARAM_NAME], name, missing_name, mint: !handle_free)
@@ -464,10 +462,6 @@ module PostHog
       # recorded under. A minted handle is not known to have reached the agent
       # until the call returns, so it stays out of here. {#prepare_request} runs
       # again after the call; the second run is idempotent.
-      #
-      # A minted handle groups the call only once its result delivers it, so with
-      # `hold_custom_events` the body's custom events wait for
-      # {#release_custom_events} and go out with the session the call settles on.
       def prime_session(request, conversation_id, hold_custom_events: false)
         session_id = prepare_request(request, conversation_id: conversation_id)
         @data.synchronize do
@@ -477,9 +471,6 @@ module PostHog
         end
       end
 
-      # Send the custom events {#prime_session} held, with the session the call
-      # recorded, and let later ones (from threads the tool left running) go out
-      # with it directly. Runs once per call; later runs find nothing held.
       def release_custom_events(session_id)
         return unless @scope.key?(:held)
 
@@ -544,14 +535,10 @@ module PostHog
         payload
       end
 
-      # The session a request that carries none gets on stateless HTTP, where the
-      # server's own session would group every client it serves. Fixed per request,
-      # so each event of the request agrees.
       def request_session_id
         @request_session_id ||= (Session.new_session_id if http?)
       end
 
-      # The row of the client this request comes from, see {ClientConversation}.
       def client_row
         return @client_row if defined?(@client_row)
 
@@ -731,8 +718,6 @@ module PostHog
         stripped
       end
 
-      # A handle-free client's listing advertises no `conversation_id`, but the
-      # argument stays owned: other clients' listings still advertise it.
       def mutate_tool(tool, advertise_handle)
         return tool unless tool.is_a?(Hash)
 

@@ -90,9 +90,6 @@ module PostHog
         [Session.new_session_id, 'generated']
       end
 
-      # A call whose session waits on delivering a minted handle holds its custom
-      # events until it records (see {Instrumentation#prime_session}). Each is fixed
-      # when captured, its properties copied and its duration zero.
       def hold(data, scope, input)
         return false unless scope&.key?(:held)
 

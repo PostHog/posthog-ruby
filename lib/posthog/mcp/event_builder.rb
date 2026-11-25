@@ -8,7 +8,6 @@ module PostHog
     #
     # @api private
     module EventBuilder
-      # A replayed token and a transport session id are both carried by the transport.
       WIRE_SESSION_SOURCES = { 'token' => 'transport', 'mcp' => 'transport' }.freeze
 
       module_function

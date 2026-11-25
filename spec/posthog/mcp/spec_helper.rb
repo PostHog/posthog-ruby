@@ -21,7 +21,6 @@ module MCPSpecHelpers
     request
   end
 
-  # A Rack env for a POST to the Streamable HTTP transport.
   def env_for(body, headers = {})
     env = {
       'REQUEST_METHOD' => 'POST', 'PATH_INFO' => '/', 'SCRIPT_NAME' => '', 'QUERY_STRING' => '',

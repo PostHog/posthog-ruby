@@ -26,12 +26,6 @@ module PostHog
         Ids.deterministic_prefixed_id('ses', conversation_id)
       end
 
-      # A client conversation id and a handle name one chat, so they never touch
-      # the server's shared state: a concurrent request would read them.
-      #
-      # @param client_conversation [String, nil] `"<_meta key>:<id>"`, see {ClientConversation.read}
-      # @param request_session_id [String, nil] the session a request that carries
-      #   none gets on a transport every client shares; never stored either
       # @return [Array(String, String)] `[session_id, source]` where source is one of
       #   `client_metadata`, `conversation`, `token`, `mcp`, `generated`
       def resolve(data, mcp_session_id, token: nil, conversation_id: nil, client_conversation: nil,

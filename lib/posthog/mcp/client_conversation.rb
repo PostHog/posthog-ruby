@@ -2,20 +2,12 @@
 
 module PostHog
   module MCP
-    # Client conversation ids: the value an MCP client puts in a `tools/call`
-    # request's `_meta` to name the conversation the call belongs to.
-    #
     # {ROWS} is the table of the MCP analytics spec's "Session identity"
-    # requirement, row for row, in its order. A row's key is read only from a
-    # request its recognition rule matches, so a generic key such as Codex's
-    # `sessionId` is never read from a client that means something else by it.
-    # posthog-js and posthog-python keep the same table.
+    # requirement, row for row, in its order. posthog-js and posthog-python keep
+    # the same table.
     #
     # @api private
     module ClientConversation
-      # `id` returns the id when a value is the row's shape. `handle_free`: the
-      # client sends its id on every call, so it is advertised no
-      # `conversation_id` and minted no handle.
       Row = Struct.new(:key, :id, :user_agent, :client_names, :handle_free, keyword_init: true) do
         def recognizes?(user_agent, client_name)
           return true if user_agent.is_a?(String) && self.user_agent.match?(user_agent)
@@ -45,12 +37,10 @@ module PostHog
 
       module_function
 
-      # @return [Row, nil] the first row that recognizes the request
       def recognize(user_agent, client_name)
         ROWS.find { |row| row.recognizes?(user_agent, client_name) }
       end
 
-      # @return [String, nil] `"<key>:<id>"`, what the session is derived from
       def read(row, meta)
         value = row && SchemaMutation.fetch(meta, row.key)
         id = row.id.call(value) if value.is_a?(String)

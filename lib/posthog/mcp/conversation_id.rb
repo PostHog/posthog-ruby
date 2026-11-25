@@ -37,8 +37,6 @@ module PostHog
       #   when this layer owns it. A tool that declares `conversation_id` in its
       #   own schema is passed application data, which must not anchor analytics:
       #   two users sharing such a value would be stitched into one conversation.
-      # @param mint [Boolean] false for a call that gets no handle of ours: a
-      #   handle-free client's, or one already grouped by its client's own id
       # @return [Array(String, Boolean), Array(nil, false)] `[conversation_id, minted]`
       def resolve(enabled, supplied, tool_name, missing_capability_tool_name, mint: true)
         return [nil, false] if !enabled || tool_name == missing_capability_tool_name
