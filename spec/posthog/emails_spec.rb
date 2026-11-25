@@ -1155,7 +1155,8 @@ module PostHog
 
       it 'refuses a time without an offset before any request' do
         ['2026-12-01T09:00:00', '2026-12-01 09:00:00Z', '2026-12-01', '2026-02-30T09:00:00Z', '1500-02-29T09:00:00Z',
-         'tomorrow', Date.new(2026, 12, 1), 1_764_576_000].each do |scheduled_at|
+         'tomorrow', Date.new(2026, 12, 1), 1_764_576_000,
+         '2026-12-01T09:00:00Z'.encode('UTF-16LE')].each do |scheduled_at|
           expect { send_template(scheduled_at: scheduled_at) }.to raise_error(ArgumentError, /scheduled_at/)
         end
         expect(a_request(:any, %r{/messaging/|amazonaws})).not_to have_been_made

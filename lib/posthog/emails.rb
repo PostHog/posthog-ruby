@@ -611,7 +611,7 @@ module PostHog
     end
 
     def offset_time(value)
-      return nil unless value.valid_encoding?
+      return nil unless value.valid_encoding? && value.encoding.ascii_compatible?
 
       parts = SCHEDULED_AT_PATTERN.match(value)
       return nil if parts.nil?
