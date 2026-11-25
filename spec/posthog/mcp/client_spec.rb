@@ -286,4 +286,13 @@ RSpec.describe PostHog::MCP::Client, 'sessions' do
       expect(sent.first[1..]).to eq(session)
     end
   end
+
+  it 'never raises into the dispatcher on a User-Agent that is not valid UTF-8' do
+    user_agent = (+"openai-mcp/1.0.0 (ChatGPT) \xFF").force_encoding('UTF-8')
+
+    expect do
+      client.capture_tool_call('search_docs', client_user_agent: user_agent,
+                                              request_meta: { 'openai/session' => 'v1/conv-example-0001' })
+    end.not_to raise_error
+  end
 end
