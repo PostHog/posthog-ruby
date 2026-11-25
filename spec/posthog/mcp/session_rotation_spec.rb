@@ -76,6 +76,29 @@ RSpec.describe 'PostHog::MCP one-client connection sessions' do
     expect(events.map { |event| event[:properties]['$session_id'] }.uniq.size).to eq(1)
   end
 
+  it 'keeps the startup session for the first tool call, however late it arrives' do
+    at(0)
+    server.handle(rpc(1, 'tools/list'))
+    at(31)
+    call_tool(2)
+
+    expect(drain_events(client).map { |event| event[:properties]['$session_id'] }.uniq.size).to eq(1)
+  end
+
+  it 'never rolls the session over under a call still running' do
+    at(0)
+    call_tool(1)
+    at(1)
+    PostHogMcpRotationTool.during_call = lambda do
+      PostHogMcpRotationTool.during_call = nil
+      at(31)
+      call_tool(3)
+    end
+    call_tool(2)
+
+    expect(drain_events(client).map { |event| event[:properties]['$session_id'] }.uniq.size).to eq(1)
+  end
+
   it 'gives a custom event captured before any request the connection\'s session' do
     PostHogMcpRotationTool.analytics.capture('server_started')
     call_tool(1)

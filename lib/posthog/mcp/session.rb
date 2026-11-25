@@ -61,19 +61,24 @@ module PostHog
         end
       end
 
-      # A one-client connection's session rolls over for the first tool call that
-      # arrives {INACTIVITY_TIMEOUT_MINUTES} or more after the previous one ended:
-      # a desktop app can keep one stdio process alive across many chats.
-      def rotate_if_idle(data)
+      # A desktop app can keep one stdio process alive across many chats.
+      def start_tool_call(data)
         data.synchronize do
-          next unless data.session_source == 'generated'
-
-          data.session_id = new_session_id if Time.now - data.last_tool_call_end >= INACTIVITY_TIMEOUT_MINUTES * 60
+          data.session_id = new_session_id if data.session_source == 'generated' && idle?(data)
+          data.tool_calls_in_flight += 1
         end
       end
 
       def end_tool_call(data)
-        data.synchronize { data.last_tool_call_end = Time.now }
+        data.synchronize do
+          data.tool_calls_in_flight -= 1
+          data.last_tool_call_end = Time.now
+        end
+      end
+
+      def idle?(data)
+        data.tool_calls_in_flight.zero? && !data.last_tool_call_end.nil? &&
+          Time.now - data.last_tool_call_end >= INACTIVITY_TIMEOUT_MINUTES * 60
       end
 
       def present?(value)

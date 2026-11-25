@@ -137,12 +137,12 @@ RSpec.describe PostHog::MCP::Session do
     first, = described_class.resolve(data, nil)
     data.last_tool_call_end = Time.now - (31 * 60)
     expect(described_class.resolve(data, nil)[0]).to eq(first)
-    described_class.rotate_if_idle(data)
+    described_class.start_tool_call(data)
     expect(described_class.resolve(data, nil)[0]).not_to eq(first)
 
     token = PostHog::MCP::SessionTokenPayload.new(session_id: 'ses_tok')
     described_class.resolve(data, nil, token: token)
-    described_class.rotate_if_idle(data)
+    described_class.start_tool_call(data)
     expect(described_class.resolve(data, nil, token: token)[0]).to eq('ses_tok')
   end
 end

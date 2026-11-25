@@ -155,7 +155,7 @@ module PostHog
       # --- dispatchers -------------------------------------------------------
 
       def dispatch_tool_call
-        Session.rotate_if_idle(@data) unless http?
+        Session.start_tool_call(@data) unless http?
         name = fetch(@params, :name)
         arguments = fetch(@params, :arguments)
         arguments = nil unless arguments.is_a?(Hash)
