@@ -372,10 +372,11 @@ module PostHog
     #   one. The error is `client_closed` when the client shut down before a retry. {EmailError#code} is
     #   `content_too_large` with PostHog's fix: a 413 for a batch to split into smaller batches, or for one recipient
     #   an email to make smaller, and a 400 for shared content to make smaller. It is `batch_unavailable` when the
-    #   project can't send batches yet, and `not_found` when the template doesn't exist or batch sends are off: send
-    #   each email the batch didn't queue with {#send} and its recipient's +idempotency_key+. The warnings of an
-    #   answer without a result for each recipient are on
-    #   {EmailError#warnings}, and the client logs none of them.
+    #   project can't send batches yet: send each email the batch didn't queue with {#send} and its recipient's
+    #   +idempotency_key+. It is `not_found` with no {EmailError#field} when PostHog found no template with the
+    #   +template_id+ or batch sends aren't available for the project, which PostHog answers alike: check
+    #   +template_id+, and if it's right, send each recipient on its own the same way. The warnings of an answer
+    #   without a result for each recipient are on {EmailError#warnings}, and the client logs none of them.
     # @raise [EmailError] The client sent nothing, such as when it is disabled or has no +secret_key+.
     # @raise [ArgumentError] An argument has the wrong type or format, such as more than 100 recipients or two
     #   recipients with the same +idempotency_key+. No email was sent.

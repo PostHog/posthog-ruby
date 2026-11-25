@@ -15,12 +15,18 @@ module PostHog
                  'it goes out once.'
     UNAVAILABLE_FIX = "Until batch sends are on for the project, send each email the batch didn't queue with " \
                       "emails.send and its recipient's idempotency_key."
-    NOT_FOUND = {
+    NO_TEMPLATE = {
       'code' => 'not_found',
-      'detail' => 'PostHog found no batch send for this request, so no email was sent.',
-      'why' => "The template doesn't exist, or batch sends are off for this project or this PostHog version.",
-      'fix' => "Check template_id, or send each email the batch didn't queue with emails.send and its recipient's " \
-               'idempotency_key.'
+      'detail' => "PostHog found no template with this ID, or batch sends aren't available for this project, so it " \
+                  'sent no email of this request.',
+      'fix' => "Check template_id. If it's right, send each recipient on its own with emails.send and its " \
+               'idempotency_key until batch sends are available.'
+    }.freeze
+    NO_CODE_BATCH = {
+      'code' => 'not_found',
+      'detail' => "Batch sends from code aren't available for this project, so PostHog sent no email of this request.",
+      'fix' => 'Send each recipient on its own with emails.send and its idempotency_key until batch sends are ' \
+               'available.'
     }.freeze
     TOO_LARGE = {
       'code' => 'content_too_large',
@@ -31,7 +37,8 @@ module PostHog
     EARLIER_ATTEMPT = 'An earlier attempt of this batch may have queued this email, so it may still go out. ' \
                       'The last attempt ended with:'
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
-    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NOT_FOUND, :TOO_LARGE,
+    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NO_TEMPLATE, :NO_CODE_BATCH,
+                     :TOO_LARGE,
                      :SMALLER_FIX, :RESULT_DEFAULTS
 
     Member = Struct.new(:index, :to, :idempotency_key, :wire, keyword_init: true)
@@ -50,6 +57,7 @@ module PostHog
       @warnings = []
       @maybe_queued = false
       @attempt_error = nil
+      @template_form = shared.key?(:template_id)
       head = JSON.generate(shared.merge(recipients: [])).delete_suffix(']}')
       # A buffer of the exact size, and each recipient's JSON dropped once copied, so the request body is the only copy
       # of the batch through every retry.
@@ -148,8 +156,10 @@ module PostHog
 
     def response_error(fields, status, retry_after)
       answered = fields.compact
-      fields = if status == 404
-                 NOT_FOUND.merge(answered)
+      fields = if status == 404 && unnamed_not_found?(answered)
+                 # An unknown template, batch sends that are off and a server without the route answer alike, and
+                 # after launch a wrong template ID is the likely one.
+                 @template_form ? NO_TEMPLATE : NO_CODE_BATCH
                elsif status == 413
                  too_large(answered)
                else
@@ -157,6 +167,10 @@ module PostHog
                end
       fields = fields.merge('fix' => UNAVAILABLE_FIX) if fields['code'] == 'batch_unavailable'
       @reply_error.call(fields, status, retry_after)
+    end
+
+    def unnamed_not_found?(answered)
+      %w[not_found api_error].include?(text(answered['code']) || 'api_error') && text(answered['attr']).nil?
     end
 
     def too_large(answered)

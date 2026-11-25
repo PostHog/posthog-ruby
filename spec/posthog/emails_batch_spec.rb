@@ -313,12 +313,45 @@ module PostHog
           end
         end
 
-        it 'names a 404 as a missing template or batch sends that are off' do
-          stub_request(:post, batch_url).to_return(status: 404, body: '')
+        # PostHog answers an unknown template_id, batch sends that are off and a server without the route alike.
+        {
+          'an unknown template or batch sends off' => JSON.generate(code: 'not_found', attr: nil, detail: 'Not found.'),
+          'a server without the route' => JSON.generate(code: 'not_found', detail: 'Endpoint not found.'),
+          'no body' => ''
+        }.each do |name, body|
+          it "names the template ID first after a 404 for #{name}" do
+            stub_request(:post, batch_url).to_return(status: 404, body: body)
+
+            expect { batch_template([ada, alan]) }.to raise_error(EmailBatchError) { |error|
+              expect([error.code, error.name, error.status_code, error.field])
+                .to eq(['not_found', 'not_found', 404, nil])
+              expect(error.message)
+                .to include('no template with this ID', "batch sends aren't available for this project")
+              expect(error.fix).to include('Check template_id', 'on its own')
+              expect("#{error.message} #{error.why} #{error.fix}").not_to match(/update|upgrade|server|version/i)
+              expect(error.results.map(&:status)).to eq(%w[failed failed])
+            }
+          end
+
+          it "names batch sends from code after a 404 for #{name}" do
+            stub_request(:post, batch_url).to_return(status: 404, body: body)
+
+            code = { template_key: 'launch', subject: 'Hi', text: 'Hi', recipients: [{ to: 'ada@example.com' }] }
+            expect { emails.batch(**code) }.to raise_error(EmailBatchError) { |error|
+              expect([error.code, error.status_code]).to eq(['not_found', 404])
+              expect(error.message).to include("aren't available for this project")
+              expect(error.fix).to include('on its own')
+              expect("#{error.message} #{error.why} #{error.fix}")
+                .not_to match(/template_id|update|upgrade|server|version/i)
+            }
+          end
+        end
+
+        it 'keeps the answer of a 404 that names a field' do
+          stub_request(:post, batch_url).to_return(refuse(404, 'not_found', detail: 'No such sender.', attr: 'from'))
 
           expect { batch_template([ada]) }.to raise_error(EmailBatchError) { |error|
-            expect([error.code, error.name]).to eq(%w[not_found not_found])
-            expect(error.why).to include("template doesn't exist")
+            expect([error.code, error.field, error.message]).to eq(['not_found', 'from', 'No such sender.'])
           }
         end
 
