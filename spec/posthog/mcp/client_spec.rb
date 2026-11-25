@@ -109,8 +109,9 @@ RSpec.describe PostHog::MCP::Client do
     expect(props['$mcp_listed_tool_names']).to eq(%w[execute-sql query-logs get_more_tools])
 
     client.capture_missing_capability(context: '  wanted a tool to export to CSV ', distinct_id: 'u',
-                                      llm_model: ' claude-opus-4-8 ')
+                                      llm_model: ' claude-opus-4-8 ', parameters: { context: 'export' })
     event = client.dequeue_last_message
+    expect(event[:properties]).not_to have_key('$mcp_parameters')
     expect(event[:event]).to eq('$mcp_missing_capability')
     expect(event[:properties]).to include('$mcp_intent' => 'wanted a tool to export to CSV',
                                           '$mcp_intent_source' => 'context_parameter',

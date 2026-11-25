@@ -116,8 +116,11 @@ module PostHog
       # Capture a `get_more_tools` call as a missing-capability report. Emits
       # `$mcp_missing_capability` with the agent's description as `$mcp_intent`.
       #
+      # `parameters` is accepted for compatibility and not sent: the report is
+      # already the event's `$mcp_intent`.
+      #
       # @return [void]
-      def capture_missing_capability(context: nil, parameters: nil, protocol_version: nil, distinct_id: nil,
+      def capture_missing_capability(context: nil, parameters: nil, protocol_version: nil, distinct_id: nil, # rubocop:disable Lint/UnusedMethodArgument
                                      session_id: nil, client_user_agent: nil, vendor_client: nil,
                                      set_properties: nil, groups: nil, properties: nil, timestamp: nil,
                                      llm_model: nil, llm_model_source: nil)
@@ -125,7 +128,6 @@ module PostHog
                            properties, timestamp, client_user_agent, vendor_client)
         event['resource_name'] = @missing_capability_tool_name
         event['protocol_version'] = protocol_version
-        event['parameters'] = parameters
         apply_intent(event, context, 'context_parameter')
         apply_model(event, llm_model, llm_model_source)
         emit(event)
