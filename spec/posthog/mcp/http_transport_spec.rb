@@ -92,7 +92,7 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       response = transport.call(env_for(initialize_body(1, 'draft')))
       expect(response[1]['mcp-session-id']).to be_nil
       2.times { |i| transport.call(env_for(rpc(i + 2, 'tools/call', { name: 'ping_tool', arguments: {} }))) }
-      expect(logs.count { |m| m.include?('fragment across requests') }).to eq(1)
+      expect(logs.count { |m| m.include?('a $session_id of its own') }).to eq(1)
     end
 
     {

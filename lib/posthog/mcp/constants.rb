@@ -69,6 +69,7 @@ module PostHog
       SERVER_NAME = '$mcp_server_name'
       SERVER_VERSION = '$mcp_server_version'
       SESSION_ID = '$session_id'
+      SESSION_SOURCE = '$mcp_session_source'
       SOURCE = '$mcp_source'
       TOOL_CATEGORY = '$mcp_tool_category'
       TOOL_DESCRIPTION = '$mcp_tool_description'

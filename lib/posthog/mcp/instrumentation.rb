@@ -105,6 +105,7 @@ module PostHog
         @token = SessionToken.decode(header_session_id)
         @data.http_transport_seen = true if http?
         @identified_in_request = {}
+        @session_sources = {}
       end
 
       # Runs the wrapped handler and records the request.
@@ -131,6 +132,9 @@ module PostHog
         when :initialize then dispatch_initialize(&)
         else dispatch_generic(&)
         end
+      ensure
+        # A call that recorded nothing still sends what it held, with the session it arrived with.
+        safely { release_custom_events(@scope[:session_id]) }
       end
 
       # --- dispatchers -------------------------------------------------------
@@ -146,11 +150,19 @@ module PostHog
         # Resolution reads the stripped values, never `original_arguments`: only an
         # argument this layer injected is ours to interpret. A `conversation_id` or
         # `context` the tool declares itself stays application data and is left to it.
+        request = request_with_arguments(original_arguments)
+        handle_free = safely(false) { client_row(request)&.handle_free }
+        @client_conversation = safely { ClientConversation.read(client_row(request), envelope_meta) }
         conversation_id, minted = safely([nil, false]) do
           ConversationId.resolve(@options.enable_conversation_id, stripped[ConversationId::PARAM_NAME], name,
                                  missing_name)
         end
-        request = request_with_arguments(original_arguments)
+        # The client's own id outranks a handle, and a handle-free client names its
+        # conversation itself, so neither is minted one.
+        if @client_conversation || (minted && handle_free)
+          conversation_id = nil
+          minted = false
+        end
 
         if virtual_tool?(name)
           # Run the gem's own handler so validation, in-flight tracking and
@@ -172,7 +184,7 @@ module PostHog
           return result
         end
 
-        safely { prime_session(request, minted ? nil : conversation_id) }
+        safely { prime_session(request, minted ? nil : conversation_id, hold_custom_events: minted) }
         begin
           result = yield
         rescue StandardError => e
@@ -191,7 +203,7 @@ module PostHog
         error_source = result
         unless no_response?(result) || conversation_id.nil?
           safely do
-            if @data.tool_output_instructions[name]
+            if @data.tool_output_instructions[name] && !handle_free
               result, delivered = ConversationId.mirror_instructions(result, conversation_id)
             end
             if minted
@@ -205,6 +217,7 @@ module PostHog
         safely do
           cid = minted && !delivered ? nil : conversation_id
           session_id = prepare_request(request, conversation_id: cid)
+          release_custom_events(session_id)
           record_tool_call(session_id, name, request, result: result, conversation_id: cid,
                                                       stripped: stripped, error_source: error_source)
         end
@@ -228,7 +241,8 @@ module PostHog
           if tools.is_a?(Array)
             names = tools.map { |tool| fetch(tool, :name) }.compact
             empty = tools.empty?
-            mutated = tools.map { |tool| mutate_tool(tool) }
+            advertise_handle = !client_row(@request)&.handle_free
+            mutated = tools.map { |tool| mutate_tool(tool, advertise_handle) }
             result = result.merge(SchemaMutation.key_for(result, :tools) => mutated)
           end
         end
@@ -405,6 +419,7 @@ module PostHog
         event = {
           'event_type' => event_type,
           'session_id' => session_id,
+          'session_source' => @session_sources[session_id],
           'duration' => duration_ms,
           'client_name' => nil,
           'client_version' => nil,
@@ -454,16 +469,46 @@ module PostHog
       # recorded under. A minted handle is not known to have reached the agent
       # until the call returns, so it stays out of here. {#prepare_request} runs
       # again after the call; the second run is idempotent.
-      def prime_session(request, conversation_id)
+      #
+      # A minted handle groups the call only once its result delivers it, so with
+      # `hold_custom_events` the body's custom events wait for
+      # {#release_custom_events} and go out with the session the call settles on.
+      def prime_session(request, conversation_id, hold_custom_events: false)
         session_id = prepare_request(request, conversation_id: conversation_id)
-        @scope[:session_id] = session_id if @scope.is_a?(Hash)
+        @data.synchronize do
+          @scope[:session_id] = session_id
+          @scope[:session_source] = @session_sources[session_id]
+          @scope[:held] = [] if hold_custom_events
+        end
+      end
+
+      # Send the custom events {#prime_session} held, with the session the call
+      # recorded, and let later ones (from threads the tool left running) go out
+      # with it directly. Runs once per call; later runs find nothing held.
+      def release_custom_events(session_id)
+        held = @data.synchronize do
+          next nil unless @scope.key?(:held)
+
+          @scope[:session_id] = session_id
+          @scope[:session_source] = @session_sources[session_id]
+          @scope[:actor] = actor_for(session_id)
+          @scope.delete(:held)
+        end
+        held&.each do |input|
+          self.class.capture_event(@data, input.merge('session_id' => session_id,
+                                                      'session_source' => @session_sources[session_id]),
+                                   actor: actor_for(session_id))
+        end
       end
 
       # Resolve the session id and run identify.
       def prepare_request(request, conversation_id: nil, token: nil)
         token ||= @token
         session_id, source = Session.resolve(@data, mcp_session_id(token), token: token,
-                                                                           conversation_id: conversation_id)
+                                                                           conversation_id: conversation_id,
+                                                                           client_conversation: @client_conversation,
+                                                                           request_session_id: request_session_id)
+        @session_sources[session_id] = source
         warn_stateless_session_not_wired if source == 'generated' && http?
 
         # A tool call prepares twice: once before the body to pin the session, and
@@ -501,14 +546,28 @@ module PostHog
         payload
       end
 
+      # The session a request that carries none gets on stateless HTTP, where the
+      # server's own session would group every client it serves. Fixed per request,
+      # so each event of the request agrees.
+      def request_session_id
+        @request_session_id ||= (Session.new_session_id if http?)
+      end
+
+      # The row of the client this request comes from, see {ClientConversation}.
+      def client_row(request)
+        return @client_row if defined?(@client_row)
+
+        @client_row = ClientConversation.recognize(@headers['user-agent'], client_identity(request)[0])
+      end
+
       def warn_stateless_session_not_wired
         return if @data.warned_no_stateless_session
 
         @data.warned_no_stateless_session = true
         Log.warn(
           @options,
-          'Warning: an MCP request arrived over streamable HTTP with no session id, so PostHog generated a ' \
-          'per-process $session_id that will fragment across requests and pods. In stateless mode the ' \
+          'Warning: an MCP request arrived over streamable HTTP with no session id, so PostHog gave it a ' \
+          '$session_id of its own, shared with no other request. In stateless mode the ' \
           'client must replay the Mcp-Session-Id header PostHog::MCP mints at initialize; for a custom Rack ' \
           'stack add PostHog::MCP::RackMiddleware. Conversation ids, which are enabled by default, also anchor ' \
           'the session without any middleware. See https://posthog.com/docs/mcp-analytics/installation#ruby.'
@@ -539,8 +598,10 @@ module PostHog
       end
 
       def client_identity(request)
-        info = envelope_client_info || session_client || server_client
+        info = envelope_client_info || session_client
         info = fetch(request_params(request), :clientInfo) if info.nil? && @kind == :initialize
+        # One instance serves every stateless HTTP client, so its handshake may be another client's.
+        info = server_client if info.nil? && !http?
         name = info.is_a?(Hash) ? fetch(info, :name) : nil
         version = info.is_a?(Hash) ? fetch(info, :version) : nil
         name ||= @token&.client_name
@@ -673,7 +734,9 @@ module PostHog
         stripped
       end
 
-      def mutate_tool(tool)
+      # A handle-free client's listing advertises no `conversation_id`, but the
+      # argument stays owned: other clients' listings still advertise it.
+      def mutate_tool(tool, advertise_handle)
         return tool unless tool.is_a?(Hash)
 
         name = fetch(tool, :name)
@@ -691,7 +754,7 @@ module PostHog
         if @options.enable_conversation_id
           updated = SchemaMutation.add_conversation_id_parameter(schema, tool_name: name, options: @options)
           owned << ConversationId::PARAM_NAME unless updated.equal?(schema)
-          schema = updated
+          schema = updated if advertise_handle
         end
         if @options.capture_model_enabled?
           updated = SchemaMutation.add_model_parameter(
@@ -703,7 +766,7 @@ module PostHog
 
         mutated = tool.merge(SchemaMutation.key_for(tool, :inputSchema) => schema)
         declared = nil
-        if @options.enable_conversation_id
+        if @options.enable_conversation_id && advertise_handle
           output_schema = fetch(tool, :outputSchema)
           new_output, declared = SchemaMutation.add_output_instructions(output_schema, tool_name: name,
                                                                                        options: @options)

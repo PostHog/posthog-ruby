@@ -44,6 +44,7 @@ module PostHog
       def add_session_id(event, properties)
         session_id = event['session_id']
         properties[Property::SESSION_ID] = session_id if session_id.is_a?(String) && !session_id.empty?
+        properties[Property::SESSION_SOURCE] = event['session_source'] if event['session_source']
       end
 
       def add_conversation_id(event, properties)

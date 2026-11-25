@@ -9,6 +9,8 @@ module PostHog
     class Analytics
       FLUSH_TIMEOUT_SECONDS = 10
       private_constant :FLUSH_TIMEOUT_SECONDS
+      MAX_HELD_EVENTS = 1000
+      private_constant :MAX_HELD_EVENTS
 
       # @api private
       def initialize(server)
@@ -40,13 +42,13 @@ module PostHog
 
         scope = RequestScope.current
         scope = nil unless scope.is_a?(Hash)
-        Instrumentation.capture_event(data, {
-                                        'session_id' => current_session_id(data, scope),
-                                        'event_type' => EventType::CUSTOM,
-                                        'event_name' => event,
-                                        'timestamp' => Time.now.utc,
-                                        'properties' => properties
-                                      }, actor: scoped_actor(scope))
+        input = { 'event_type' => EventType::CUSTOM, 'event_name' => event, 'timestamp' => Time.now.utc,
+                  'properties' => properties }
+        return if hold(data, scope, input)
+
+        session_id, source = current_session(data, scope)
+        Instrumentation.capture_event(data, input.merge('session_id' => session_id, 'session_source' => source),
+                                      actor: scoped_actor(scope))
         nil
       end
 
@@ -80,13 +82,30 @@ module PostHog
       # created before the request. Fail closed with a standalone session
       # rather than filing the event under another caller's identity; over stdio a
       # server only ever talks to one client, so the fallback stays.
-      def current_session_id(data, scope)
-        scoped = scope ? scope[:session_id] : nil
-        return scoped if scoped
-        return data.session_id unless data.http_transport_seen
+      def current_session(data, scope)
+        return scope.values_at(:session_id, :session_source) if scope&.[](:session_id)
+        return [data.session_id, Session.server_source(data)] unless data.http_transport_seen
 
         warn_unscoped_capture(data)
-        Session.new_session_id
+        [Session.new_session_id, 'generated']
+      end
+
+      # A call whose session waits on delivering a minted handle holds its custom
+      # events until it records (see {Instrumentation#prime_session}). Each is fixed
+      # when captured, its properties copied and its duration zero.
+      def hold(data, scope, input)
+        data.synchronize do
+          held = scope&.[](:held)
+          next false unless held
+
+          if held.size < MAX_HELD_EVENTS
+            held << input.merge('properties' => input['properties'].dup, 'duration' => 0)
+          else
+            Log.debug(data.options, "analytics.capture(#{input['event_name']}) dropped: the call holds " \
+                                    "#{MAX_HELD_EVENTS} events already")
+          end
+          true
+        end
       end
 
       # The identity the in-flight request resolved, which {Instrumentation} pinned

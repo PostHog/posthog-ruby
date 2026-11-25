@@ -43,6 +43,7 @@ These are the few things that differ from what the docs describe for the other S
 | `mcp.rb` (parent dir) | `PostHog::MCP.instrument` and the public helpers |
 | `server_extension.rb` | Prepended onto `MCP::Server` and the Streamable HTTP transport |
 | `instrumentation.rb` | Per-request dispatch: intent, identity, sessions, recording |
+| `session.rb`, `client_conversation.rb` | Session resolution and the clients whose `_meta` conversation ids it reads |
 | `client.rb` | `PostHog::MCP::Client` for custom dispatchers |
 | `rack_middleware.rb` | `Mcp-Session-Id` tokens for a custom Rack stack |
 | `sanitization.rb`, `truncation.rb` | Redaction and payload budgets |

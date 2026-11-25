@@ -289,6 +289,7 @@ constant PostHog::MCP::Property::RESPONSE: String
 constant PostHog::MCP::Property::SERVER_NAME: String
 constant PostHog::MCP::Property::SERVER_VERSION: String
 constant PostHog::MCP::Property::SESSION_ID: String
+constant PostHog::MCP::Property::SESSION_SOURCE: String
 constant PostHog::MCP::Property::SOURCE: String
 constant PostHog::MCP::Property::TOOL_CATEGORY: String
 constant PostHog::MCP::Property::TOOL_DESCRIPTION: String
