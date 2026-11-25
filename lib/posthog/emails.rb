@@ -536,7 +536,6 @@ module PostHog
       [nil, run.failure(e)]
     end
 
-    # The client can't tell a failing logger from a caller's deadline, so either propagates.
     def log_warnings(warnings)
       warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
     end
