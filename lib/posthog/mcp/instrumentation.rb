@@ -171,7 +171,6 @@ module PostHog
           ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
                                  stripped[ConversationId::PARAM_NAME], mint: !handle_free && !carries_session?)
         end
-        # A minted handle anchors the call only once a result delivers it.
         anchored = minted ? nil : conversation_id
 
         if virtual_tool?(name)
@@ -808,8 +807,6 @@ module PostHog
         mutated
       end
 
-      # A virtual tool registers its own report arguments and `llm_model`, and
-      # takes `conversation_id` like any tool.
       def mutate_virtual_tool(tool, advertise_handle)
         return tool unless @options.enable_conversation_id && advertise_handle
 
