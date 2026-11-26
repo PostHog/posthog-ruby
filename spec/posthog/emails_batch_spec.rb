@@ -160,15 +160,17 @@ module PostHog
       it 'leaves an unconfirmed email PostHog answered without an ID to be sent again with its key' do
         stub_request(:post, batch_url).to_return(
           answer(slot_error('delivery_unavailable', 503, message_id: 'msg_ada'),
-                 slot_error('delivery_unavailable', 503, message_id: nil), { status: 'queued' })
+                 slot_error('delivery_unavailable', 503, message_id: nil), { status: 'queued' },
+                 { status: 'queued', message_id: ' ' })
         )
+        grace = { to: 'grace@example.com', idempotency_key: 'welcome:grace' }
 
-        results = batch_template([ada, alan, { to: 'grace@example.com', idempotency_key: 'welcome:grace' }]).results
+        results = batch_template([ada, alan, grace, { to: 'lin@example.com', idempotency_key: 'welcome:lin' }]).results
 
-        expect(results.map(&:message_id)).to eq(['msg_ada', nil, nil])
+        expect(results.map(&:message_id)).to eq(['msg_ada', nil, nil, nil])
         expect(results.map { |result| resend_with_key(result) }).to eq(
           [['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true],
-           ['unconfirmed', 'welcome:grace', true]]
+           ['unconfirmed', 'welcome:grace', true], ['unconfirmed', 'welcome:lin', true]]
         )
         results.each { |result| expect_unconfirmed_message(result) }
         expect(a_request(:get, %r{/api/messaging/emails/status/})).not_to have_been_made
@@ -274,6 +276,7 @@ module PostHog
           ],
           'a 413 without a JSON body' => [{ status: 413, body: '<html>Request Entity Too Large</html>' }, 'smaller'],
           'a 413 with an empty code and fix' => [{ status: 413, body: JSON.generate(code: '', fix: '') }, 'smaller'],
+          'a 413 with a blank code and fix' => [{ status: 413, body: JSON.generate(code: ' ', fix: ' ') }, 'smaller'],
           'a 413 with fields that are not text' => [
             { status: 413, body: JSON.generate(code: 413, fix: false) }, 'smaller'
           ]

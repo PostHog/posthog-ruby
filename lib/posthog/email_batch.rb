@@ -202,8 +202,7 @@ module PostHog
                                        'so it may still go out.')
       end
 
-      code = text(error['code'])
-      code = 'api_error' unless code&.valid_encoding? && !code.strip.empty?
+      code = text(error['code']) || 'api_error'
       status = error['status'].is_a?(Integer) ? error['status'] : nil
       # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
       unconfirmed = UNCONFIRMED_CODES.include?(code)
@@ -217,8 +216,9 @@ module PostHog
                      fix: (RESEND_FIX if unconfirmed), message: message)
     end
 
+    # A blank string, or one that isn't valid UTF-8, names nothing.
     def text(value)
-      value if value.is_a?(String) && !value.empty?
+      value if value.is_a?(String) && value.valid_encoding? && !value.strip.empty?
     end
   end
 end
