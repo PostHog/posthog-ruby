@@ -63,6 +63,8 @@ constant PostHog::Defaults::Request::PATH: String
 constant PostHog::Defaults::Request::PORT: Integer
 constant PostHog::Defaults::Request::RETRIES: Integer
 constant PostHog::Defaults::Request::SSL: Boolean
+class PostHog::EmailBatchError < PostHog::EmailError
+instance_method PostHog::EmailBatchError#results()
 class PostHog::EmailError < StandardError
 instance_method PostHog::EmailError#code()
 instance_method PostHog::EmailError#docs_url()
@@ -75,9 +77,40 @@ instance_method PostHog::EmailError#status_code()
 instance_method PostHog::EmailError#warnings()
 instance_method PostHog::EmailError#why()
 class PostHog::Emails
+instance_method PostHog::Emails#batch(recipients:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., sensitive: ..., tracking: ..., capture_engagement: ..., max_retries: ...)
 instance_method PostHog::Emails#get(message_id)
 instance_method PostHog::Emails#send(to:, template_id: ..., template_data: ..., template_key: ..., subject: ..., html: ..., text: ..., from: ..., reply_to: ..., cc: ..., bcc: ..., attachments: ..., sensitive: ..., tracking: ..., capture_engagement: ..., distinct_id: ..., idempotency_key: ..., max_retries: ..., scheduled_at: ...)
 class_method PostHog::Emails.logger()
+class PostHog::Emails::BatchEmailResult < Struct
+instance_method PostHog::Emails::BatchEmailResult#error()
+instance_method PostHog::Emails::BatchEmailResult#error=(_)
+instance_method PostHog::Emails::BatchEmailResult#idempotency_key()
+instance_method PostHog::Emails::BatchEmailResult#idempotency_key=(_)
+instance_method PostHog::Emails::BatchEmailResult#index()
+instance_method PostHog::Emails::BatchEmailResult#index=(_)
+instance_method PostHog::Emails::BatchEmailResult#message_id()
+instance_method PostHog::Emails::BatchEmailResult#message_id=(_)
+instance_method PostHog::Emails::BatchEmailResult#replayed()
+instance_method PostHog::Emails::BatchEmailResult#replayed=(_)
+instance_method PostHog::Emails::BatchEmailResult#status()
+instance_method PostHog::Emails::BatchEmailResult#status=(_)
+instance_method PostHog::Emails::BatchEmailResult#to()
+instance_method PostHog::Emails::BatchEmailResult#to=(_)
+class_method PostHog::Emails::BatchEmailResult.[](*arg0)
+class_method PostHog::Emails::BatchEmailResult.inspect()
+class_method PostHog::Emails::BatchEmailResult.keyword_init?()
+class_method PostHog::Emails::BatchEmailResult.members()
+class_method PostHog::Emails::BatchEmailResult.new(*arg0)
+class PostHog::Emails::BatchResult < Struct
+instance_method PostHog::Emails::BatchResult#results()
+instance_method PostHog::Emails::BatchResult#results=(_)
+instance_method PostHog::Emails::BatchResult#warnings()
+instance_method PostHog::Emails::BatchResult#warnings=(_)
+class_method PostHog::Emails::BatchResult.[](*arg0)
+class_method PostHog::Emails::BatchResult.inspect()
+class_method PostHog::Emails::BatchResult.keyword_init?()
+class_method PostHog::Emails::BatchResult.members()
+class_method PostHog::Emails::BatchResult.new(*arg0)
 class PostHog::Emails::SendResult < Struct
 instance_method PostHog::Emails::SendResult#id()
 instance_method PostHog::Emails::SendResult#id=(_)

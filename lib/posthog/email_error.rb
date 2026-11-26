@@ -28,8 +28,9 @@ module PostHog
     # @return [String, nil] The message ID of an email PostHog accepted although the call failed, such as an email
     #   whose `schedule_not_confirmed` means it may go out at another time. Read its status with {Emails#get}.
     attr_reader :message_id
-    # @return [Array<Emails::Warning>] PostHog's warnings about an email it accepted although the call failed. The
-    #   client logs warnings only for a call that succeeds.
+    # @return [Array<Emails::Warning>] PostHog's warnings about the emails it accepted although the call failed, each
+    #   once, such as those of a batch's requests that went out. The client logs warnings only for a call that
+    #   succeeds.
     attr_reader :warnings
 
     # @api private
@@ -52,9 +53,13 @@ module PostHog
       'network_error' => 'service_unavailable',
       'invalid_attachment' => 'validation_error',
       'too_many_attachments' => 'validation_error',
-      'message_too_large' => 'validation_error'
+      'message_too_large' => 'validation_error',
+      'delivery_unavailable' => 'service_unavailable',
+      'content_too_large' => 'validation_error'
     }.freeze
-    private_constant :SDK_ERROR_NAMES
+    # A 409 PostHog answers before it takes the request, so no idempotency key is in flight.
+    VALIDATION_CONFLICTS = %w[template_outdated batch_unavailable].freeze
+    private_constant :SDK_ERROR_NAMES, :VALIDATION_CONFLICTS
 
     # @api private
     def self.name_for(status_code, code)
@@ -66,12 +71,29 @@ module PostHog
       when 400 then 'validation_error'
       when 403 then 'invalid_permission'
       when 404 then 'not_found'
-      when 409 then code == 'template_outdated' ? 'validation_error' : 'concurrent_idempotent_requests'
+      when 409 then VALIDATION_CONFLICTS.include?(code) ? 'validation_error' : 'concurrent_idempotent_requests'
       when 422 then code == 'idempotency_key_reused' ? 'invalid_idempotent_request' : 'validation_error'
       when 429 then code == 'quota_limited' ? 'monthly_quota_exceeded' : 'rate_limit_exceeded'
       when 503 then 'service_unavailable'
       else 'application_error'
       end
+    end
+  end
+
+  # The request of {Emails#batch} failed as a whole.
+  #
+  # The other fields describe its error. {#results} holds every recipient: `unconfirmed` where PostHog may have queued
+  # them in any attempt, such as after a lost answer or while it held their keys, and `failed` otherwise.
+  class EmailBatchError < EmailError
+    # @return [Array<Emails::BatchEmailResult>] One result per recipient, in the order of the batch's recipients.
+    attr_reader :results
+
+    # @api private
+    def initialize(error, results:, warnings:)
+      super(code: error.code, message: error.message, status_code: error.status_code, why: error.why, fix: error.fix,
+            docs_url: error.docs_url, field: error.field, retry_after: error.retry_after, message_id: error.message_id,
+            warnings: warnings)
+      @results = results
     end
   end
 end
