@@ -198,7 +198,9 @@ module PostHog
       end
 
       it 'buckets the person condition on the distinct id when the group key is usable' do
-        c = local_client(org_flag('org-flag', condition(plan_is_pro, aggregation_group_type_index: nil)))
+        # At 60%, `org-flag.user-1` hashes to about 0.48 and `org-flag.acme` to about 0.93.
+        c = local_client(org_flag('org-flag', condition(plan_is_pro, rollout_percentage: 60,
+                                                                     aggregation_group_type_index: nil)))
 
         snapshot = c.evaluate_flags('user-1', groups: { organization: 'acme' }, group_properties: { organization: {} },
                                               person_properties: { plan: 'pro' }, only_evaluate_locally: true)
