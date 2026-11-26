@@ -1130,11 +1130,21 @@ module PostHog
         end
       else
         property_group_items_match?(properties, group_type) do |prop|
-          matches = match_property(prop, property_values, cohort_properties,
-                                   property_matching_version: property_matching_version)
+          matches = if cohort_flag_dependency?(prop)
+                      false
+                    else
+                      match_property(prop, property_values, cohort_properties,
+                                     property_matching_version: property_matching_version)
+                    end
           extract_value(prop, :negation) ? !matches : matches
         end
       end
+    end
+
+    # The flags service doesn't resolve a flag dependency inside a cohort. Its property matcher
+    # rejects flag_evaluates_to, which makes the leaf a definitive non-match.
+    def self.cohort_flag_dependency?(property)
+      extract_value(property, :type) == 'flag' && extract_value(property, :operator) == 'flag_evaluates_to'
     end
 
     def self.extract_value(hash, key)
@@ -1379,8 +1389,10 @@ module PostHog
         filter = PostHog::Utils.symbolize_keys(property)
         if filter[:type] == 'cohort'
           unsupported_property?(filter, flags_by_key, cohorts, visited_cohort_ids)
+        elsif cohort_flag_dependency?(filter)
+          false
         else
-          # Like evaluation, a cohort group checks a flag filter as an ordinary property.
+          # Like evaluation, a cohort group checks any other flag filter as an ordinary property.
           unsupported_filter?(filter)
         end
       end
@@ -1394,7 +1406,7 @@ module PostHog
       true
     end
 
-    private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
+    private_class_method :extract_value, :cohort_flag_dependency?, :find_cohort_property, :nested_property_group?,
                          :property_group_items_match?, :assert_property_filter_type_supported,
                          :assert_filter_supported,
                          :unsupported_property?, :unsupported_property_group?, :unsupported_filter?
