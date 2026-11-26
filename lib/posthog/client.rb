@@ -262,8 +262,8 @@ module PostHog
     # @return [PostHog::Emails]
     attr_reader :emails
 
-    # When sync_mode is enabled, blocks until in-flight requests are complete
-    # and returns true. Timeout parameter has no effect.
+    # When sync_mode is enabled, waits until any in-flight request completes or
+    # timeout is hit.
     #
     # Otherwise, waits until the worker has cleared the queue or timeout is hit.
     # Note: The asynchronous wait polls and can be starved if another thread is
@@ -274,18 +274,13 @@ module PostHog
     # @return [Boolean] +true+ if all pending events were sent, +false+ if the
     #   timeout elapsed first.
     def flush(timeout: nil)
-      if @sync_mode
-        # Wait for any in-flight sync send to complete
-        @sync_lock.synchronize {} # rubocop:disable Lint/EmptyBlock
-        return true
-      end
+      deadline = timeout && (monotonic_time + timeout)
+      return synchronized_within?(deadline) {} if @sync_mode # rubocop:disable Lint/EmptyBlock
 
       if @worker.is_a?(NoopWorker)
         clear
         return true
       end
-
-      deadline = timeout && (monotonic_time + timeout)
 
       while !@queue.empty? || @worker.is_requesting?
         ensure_worker_running
@@ -965,9 +960,11 @@ module PostHog
     # sent. After the timeout, this method may wait up to one additional second
     # for worker and transport cleanup, which may continue after it returns.
     #
+    # When sync_mode is set and the timeout elapses while a request is in
+    # flight, the connection is closed once that request completes.
+    #
     # @param timeout [Numeric, nil] Maximum seconds to wait for pending events
-    #   to be sent, or +nil+ to wait indefinitely. Has no effect when sync_mode
-    #   is true.
+    #   to be sent, or +nil+ to wait indefinitely.
     # @return [Boolean] +true+ if all pending events were sent, +false+ if the
     #   timeout elapsed first.
     def shutdown(timeout: nil)
@@ -1000,8 +997,9 @@ module PostHog
           if @sync_mode
             # Waiting for @sync_lock lets any in-flight sync send finish before
             # the connection is closed.
-            @sync_lock.synchronize { @transport&.shutdown }
-            true
+            closed = synchronized_within?(deadline) { @transport&.shutdown }
+            Thread.new { @sync_lock.synchronize { @transport&.shutdown } } unless closed
+            closed
           else
             drained = flush(timeout: timeout)
             @worker&.shutdown
@@ -1314,6 +1312,27 @@ module PostHog
         @on_error.call(res.status, res.error) unless success
         success
       end
+    end
+
+    # Mutex has no timed lock, so a deadline polls try_lock.
+    def synchronized_within?(deadline, &)
+      unless deadline
+        @sync_lock.synchronize(&)
+        return true
+      end
+
+      until @sync_lock.try_lock
+        remaining = deadline - monotonic_time
+        return false if remaining <= 0
+
+        sleep(remaining.clamp(0, 0.01))
+      end
+      begin
+        yield
+      ensure
+        @sync_lock.unlock
+      end
+      true
     end
 
     def worker_running?

@@ -324,7 +324,7 @@ module PostHog
         sync_client.flush
       end
 
-      it 'flush accepts and ignores a timeout' do
+      it 'flush with a timeout returns true when no send is in flight' do
         sync_client = Client.new(api_key: API_KEY, sync_mode: true)
 
         expect(sync_client.flush(timeout: 1)).to eq(true)
@@ -337,6 +337,56 @@ module PostHog
 
         expect(sync_client.shutdown(timeout: 1)).to eq(true)
         expect(transport).to have_received(:shutdown)
+      end
+
+      context 'while a send is in flight' do
+        let(:sync_client) { Client.new(api_key: API_KEY, sync_mode: true) }
+        let(:transport) { sync_client.instance_variable_get(:@transport) }
+        let(:send_started) { Queue.new }
+        let(:release_send) { Queue.new }
+        let!(:sender) do
+          allow(transport).to receive(:send) do
+            send_started << true
+            release_send.pop
+            PostHog::Response.new(200)
+          end
+          allow(transport).to receive(:shutdown)
+          thread = Thread.new { sync_client.capture(Queued::CAPTURE) }
+          send_started.pop
+          thread
+        end
+
+        after do
+          release_send << true
+          sender.join
+        end
+
+        %i[flush shutdown].each do |method|
+          it "#{method} returns false once its timeout elapses" do
+            caller = Thread.new { sync_client.public_send(method, timeout: 0.1) }
+
+            expect(caller.join(1)&.value).to eq(false)
+          end
+        end
+
+        it 'flush without a timeout waits for the send to finish' do
+          flusher = Thread.new { sync_client.flush }
+
+          expect(flusher.join(0.1)).to be_nil
+          release_send << true
+          expect(flusher.value).to eq(true)
+        end
+
+        it 'shutdown closes the connection after the send finishes when its timeout elapses' do
+          closed = Queue.new
+          allow(transport).to receive(:shutdown) { closed << true }
+
+          sync_client.shutdown(timeout: 0.1)
+          expect(closed).to be_empty
+
+          release_send << true
+          expect(closed.pop(timeout: 1)).to eq(true)
+        end
       end
 
       it 'calls on_error with status -1 when message serialization fails' do
