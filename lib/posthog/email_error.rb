@@ -54,7 +54,6 @@ module PostHog
       'invalid_attachment' => 'validation_error',
       'too_many_attachments' => 'validation_error',
       'message_too_large' => 'validation_error',
-      'scheduling_requires_cloud' => 'validation_error',
       'delivery_unavailable' => 'service_unavailable',
       'content_too_large' => 'validation_error'
     }.freeze
