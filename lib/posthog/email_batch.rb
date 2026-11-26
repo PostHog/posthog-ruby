@@ -105,8 +105,10 @@ module PostHog
     # `failed` otherwise.
     def failure(error)
       if @maybe_queued
-        recipient_error = restate(error, unconfirmed_message(error.code), RESEND_FIX)
-        error = restate(error, earlier_message(error), BATCH_RESEND_FIX)
+        # A refusal's why speaks for its own attempt, and can say nothing was sent.
+        why = error.why if maybe_queued?(error)
+        recipient_error = restate(error, unconfirmed_message(error.code), RESEND_FIX, why)
+        error = restate(error, earlier_message(error), BATCH_RESEND_FIX, why)
       end
       status = @maybe_queued ? 'unconfirmed' : 'failed'
       results = @members.map { |member| result(member, status, error: recipient_error || error) }
@@ -138,7 +140,7 @@ module PostHog
         # A refusal can't confirm an email that an earlier attempt of the request may have queued.
         message = "PostHog didn't confirm this email: it refused a retry with #{answer.code}, but an earlier attempt " \
                   'of this batch may have queued it, so it may still go out.'
-        return result(member, 'unconfirmed', message_id: message_id, error: restate(answer, message, RESEND_FIX))
+        return result(member, 'unconfirmed', message_id: message_id, error: restate(answer, message, RESEND_FIX, nil))
       end
 
       result(member, 'failed', message_id: message_id, error: answer)
@@ -162,8 +164,8 @@ module PostHog
       "PostHog didn't confirm this email (#{code}), so it may still go out."
     end
 
-    def restate(error, message, fix)
-      EmailError.new(code: error.code, message: message, status_code: error.status_code, why: error.why, fix: fix,
+    def restate(error, message, fix, why)
+      EmailError.new(code: error.code, message: message, status_code: error.status_code, why: why, fix: fix,
                      docs_url: error.docs_url, field: error.field, retry_after: error.retry_after,
                      message_id: error.message_id)
     end
@@ -201,7 +203,7 @@ module PostHog
       end
 
       code = text(error['code'])
-      code = 'api_error' if code.nil? || code.strip.empty?
+      code = 'api_error' unless code&.valid_encoding? && !code.strip.empty?
       status = error['status'].is_a?(Integer) ? error['status'] : nil
       # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
       unconfirmed = UNCONFIRMED_CODES.include?(code)

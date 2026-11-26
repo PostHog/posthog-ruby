@@ -197,6 +197,17 @@ module PostHog
         end
       end
 
+      it 'keeps the results when a recipient error code is not valid UTF-8' do
+        slots = JSON.generate(results: [queued('msg_1'), { status: 'error', error: { status: 400, code: 'CODE' } }])
+        stub_request(:post, batch_url).to_return(status: 200, body: slots.sub('CODE', "\xFF".b))
+
+        results = batch_template([ada, alan]).results
+
+        expect(results.map { |result| [result.status, result.message_id] })
+          .to eq([%w[queued msg_1], ['unconfirmed', nil]])
+        expect(resend_with_key(results.last)).to eq(['unconfirmed', 'welcome:alan', true])
+      end
+
       it "logs the reply's warnings once each" do
         warning = { code: 'unverified_link', detail: 'A link points to an unverified domain.' }
         stub_request(:post, batch_url).to_return(answer(queued('msg_1'), warnings: [warning, warning]))
@@ -398,6 +409,12 @@ module PostHog
             { status: 400, body: JSON.generate(code: 'invalid_request', detail: 'Invalid, so no email was sent.') },
             'invalid_request'
           ],
+          'a 400 whose why says nothing was sent' => [
+            { status: 400,
+              body: JSON.generate(code: 'invalid_request', detail: 'Invalid.',
+                                  why: 'No email was sent. Use new keys.') },
+            'invalid_request'
+          ],
           'a 404 without a field' => [{ status: 404, body: JSON.generate(code: 'not_found', detail: 'Not found.') },
                                       'not_found'],
           'a 409 batch_unavailable' => [{ status: 409, body: JSON.generate(code: 'batch_unavailable') },
@@ -418,7 +435,8 @@ module PostHog
               expect(error.code).to eq(code)
               expect(error.message).to include('some of its emails may have gone out', "read each recipient's result")
               expect(error.fix).to start_with('Send each recipient again with the same idempotency_key within 24 hours')
-              expect([error.message, error.fix]).to all(satisfy { |text| !text.match?(nothing_sent) })
+              said = [error.message, error.fix, error.why, *error.results.map { |result| result.error.why }].compact
+              expect(said).to all(satisfy { |text| !text.match?(nothing_sent) })
               error.results.each { |result| expect_unconfirmed_message(result) }
               expect(error.results.map { |result| resend_with_key(result) })
                 .to eq([['unconfirmed', 'welcome:ada', true], ['unconfirmed', 'welcome:alan', true]])
@@ -464,7 +482,8 @@ module PostHog
           'a 409 with another code' => [{ status: 409, body: JSON.generate(code: 'conflict') }, 'unconfirmed'],
           "a 503 with PostHog's detail" => [
             { status: 503,
-              body: JSON.generate(code: 'delivery_unavailable', detail: 'The email pipeline is unavailable.') },
+              body: JSON.generate(code: 'delivery_unavailable', detail: 'The email pipeline is unavailable.',
+                                  why: "PostHog's email pipeline didn't confirm that the email was queued.") },
             'unconfirmed'
           ],
           'a 403 without a code' => [{ status: 403, body: '<html>Forbidden</html>' }, 'failed'],
@@ -478,6 +497,7 @@ module PostHog
             expect { batch_template([ada], max_retries: 0) }.to raise_error(EmailBatchError) { |error|
               expect(error.status_code).to eq(reply[:status])
               expect(resend_with_key(error.results.first)).to eq([status, 'welcome:ada', status == 'unconfirmed'])
+              expect(error.results.first.error.why).to eq(reply[:body][/"why":"([^"]*)"/, 1])
               if status == 'unconfirmed'
                 expect_unconfirmed_message(error.results.first)
               else
