@@ -7,8 +7,8 @@ module PostHog
     #
     # @note Experimental.
     class Analytics
-      DEFAULT_FLUSH_TIMEOUT = 10
-      private_constant :DEFAULT_FLUSH_TIMEOUT
+      FLUSH_TIMEOUT_SECONDS = 10
+      private_constant :FLUSH_TIMEOUT_SECONDS
 
       # @api private
       def initialize(server)
@@ -53,15 +53,17 @@ module PostHog
       # Flush the underlying PostHog client. Never raises: a failed or timed-out
       # flush is logged instead.
       #
-      # @param timeout [Numeric, nil] seconds to wait for the client to send its queue; nil waits without a deadline
       # @return [void]
-      def flush(timeout: DEFAULT_FLUSH_TIMEOUT)
+      def flush
         data = PostHog::MCP.tracking_data(@server)
         client = data&.sink&.client
         return unless client.respond_to?(:flush)
 
-        flushed = client.flush(timeout: timeout)
-        Log.warn(data.options, "PostHog client flush did not finish within #{timeout}s") if flushed == false
+        flushed = client.flush(timeout: FLUSH_TIMEOUT_SECONDS)
+        if flushed == false
+          Log.warn(data.options,
+                   "PostHog client flush did not finish within #{FLUSH_TIMEOUT_SECONDS}s")
+        end
         nil
       rescue StandardError => e
         Log.warn(data&.options, "Failed to flush PostHog client: #{e.class}: #{e.message}")
@@ -119,7 +121,7 @@ module PostHog
         nil
       end
 
-      def flush(**)
+      def flush
         nil
       end
     end

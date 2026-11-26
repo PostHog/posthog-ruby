@@ -11,15 +11,10 @@ RSpec.describe PostHog::MCP::Analytics do
   before { allow(Kernel).to receive(:warn) }
 
   describe '#flush' do
-    [
-      [{}, 10],
-      [{ timeout: 2.5 }, 2.5]
-    ].each do |kwargs, expected_timeout|
-      it "bounds the client flush with timeout #{expected_timeout} when called with #{kwargs}" do
-        expect(client).to receive(:flush).with(timeout: expected_timeout).and_return(true)
+    it 'bounds the client flush with a 10s timeout' do
+      expect(client).to receive(:flush).with(timeout: 10).and_return(true)
 
-        analytics.flush(**kwargs)
-      end
+      analytics.flush
     end
 
     [
