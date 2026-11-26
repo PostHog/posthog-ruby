@@ -32,8 +32,8 @@ These are the few things that differ from what the docs describe for the other S
 * **Composed schemas are left alone.** A tool whose `input_schema` is `oneOf`/`allOf`/`anyOf` or a
   `$ref` has nothing injected into it and nothing stripped from its calls.
 * **stdio servers own `$stdout`.** The integration's own messages go only to the `logger:` you pass
-  (default: nowhere); the experimental notice and misconfiguration warnings go to stderr. Point the
-  core SDK's logger away from stdout too: `PostHog::Logging.logger = Logger.new($stderr)`.
+  (default: nowhere); the experimental notice and misconfiguration warnings go to stderr, as does the
+  core SDK's default logger. A custom `PostHog::Logging.logger` must stay off stdout too.
 
 ## Layout
 
