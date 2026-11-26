@@ -1320,6 +1320,7 @@ module PostHog
         @sync_lock.synchronize(&)
         return true
       end
+      return false if @sync_lock.owned?
 
       until @sync_lock.try_lock
         remaining = deadline - monotonic_time

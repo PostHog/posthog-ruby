@@ -339,6 +339,24 @@ module PostHog
         expect(transport).to have_received(:shutdown)
       end
 
+      %i[flush shutdown].each do |method|
+        it "#{method} with a timeout from on_error returns false without waiting for the timeout" do
+          result = nil
+          sync_client = Client.new(
+            api_key: API_KEY, sync_mode: true,
+            on_error: proc { result = sync_client.public_send(method, timeout: 5) }
+          )
+          allow_any_instance_of(PostHog::Transport).to(
+            receive(:send).and_return(PostHog::Response.new(400, 'bad'))
+          )
+
+          caller = Thread.new { sync_client.capture(Queued::CAPTURE) }
+
+          expect(caller.join(1)).not_to be_nil
+          expect(result).to eq(false)
+        end
+      end
+
       context 'while a send is in flight' do
         let(:sync_client) { Client.new(api_key: API_KEY, sync_mode: true) }
         let(:transport) { sync_client.instance_variable_get(:@transport) }
