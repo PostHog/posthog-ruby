@@ -52,8 +52,7 @@ module PostHog
       'network_error' => 'service_unavailable',
       'invalid_attachment' => 'validation_error',
       'too_many_attachments' => 'validation_error',
-      'message_too_large' => 'validation_error',
-      'scheduling_requires_cloud' => 'validation_error'
+      'message_too_large' => 'validation_error'
     }.freeze
     private_constant :SDK_ERROR_NAMES
 

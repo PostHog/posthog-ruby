@@ -1182,7 +1182,7 @@ module PostHog
         attachments = [{ filename: 'a.txt', content: 'hi'.b }]
         expect { send_code(scheduled_at: due, attachments: attachments) }.to raise_error(EmailError) { |error|
           expect([error.code, error.name, error.field])
-            .to eq(%w[scheduling_requires_cloud validation_error scheduled_at])
+            .to eq(%w[scheduling_requires_cloud application_error scheduled_at])
           expect(error.message).to include('posthog.example.com:8443')
           expect(error.message).not_to include('secret')
         }
