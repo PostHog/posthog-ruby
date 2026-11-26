@@ -53,7 +53,7 @@ module PostHog
       # Flush the underlying PostHog client. Never raises: a failed or timed-out
       # flush is logged instead.
       #
-      # @param timeout [Numeric] seconds to wait for the client to send its queue
+      # @param timeout [Numeric, nil] seconds to wait for the client to send its queue; nil waits without a deadline
       # @return [void]
       def flush(timeout: DEFAULT_FLUSH_TIMEOUT)
         data = PostHog::MCP.tracking_data(@server)
