@@ -1458,12 +1458,8 @@ module PostHog
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
       if aggregation_group_type_index.nil?
-        local_person_properties = person_properties || {}
-        unless local_person_properties.key?(:distinct_id) || local_person_properties.key?('distinct_id')
-          local_person_properties = local_person_properties.merge(distinct_id: distinct_id)
-        end
-
-        return match_feature_flag_properties(flag, distinct_id, local_person_properties, evaluation_cache,
+        return match_feature_flag_properties(flag, distinct_id, person_properties_with_distinct_id(context),
+                                             evaluation_cache,
                                              snapshot[:cohorts], groups: groups, group_properties: group_properties,
                                                                  snapshot: snapshot, known_absent: known_absent,
                                                                  known_absent_scope: known_absent&.person_scope,
@@ -1483,11 +1479,13 @@ module PostHog
 
       group_name_symbol = group_name.to_sym
 
-      unless FeatureFlagsPoller.usable_group_key?(groups[group_name_symbol])
-        # Group flags are never enabled if a usable group key isn't passed in
-        # don't failover to `/flags/`, since response will be the same
-        logger.warn "[FEATURE FLAGS] Can't compute group feature flag: #{flag[:key]} without group names passed in"
-        return false
+      # Without a usable group key, conditions aggregated on the group are skipped one by one below, so a
+      # person condition can still match. The holdout runs first and buckets on the group key, so a holdout
+      # that excludes anyone can't be resolved without one.
+      if holdout_excludes_anyone?(flag_filters[:holdout]) &&
+         !FeatureFlagsPoller.usable_group_key?(groups[group_name_symbol])
+        raise InconclusiveMatchError.new('Flag has a holdout bucketed on a group key that was not passed in',
+                                         reason: UnresolvedFlagReason::MISSING_CONTEXT)
       end
 
       focused_group_properties = group_properties[group_name_symbol]
@@ -1543,20 +1541,24 @@ module PostHog
         effective_bucketing = distinct_id
         effective_known_absent_scope = known_absent_scope
 
-        # Mixed-override path: condition-level aggregation differs from flag-level.
-        # This assumes flag-level aggregation is nil for mixed flags.
-        if condition_aggregation != flag_aggregation
-          if condition_aggregation.nil?
-            # Person condition under a mixed flag — caller already passed person props/bucketing.
-          else
-            group_name = snapshot[:group_type_mapping][condition_aggregation.to_s.to_sym]
-            if group_name.nil? || !FeatureFlagsPoller.usable_group_key?(groups[group_name.to_sym])
-              logger.debug do
-                "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
-                  "group type index #{condition_aggregation} not available"
-              end
-              next
+        if condition_aggregation.nil?
+          # A person condition under a group flag uses the person, not the group the caller resolved.
+          unless flag_aggregation.nil? || context.nil?
+            effective_properties = person_properties_with_distinct_id(context)
+            effective_bucketing = context[:distinct_id]
+            effective_known_absent_scope = known_absent&.person_scope
+          end
+        else
+          # A condition aggregated on a group without a usable key is skipped, and later conditions still run.
+          group_name = snapshot[:group_type_mapping][condition_aggregation.to_s.to_sym]
+          if group_name.nil? || !FeatureFlagsPoller.usable_group_key?(groups[group_name.to_sym])
+            logger.debug do
+              "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
+                "group type index #{condition_aggregation} not available"
             end
+            next
+          end
+          if condition_aggregation != flag_aggregation
             unless group_properties.key?(group_name.to_sym)
               inconclusive_reason = FeatureFlagsPoller.pick_unresolved_reason(
                 inconclusive_reason, UnresolvedFlagReason::MISSING_CONTEXT
@@ -1608,6 +1610,13 @@ module PostHog
 
       # We can only return False when all conditions are False
       false
+    end
+
+    def person_properties_with_distinct_id(context)
+      person_properties = context[:person_properties] || {}
+      return person_properties if person_properties.key?(:distinct_id) || person_properties.key?('distinct_id')
+
+      person_properties.merge(distinct_id: context[:distinct_id])
     end
 
     def _definition_unresolved_reason(flag, snapshot)
@@ -1702,19 +1711,28 @@ module PostHog
     # no usable holdout or the identifier falls outside it, leaving ordinary evaluation
     # unchanged.
     def holdout_variant_for(holdout, bucketing_value)
-      return nil unless holdout.is_a?(Hash)
-
-      id = holdout[:id]
-      exclusion_percentage = holdout[:exclusion_percentage]
-      return nil if id.nil? || !exclusion_percentage.is_a?(Numeric)
-
-      # The server clamps an out-of-range percentage rather than rejecting it, and treats
-      # 100 as everyone without hashing, so a full holdout can't miss on a hash boundary.
-      # Fractional percentages are kept as-is.
-      percentage = exclusion_percentage.to_f.clamp(0, 100)
+      percentage = holdout_exclusion_percentage(holdout)
+      return nil if percentage.nil?
+      # The server treats 100 as everyone without hashing, so a full holdout can't miss on a hash boundary.
       return nil if percentage < 100 && _holdout_hash(bucketing_value) > (percentage / 100)
 
-      "holdout-#{id}"
+      "holdout-#{holdout[:id]}"
+    end
+
+    def holdout_excludes_anyone?(holdout)
+      percentage = holdout_exclusion_percentage(holdout)
+      !percentage.nil? && percentage.positive?
+    end
+
+    # The exclusion percentage of a usable holdout, or nil. The server clamps an out-of-range percentage
+    # rather than rejecting it. Fractional percentages are kept as-is.
+    def holdout_exclusion_percentage(holdout)
+      return nil unless holdout.is_a?(Hash)
+
+      exclusion_percentage = holdout[:exclusion_percentage]
+      return nil if holdout[:id].nil? || !exclusion_percentage.is_a?(Numeric)
+
+      exclusion_percentage.to_f.clamp(0, 100)
     end
 
     # Holdout membership hashes `holdout-<bucketing value>` with no separator, salt, flag
