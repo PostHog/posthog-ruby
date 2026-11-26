@@ -191,7 +191,7 @@ class_method PostHog::MCP.get_more_tools_result()
 class_method PostHog::MCP.instrument(server, client = ..., options: ..., **kwargs)
 class PostHog::MCP::Analytics
 instance_method PostHog::MCP::Analytics#capture(event, properties = ...)
-instance_method PostHog::MCP::Analytics#flush()
+instance_method PostHog::MCP::Analytics#flush(timeout: ...)
 class PostHog::MCP::Client < PostHog::Client
 instance_method PostHog::MCP::Client#capture_initialize(client_name: ..., client_version: ..., protocol_version: ..., parameters: ..., response: ..., duration_ms: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ...)
 instance_method PostHog::MCP::Client#capture_missing_capability(context: ..., parameters: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ..., llm_model: ..., llm_model_source: ...)
