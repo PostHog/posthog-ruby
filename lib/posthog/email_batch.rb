@@ -13,6 +13,8 @@ module PostHog
     UNCONFIRMED_CODES = %w[idempotency_key_in_flight delivery_unavailable api_error].freeze
     RESEND_FIX = 'Send it again with the same idempotency_key within 24 hours of the first request that used it, so ' \
                  'it goes out once.'
+    BATCH_RESEND_FIX = 'Send each recipient again with the same idempotency_key within 24 hours of the first request ' \
+                       'that used it, so each email goes out once.'
     UNAVAILABLE_FIX = "Until batch sends are on for the project, send each email the batch didn't queue with " \
                       "emails.send and its recipient's idempotency_key."
     NO_TEMPLATE = {
@@ -35,10 +37,14 @@ module PostHog
       'fix' => 'Split the recipients into smaller batches.'
     }.freeze
     SMALLER_FIX = 'Make the email smaller, such as its template_data.'
-    EARLIER_ATTEMPT = 'An earlier attempt of this batch may have queued this email, so it may still go out. ' \
-                      'The last attempt ended with:'
+    MAY_HAVE_GONE_OUT = "so some of its emails may have gone out: read each recipient's result."
+    EARLIER_REFUSED = 'PostHog refused a retry of this batch with %s. An earlier attempt may have queued it, ' \
+                      "#{MAY_HAVE_GONE_OUT}".freeze
+    EARLIER_CLOSED = 'The PostHog client shut down before a retry of this batch. An earlier attempt may have queued ' \
+                     "it, #{MAY_HAVE_GONE_OUT}".freeze
     RESULT_DEFAULTS = { message_id: nil, replayed: false, error: nil }.freeze
-    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :EARLIER_ATTEMPT, :UNAVAILABLE_FIX, :NO_TEMPLATE, :NO_CODE_BATCH,
+    private_constant :UNCONFIRMED_CODES, :RESEND_FIX, :BATCH_RESEND_FIX, :MAY_HAVE_GONE_OUT, :EARLIER_REFUSED,
+                     :EARLIER_CLOSED, :UNAVAILABLE_FIX, :NO_TEMPLATE, :NO_CODE_BATCH,
                      :TOO_LARGE,
                      :SMALLER_FIX, :RESULT_DEFAULTS
 
@@ -98,11 +104,12 @@ module PostHog
     # Every recipient of a request that failed as a whole is `unconfirmed` when any attempt may have queued it, and
     # `failed` otherwise.
     def failure(error)
-      # Only an attempt's error says what PostHog may have queued; the client raises client_closed without a request.
-      refused = !(@attempt_error.equal?(error) && maybe_queued?(error))
-      error = resend(error, earlier: refused) if @maybe_queued
+      if @maybe_queued
+        recipient_error = restate(error, unconfirmed_message(error.code), RESEND_FIX)
+        error = restate(error, earlier_message(error), BATCH_RESEND_FIX)
+      end
       status = @maybe_queued ? 'unconfirmed' : 'failed'
-      results = @members.map { |member| result(member, status, error: error) }
+      results = @members.map { |member| result(member, status, error: recipient_error || error) }
       EmailBatchError.new(error, results: results.freeze, warnings: @warnings.dup.freeze)
     end
 
@@ -129,7 +136,9 @@ module PostHog
         return result(member, 'unconfirmed', message_id: message_id, error: answer)
       elsif @maybe_queued
         # A refusal can't confirm an email that an earlier attempt of the request may have queued.
-        return result(member, 'unconfirmed', message_id: message_id, error: resend(answer, earlier: true))
+        message = "PostHog didn't confirm this email: it refused a retry with #{answer.code}, but an earlier attempt " \
+                  'of this batch may have queued it, so it may still go out.'
+        return result(member, 'unconfirmed', message_id: message_id, error: restate(answer, message, RESEND_FIX))
       end
 
       result(member, 'failed', message_id: message_id, error: answer)
@@ -140,14 +149,23 @@ module PostHog
       Emails::BatchEmailResult.new(**RESULT_DEFAULTS, **identity, **fields)
     end
 
-    # A caller who follows PostHog's own advice without the key sends a second email. A refusal that follows an
-    # attempt that may have queued the email can't say no email was sent, so its message says so first.
-    def resend(error, earlier: false)
-      return error if error.fix == RESEND_FIX
+    # PostHog's text speaks for the last attempt only: it can say nothing was sent, or advise a split or new keys, while
+    # an earlier attempt may have queued every email. A caller who follows it without the keys sends a second email.
+    def earlier_message(error)
+      # The client raises client_closed itself, without a request.
+      return EARLIER_CLOSED unless @attempt_error.equal?(error)
 
-      message = earlier ? "#{EARLIER_ATTEMPT} #{error.message}" : error.message
-      EmailError.new(code: error.code, message: message, status_code: error.status_code, why: error.why,
-                     fix: RESEND_FIX, docs_url: error.docs_url, field: error.field, retry_after: error.retry_after)
+      maybe_queued?(error) ? error.message : format(EARLIER_REFUSED, error.code)
+    end
+
+    def unconfirmed_message(code)
+      "PostHog didn't confirm this email (#{code}), so it may still go out."
+    end
+
+    def restate(error, message, fix)
+      EmailError.new(code: error.code, message: message, status_code: error.status_code, why: error.why, fix: fix,
+                     docs_url: error.docs_url, field: error.field, retry_after: error.retry_after,
+                     message_id: error.message_id)
     end
 
     def response_error(fields, status, retry_after)
@@ -178,21 +196,22 @@ module PostHog
     def slot_error(error, message_id)
       unless error.is_a?(Hash)
         return EmailError.new(code: 'api_error', message_id: message_id, fix: RESEND_FIX,
-                              message: 'PostHog answered without a readable result for this email, so it may still ' \
-                                       'go out.')
+                              message: "PostHog didn't confirm this email: its answer had no readable result for it, " \
+                                       'so it may still go out.')
       end
 
       code = text(error['code']) || 'api_error'
       status = error['status'].is_a?(Integer) ? error['status'] : nil
       # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
       unconfirmed = UNCONFIRMED_CODES.include?(code)
-      fallback = if unconfirmed
-                   "PostHog couldn't confirm this email (#{code}), so it may still go out."
-                 else
-                   "PostHog didn't queue this email: #{code}."
-                 end
+      # PostHog's detail for these codes can read as a refusal or advise a retry, while the email may still go out.
+      message = if unconfirmed
+                  unconfirmed_message(code)
+                else
+                  text(error['detail']) || "PostHog didn't queue this email: #{code}."
+                end
       EmailError.new(code: code, status_code: status, message_id: (message_id if unconfirmed),
-                     fix: (RESEND_FIX if unconfirmed), message: text(error['detail']) || fallback)
+                     fix: (RESEND_FIX if unconfirmed), message: message)
     end
 
     def text(value)
