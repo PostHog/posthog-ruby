@@ -185,7 +185,7 @@ module PostHog
         expect(error.message).not_to include("didn't queue")
       end
 
-      [{}, { code: nil }, { code: '' }].each do |code|
+      [{}, { code: nil }, { code: '' }, { code: ' ' }].each do |code|
         it "keeps a recipient whose error has no code (#{code.inspect}) unconfirmed, whatever its status" do
           slot = { status: 'error', error: { status: 400, detail: 'Refused.' }.merge(code) }
           stub_request(:post, batch_url).to_return(answer(slot))

@@ -200,7 +200,8 @@ module PostHog
                                        'so it may still go out.')
       end
 
-      code = text(error['code']) || 'api_error'
+      code = text(error['code'])
+      code = 'api_error' if code.nil? || code.strip.empty?
       status = error['status'].is_a?(Integer) ? error['status'] : nil
       # EmailError#message_id means PostHog may have accepted the email, so a refusal leaves it on the result only.
       unconfirmed = UNCONFIRMED_CODES.include?(code)
