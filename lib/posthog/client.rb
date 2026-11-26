@@ -1322,18 +1322,20 @@ module PostHog
       end
       return false if @sync_lock.owned?
 
-      until @sync_lock.try_lock
-        remaining = deadline - monotonic_time
-        return false if remaining <= 0
-
-        sleep(remaining.clamp(0, 0.01))
-      end
+      locked = false
       begin
+        # Deferring interrupts until locked is set keeps the ensure from missing a held lock.
+        until Thread.handle_interrupt(Object => :never) { locked = @sync_lock.try_lock }
+          remaining = deadline - monotonic_time
+          return false if remaining <= 0
+
+          sleep(remaining.clamp(0, 0.01))
+        end
         yield
+        true
       ensure
-        @sync_lock.unlock
+        @sync_lock.unlock if locked
       end
-      true
     end
 
     def worker_running?
