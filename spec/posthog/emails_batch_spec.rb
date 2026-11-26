@@ -185,6 +185,18 @@ module PostHog
         expect(error.message).not_to include("didn't queue")
       end
 
+      [{}, { code: nil }, { code: '' }].each do |code|
+        it "keeps a recipient whose error has no code (#{code.inspect}) unconfirmed, whatever its status" do
+          slot = { status: 'error', error: { status: 400, detail: 'Refused.' }.merge(code) }
+          stub_request(:post, batch_url).to_return(answer(slot))
+
+          result = batch_template([ada]).results.first
+
+          expect(resend_with_key(result)).to eq(['unconfirmed', 'welcome:ada', true])
+          expect_unconfirmed_message(result)
+        end
+      end
+
       it "logs the reply's warnings once each" do
         warning = { code: 'unverified_link', detail: 'A link points to an unverified domain.' }
         stub_request(:post, batch_url).to_return(answer(queued('msg_1'), warnings: [warning, warning]))
