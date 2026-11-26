@@ -796,6 +796,9 @@ module PostHog
                             known_absent_scope: known_absent_scope)
       end
 
+      # An unsupported filter type stays inconclusive even when its key is listed known absent.
+      assert_property_filter_type_supported(property)
+
       if known_absent_scope&.covers?(property)
         # Like the flags service, a listed key resolves without parsing the condition value. An operator
         # this SDK does not implement stays inconclusive, so it still falls back to the server.
@@ -920,6 +923,25 @@ module PostHog
 
       raise InconclusiveMatchError.new("Unknown operator: #{operator}",
                                        reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+    end
+
+    # Filter types matched against the person or group properties the call passes. A missing, null, or empty
+    # type is a person filter. Cohort and flag filters have their own matching. Any other type, such as
+    # person_metadata (a value the flags service reads from the persons table, not from person properties),
+    # can't be evaluated locally: matching it against a caller property with the same key could disagree
+    # with the flags service.
+    PROPERTY_FILTER_TYPES = [nil, '', 'person', 'group'].freeze
+    private_constant :PROPERTY_FILTER_TYPES
+
+    def self.assert_property_filter_type_supported(property)
+      type = extract_value(property, :type)
+      # A cohort group checks a flag filter as an ordinary property, so it keeps that matching here.
+      return if PROPERTY_FILTER_TYPES.include?(type) || type == 'flag'
+
+      raise InconclusiveMatchError.new(
+        "Can't evaluate a '#{type}' filter on '#{extract_value(property, :key)}' locally",
+        reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION
+      )
     end
 
     # Raises an unsupported_definition error when local evaluation cannot use the filter, whatever
@@ -1424,6 +1446,7 @@ module PostHog
     end
 
     def self.unsupported_filter?(property)
+      assert_property_filter_type_supported(property)
       assert_filter_supported(property)
       false
     rescue InconclusiveMatchError
@@ -1431,7 +1454,8 @@ module PostHog
     end
 
     private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
-                         :property_group_items_match?, :assert_filter_supported, :assert_operator_supported,
+                         :property_group_items_match?, :assert_property_filter_type_supported,
+                         :assert_filter_supported, :assert_operator_supported,
                          :unsupported_property?, :unsupported_property_group?, :unsupported_filter?
 
     # Publish/capture all matching state together so a poll cannot switch semantics
@@ -1956,8 +1980,8 @@ module PostHog
 
       logger.warn(
         "[FEATURE FLAGS] #{unsupported_definition_keys.length} flag(s) use something local evaluation doesn't " \
-        'support, such as a static cohort, an unknown operator, a malformed value, or a missing or circular flag ' \
-        "dependency (reason: #{UnresolvedFlagReason::UNSUPPORTED_DEFINITION}): " \
+        'support, such as a static cohort, an unknown operator or filter type, a malformed value, or a missing or ' \
+        "circular flag dependency (reason: #{UnresolvedFlagReason::UNSUPPORTED_DEFINITION}): " \
         "#{unsupported_definition_keys.join(', ')}. Evaluating them makes a remote request when evaluation " \
         'reaches that part, or leaves them unresolved with only_evaluate_locally: true. To evaluate them ' \
         'locally, change these flags in PostHog or upgrade posthog-ruby.'
