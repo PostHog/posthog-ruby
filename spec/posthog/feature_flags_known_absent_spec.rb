@@ -443,7 +443,7 @@ module PostHog
           snapshot = c.evaluate_flags('user-1', flag_keys: ['old-account'], only_evaluate_locally: true,
                                                 person_property_keys_known_absent: ['created_at'])
 
-          expect(snapshot.unresolved_flags).to eq('old-account' => UnresolvedFlagReason::MISSING_CONTEXT)
+          expect(snapshot.unresolved_flags).to eq('old-account' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
         end
 
         it "do not resolve a person_metadata #{operator} cohort leaf on a listed key" do
@@ -453,18 +453,19 @@ module PostHog
           snapshot = c.evaluate_flags('user-1', flag_keys: ['old-cohort'], only_evaluate_locally: true,
                                                 person_property_keys_known_absent: ['created_at'])
 
-          expect(snapshot.unresolved_flags).to eq('old-cohort' => UnresolvedFlagReason::MISSING_CONTEXT)
+          expect(snapshot.unresolved_flags).to eq('old-cohort' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
         end
       end
 
-      it 'resolve a person_metadata filter on a listed key from a supplied value' do
+      it 'do not resolve a person_metadata filter on a listed key from a supplied value' do
         c = local_client(flag('old-account', created_at('is_date_before', '2025-01-01T00:00:00Z')))
 
         snapshot = c.evaluate_flags('user-1', flag_keys: ['old-account'], only_evaluate_locally: true,
                                               person_properties: { created_at: '2024-01-01T00:00:00Z' },
                                               person_property_keys_known_absent: ['created_at'])
 
-        expect(snapshot.get_flag('old-account')).to be(true)
+        expect(snapshot.get_flag('old-account')).to be_nil
+        expect(snapshot.unresolved_flags).to eq('old-account' => UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
 
       it 'fall back to /flags for a person_metadata filter on a listed key' do
