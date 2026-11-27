@@ -126,6 +126,8 @@ module PostHog
       private
 
       def dispatch_kind(&)
+        @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) } if @kind == :tools_call
+        safely { drop_client_conversation_key }
         case @kind
         when :tools_call then dispatch_tool_call(&)
         when :tools_list then dispatch_tools_list(&)
@@ -150,7 +152,6 @@ module PostHog
         # argument this layer injected is ours to interpret. A `conversation_id` or
         # `context` the tool declares itself stays application data and is left to it.
         handle_free = safely(false) { client_row&.handle_free }
-        @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) }
         request = request_with_arguments(original_arguments)
         conversation_id, minted = safely([nil, false]) do
           ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
@@ -654,13 +655,18 @@ module PostHog
       end
 
       # A recognized client's conversation id only groups the call; its value is never sent.
+      # Dropped once for every method, before any callback or event reads the request.
+      def drop_client_conversation_key
+        meta = envelope_meta
+        return unless client_row && meta
+
+        @params = @params.merge(SchemaMutation.key_for(@params, :_meta) => meta.except(client_row.key,
+                                                                                       client_row.key.to_sym))
+        @request = @request.merge(SchemaMutation.key_for(@request, :params) => @params)
+      end
+
       def request_with_arguments(arguments)
         params = @params.merge(SchemaMutation.key_for(@params, :arguments) => arguments)
-        meta = envelope_meta
-        if client_row && meta
-          params = params.merge(SchemaMutation.key_for(@params, :_meta) => meta.except(client_row.key,
-                                                                                       client_row.key.to_sym))
-        end
         @request.merge(SchemaMutation.key_for(@request, :params) => params)
       end
 

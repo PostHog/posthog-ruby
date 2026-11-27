@@ -219,6 +219,28 @@ module PostHogMcpClientSessionVectors
       end
     end
 
+    {
+      'tools/list' => ['tools/list', {}],
+      'resources/read' => ['resources/read', { uri: 'file:///docs.txt' }],
+      'prompts/get' => ['prompts/get', { name: 'greeting' }]
+    }.each do |method, (rpc_method, params)|
+      it "sends no VS Code conversation id on #{method}" do
+        seen = []
+        instrument(event_properties: lambda { |request, _extra|
+          seen << JSON.generate(request)
+          nil
+        })
+        canary = %w[v1 conv canary 0002].join('-')
+        server.handle(rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {},
+                                             clientInfo: { name: 'Visual Studio Code', version: '1' } }))
+        server.handle(rpc(2, rpc_method, params.merge(_meta: { 'vscode.conversationId' => canary })))
+
+        events = drain_events(client)
+        expect(seen).not_to be_empty
+        expect((seen + events.map { |event| JSON.generate(event) }).grep(/#{canary}/)).to eq([])
+      end
+    end
+
     it 'labels the $identify event with the session source' do
       instrument(identify: ->(_request, _extra) { { distinct_id: 'user-1' } })
       call_search(user_agent: CHATGPT, meta: { 'openai/session' => 'v1/conv-example-0001' })

@@ -93,6 +93,7 @@ module PostHog
 
       # The sink's own sanitize and truncate steps run at capture, so a held event
       # is a snapshot no later change to its properties reaches, and its size is bounded.
+      # {Sink#process} runs both steps again on release; they are idempotent, so the second pass is deliberate.
       def hold(data, scope, input)
         return false unless scope&.key?(:held)
 
