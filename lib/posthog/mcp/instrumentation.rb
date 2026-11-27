@@ -41,6 +41,7 @@ module PostHog
       # Passed as `actor:` by a caller that has no request identity to offer, and
       # is distinct from an explicit `nil` (a request that resolved to nobody).
       UNRESOLVED_ACTOR = Object.new.freeze
+      INVOCATION_KEYS = %i[owner session_id session_source actor held held_bytes overflowed_held].freeze
 
       class << self
         def tracked?(method)
@@ -126,6 +127,7 @@ module PostHog
       private
 
       def dispatch_kind(&)
+        enclosing = suspend_enclosing_invocation
         @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) } if @kind == :tools_call
         safely { drop_client_conversation_key }
         case @kind
@@ -136,6 +138,23 @@ module PostHog
         end
       ensure
         safely { release_custom_events(@scope[:session_id]) }
+        resume_enclosing_invocation(enclosing)
+      end
+
+      # A tool body can dispatch another request synchronously, which reuses this
+      # scope. The enclosing invocation's session, identity and held events belong
+      # to it alone: the nested one starts from none and hands them back on return,
+      # so it neither drops nor releases (through its own sink) what the outer
+      # tool captured.
+      def suspend_enclosing_invocation
+        @data.synchronize { INVOCATION_KEYS.to_h { |key| [key, @scope.delete(key)] }.compact }
+      end
+
+      def resume_enclosing_invocation(enclosing)
+        @data.synchronize do
+          INVOCATION_KEYS.each { |key| @scope.delete(key) }
+          @scope.merge!(enclosing)
+        end
       end
 
       # --- dispatchers -------------------------------------------------------
