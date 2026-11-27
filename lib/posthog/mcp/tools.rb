@@ -24,9 +24,9 @@ module PostHog
 
       # The advertised descriptor (a `tools/list` entry, symbol keys like `MCP::Tool#to_h`).
       # With `capture_model` on, the `llm_model` argument is advertised here too, so
-      # a missing-capability report carries the model that asked for it. The virtual
-      # tool is deliberately left out of the `conversation_id` loop-back: it reports
-      # a gap in the tool list rather than taking part in a tool conversation.
+      # a missing-capability report carries the model that asked for it.
+      # `conversation_id` is added per listing, as for any tool, so a handle-free
+      # client's listing can leave it out.
       def descriptor(name = GET_MORE_TOOLS_NAME, options = nil)
         spec = {
           name: name,

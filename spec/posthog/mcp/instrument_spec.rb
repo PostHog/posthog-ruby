@@ -703,7 +703,7 @@ RSpec.describe PostHog::MCP do
       list = server.handle(rpc(1, 'tools/list'))
       virtual = list[:result][:tools].last
       expect(virtual[:name]).to eq('get_more_tools')
-      expect(virtual[:inputSchema][:properties].keys).to eq([:context])
+      expect(virtual[:inputSchema][:properties].keys).to eq(%i[context conversation_id])
       result = server.handle(rpc(2, 'tools/call',
                                  { name: 'get_more_tools', arguments: { context: 'need csv export' } }))
       expect(result[:result][:content][0][:text]).to include('Unfortunately')
@@ -755,8 +755,7 @@ RSpec.describe PostHog::MCP do
       described_class.instrument(server, client, report_missing: true, capture_model: true)
       list = server.handle(rpc(1, 'tools/list'))
       virtual = list[:result][:tools].find { |t| t[:name] == 'get_more_tools' }
-      expect(virtual[:inputSchema][:properties].keys).to contain_exactly(:context, :llm_model)
-      expect(virtual[:inputSchema][:properties].keys).not_to include(:conversation_id)
+      expect(virtual[:inputSchema][:properties].keys).to contain_exactly(:context, :llm_model, :conversation_id)
       expect(virtual[:inputSchema][:required]).to contain_exactly('context')
       result = server.handle(rpc(2, 'tools/call', { name: 'get_more_tools',
                                                     arguments: { context: 'need csv export',

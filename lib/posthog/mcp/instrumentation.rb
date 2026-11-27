@@ -160,7 +160,6 @@ module PostHog
         arguments = fetch(@params, :arguments)
         arguments = nil unless arguments.is_a?(Hash)
         original_arguments = arguments&.dup
-        missing_name = Tools.missing_capability_tool_name(@options)
         owned = safely([]) { owned_params_for(name) }
         stripped = safely({}) { strip_injected_arguments(arguments, owned) }
         # Resolution reads the stripped values, never `original_arguments`: only an
@@ -170,18 +169,21 @@ module PostHog
         request = request_with_arguments(original_arguments)
         conversation_id, minted = safely([nil, false]) do
           ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
-                                 stripped[ConversationId::PARAM_NAME], name, missing_name,
-                                 mint: !handle_free && !carries_session?)
+                                 stripped[ConversationId::PARAM_NAME], mint: !handle_free && !carries_session?)
         end
+        anchored = minted ? nil : conversation_id
 
         if virtual_tool?(name)
           # Run the gem's own handler so validation, in-flight tracking and
           # cancellation behave exactly as for any other tool; only the event differs.
           begin
             result = yield
-          ensure
-            safely { record_missing_capability(name, original_arguments, request) }
+          rescue StandardError
+            safely { record_missing_capability(name, original_arguments, request, anchored) }
+            raise
           end
+          result, cid = deliver_handle(result, name, conversation_id, minted, handle_free)
+          safely { record_missing_capability(name, original_arguments, request, cid) }
           return result
         end
 
@@ -189,49 +191,57 @@ module PostHog
           begin
             result = yield
           ensure
-            safely { record_unknown_tool(name, request, minted ? nil : conversation_id) }
+            safely { record_unknown_tool(name, request, anchored) }
           end
           return result
         end
 
-        safely { prime_session(request, minted ? nil : conversation_id, hold_custom_events: minted) }
+        safely { prime_session(request, anchored, hold_custom_events: minted) }
         begin
           result = yield
         rescue StandardError => e
           safely do
-            cid = minted ? nil : conversation_id
-            session_id = prepare_request(request, conversation_id: cid)
-            record_tool_call(session_id, name, request, error: e, conversation_id: cid, stripped: stripped)
+            session_id = prepare_request(request, conversation_id: anchored)
+            record_tool_call(session_id, name, request, error: e, conversation_id: anchored, stripped: stripped)
           end
           raise
         end
 
-        delivered = false
         # The handle appended below is unique per conversation, so an error read
         # off the delivered result would give every identical failure a different
         # `$mcp_error_message`. Grouping reads the result the tool returned.
         error_source = result
-        unless no_response?(result) || conversation_id.nil?
-          safely do
-            if @data.tool_output_instructions[name] && !handle_free
-              result, delivered = ConversationId.mirror_instructions(result, conversation_id)
-            end
-            if minted
-              with_prompt_back = ConversationId.inject_prompt_back(result, conversation_id)
-              delivered ||= !with_prompt_back.equal?(result)
-              result = with_prompt_back
-            end
-          end
-        end
+        result, cid = deliver_handle(result, name, conversation_id, minted, handle_free)
 
         safely do
-          cid = minted && !delivered ? nil : conversation_id
           session_id = prepare_request(request, conversation_id: cid)
           release_custom_events(session_id)
           record_tool_call(session_id, name, request, result: result, conversation_id: cid,
                                                       stripped: stripped, error_source: error_source)
         end
         result
+      end
+
+      # Mirror the handle into `structuredContent` where the listing declared it, and
+      # append a minted one to the result. A minted handle anchors the call only
+      # once a result carries it.
+      #
+      # @return [Array(Object, String), Array(Object, nil)] `[result, conversation_id the call records]`
+      def deliver_handle(result, name, conversation_id, minted, handle_free)
+        return [result, minted ? nil : conversation_id] if no_response?(result) || conversation_id.nil?
+
+        delivered = false
+        safely do
+          if @data.tool_output_instructions[name] && !handle_free
+            result, delivered = ConversationId.mirror_instructions(result, conversation_id)
+          end
+          if minted
+            with_prompt_back = ConversationId.inject_prompt_back(result, conversation_id)
+            delivered ||= !with_prompt_back.equal?(result)
+            result = with_prompt_back
+          end
+        end
+        [result, minted && !delivered ? nil : conversation_id]
       end
 
       def dispatch_tools_list
@@ -348,12 +358,12 @@ module PostHog
         finish_event(event, request)
       end
 
-      def record_missing_capability(name, arguments, request)
-        session_id = prepare_request(request)
+      def record_missing_capability(name, arguments, request, conversation_id)
+        session_id = prepare_request(request, conversation_id: conversation_id)
         event = base_event(EventType::MCP_MISSING_CAPABILITY, session_id, request)
         event.delete('duration')
         event['resource_name'] = name
-        event['parameters'] = Sanitization.build_captured_mcp_parameters(request)
+        event['conversation_id'] = conversation_id
         context = arguments.is_a?(Hash) ? (arguments[:context] || arguments['context']) : nil
         if context.is_a?(String) && !context.strip.empty?
           event['user_intent'] = context.strip
@@ -757,7 +767,7 @@ module PostHog
         return tool unless tool.is_a?(Hash)
 
         name = fetch(tool, :name)
-        return tool if virtual_tool?(name)
+        return mutate_virtual_tool(tool, advertise_handle) if virtual_tool?(name)
 
         schema = fetch(tool, :inputSchema)
         owned = []
@@ -795,6 +805,15 @@ module PostHog
         @data.remember_tool(name, description: fetch(tool, :description), category: category, owned_params: owned,
                                   output_instructions: declared)
         mutated
+      end
+
+      def mutate_virtual_tool(tool, advertise_handle)
+        return tool unless @options.enable_conversation_id && advertise_handle
+
+        name = fetch(tool, :name)
+        schema = SchemaMutation.add_conversation_id_parameter(fetch(tool, :inputSchema), tool_name: name,
+                                                                                         options: @options)
+        tool.merge(SchemaMutation.key_for(tool, :inputSchema) => schema)
       end
 
       # --- helpers -----------------------------------------------------------
