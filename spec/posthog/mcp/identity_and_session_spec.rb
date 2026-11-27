@@ -8,68 +8,43 @@ RSpec.describe PostHog::MCP::Identity do
   let(:identify) { ->(_request, _extra) { { distinct_id: 'user-1', properties: { role: 'developer' } } } }
   let(:request) { { method: 'tools/call', params: { name: 'add_todo', arguments: {} } } }
 
-  it 'fires $identify once per session and again only on material change' do
-    event = described_class.handle_identify(data, 'ses_1', request, { 'session_id' => 'abc', 'session' => Object.new })
-    expect(event['event_type']).to eq('posthog:identify')
-    expect(event['resource_name']).to eq('add_todo')
-    expect(event['parameters']['extra']).to eq('session_id' => 'abc')
-    expect(described_class.handle_identify(data, 'ses_1', request, nil)).to be_nil
-    expect(data.identified_sessions.get('ses_1').to_h).to eq(distinct_id: 'user-1', properties: { role: 'developer' },
-                                                             groups: nil)
+  it 'merges a later identity for the session into the cached one' do
+    expect(described_class.resolve(data, 'ses_1', request, nil).to_h)
+      .to eq(distinct_id: 'user-1', properties: { role: 'developer' }, groups: nil)
 
     data.options.instance_variable_set(:@identify, ->(_r, _e) { { distinct_id: 'user-2', groups: { org: 'o' } } })
-    changed = described_class.handle_identify(data, 'ses_1', request, nil)
-    expect(changed).not_to be_nil
-    merged = data.identified_sessions.get('ses_1')
-    expect(merged.distinct_id).to eq('user-2')
-    expect(merged.properties).to eq(role: 'developer')
-    expect(merged.groups).to eq(org: 'o')
+    expect(described_class.resolve(data, 'ses_1', request, nil).to_h)
+      .to eq(distinct_id: 'user-2', properties: { role: 'developer' }, groups: { org: 'o' })
   end
 
-  it 'accepts static identities, 1-arity callables, and swallows errors and nils' do
-    static = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new(identify: { distinct_id: 'static' }),
-                                            sink: nil)
-    expect(described_class.handle_identify(static, 'ses_1', request, nil)['session_id']).to eq('ses_1')
-    one = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new(identify: lambda { |req|
-      { distinct_id: req[:params][:name] }
-    }), sink: nil)
-    described_class.handle_identify(one, 'ses_1', request, nil)
-    expect(one.identified_sessions.get('ses_1').distinct_id).to eq('add_todo')
-    boom = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new(identify: lambda { |_r, _e|
-      raise 'nope'
-    }), sink: nil)
-    expect(described_class.handle_identify(boom, 'ses_1', request, nil)).to be_nil
-    nils = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new(identify: ->(_r, _e) {}), sink: nil)
-    expect(described_class.handle_identify(nils, 'ses_1', request, nil)).to be_nil
+  {
+    'a static identity' => [{ distinct_id: 'static' }, 'static'],
+    'a 1-arity callable' => [->(req) { { distinct_id: req[:params][:name] } }, 'add_todo'],
+    'a callable that raises' => [->(_r, _e) { raise 'nope' }, nil],
+    'a callable that returns nil' => [->(_r, _e) {}, nil],
+    'no identify option' => [nil, nil]
+  }.each do |kind, (identify_option, distinct_id)|
+    it "resolves #{kind}" do
+      one = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new(identify: identify_option), sink: nil)
+      expect(described_class.resolve(one, 'ses_1', request, nil)&.distinct_id).to eq(distinct_id)
+    end
   end
 
   it 'hands back the identity it resolved, as a snapshot a later request cannot move' do
-    event, actor = described_class.identify_for_request(data, 'ses_1', request, nil)
-    expect(event['event_type']).to eq('posthog:identify')
-    expect(actor.distinct_id).to eq('user-1')
+    actor = described_class.resolve(data, 'ses_1', request, nil)
 
     data.options.instance_variable_set(:@identify, ->(_r, _e) { { distinct_id: 'user-2' } })
-    _later, later_actor = described_class.identify_for_request(data, 'ses_1', request, nil)
-    expect(later_actor.distinct_id).to eq('user-2')
+    expect(described_class.resolve(data, 'ses_1', request, nil).distinct_id).to eq('user-2')
     expect(data.identified_sessions.get('ses_1').distinct_id).to eq('user-2')
-    # The cache has moved on; the first request's own actor has not, which is what
-    # keeps its events attributed to it after its handler returns.
     expect(actor.distinct_id).to eq('user-1')
   end
 
-  it 'falls back to the cached identity at resolution time when the callback yields nothing' do
-    described_class.identify_for_request(data, 'ses_1', request, nil)
-    data.options.instance_variable_set(:@identify, ->(_r, _e) { raise 'nope' })
-    event, actor = described_class.identify_for_request(data, 'ses_1', request, nil)
-    expect(event).to be_nil
-    expect(actor.distinct_id).to eq('user-1')
-
-    data.options.instance_variable_set(:@identify, ->(_r, _e) {})
-    expect(described_class.identify_for_request(data, 'ses_1', request, nil)[1].distinct_id).to eq('user-1')
-
-    # No `identify` option at all: nothing to attribute, and nothing cached either.
-    none = PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new, sink: nil)
-    expect(described_class.identify_for_request(none, 'ses_1', request, nil)).to eq([nil, nil])
+  it 'falls back to the cached identity when the callback yields nothing' do
+    described_class.resolve(data, 'ses_1', request, nil)
+    [->(_r, _e) { raise 'nope' }, ->(_r, _e) {}].each do |identify_option|
+      data.options.instance_variable_set(:@identify, identify_option)
+      expect(described_class.resolve(data, 'ses_1', request, nil).distinct_id).to eq('user-1')
+    end
   end
 
   it 'keeps the identity cache consistent under concurrent identification' do
@@ -82,7 +57,7 @@ RSpec.describe PostHog::MCP::Identity do
     threads = 16.times.map do |i|
       Thread.new do
         50.times do |j|
-          described_class.handle_identify(concurrent, "ses_#{j % 4}", { params: { name: "t#{i}" } }, nil)
+          described_class.resolve(concurrent, "ses_#{j % 4}", { params: { name: "t#{i}" } }, nil)
         end
       end
     end

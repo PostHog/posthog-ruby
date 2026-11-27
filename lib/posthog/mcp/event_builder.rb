@@ -106,6 +106,10 @@ module PostHog
         add_error_details(event, properties) if event['is_error']
         properties[Property::PARAMETERS] = event['parameters'] unless event['parameters'].nil?
         properties[Property::RESPONSE] = event['response'] unless event['response'].nil?
+        add_person_properties(event, properties)
+      end
+
+      def add_person_properties(event, properties)
         actor_data = event['identify_actor_data']
         properties['$set'] = actor_data.dup if actor_data.is_a?(Hash) && !actor_data.empty?
       end
@@ -132,6 +136,7 @@ module PostHog
         add_session_id(event, properties)
         add_conversation_id(event, properties)
         add_person_processing(event, properties)
+        add_person_properties(event, properties)
         add_groups(event, properties)
 
         error = event['error']

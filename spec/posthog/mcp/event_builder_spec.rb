@@ -118,7 +118,7 @@ RSpec.describe PostHog::MCP::EventBuilder do
 
   it 'maps every event type and sends custom names verbatim' do
     {
-      'posthog:custom' => '$mcp_custom', 'posthog:identify' => '$identify', 'mcp:tools/call' => '$mcp_tool_call',
+      'posthog:custom' => '$mcp_custom', 'mcp:tools/call' => '$mcp_tool_call',
       'mcp:tools/list' => '$mcp_tools_list', 'mcp:initialize' => '$mcp_initialize',
       'mcp:resources/read' => '$mcp_resource_read', 'mcp:resources/list' => '$mcp_resources_list',
       'mcp:prompts/get' => '$mcp_prompt_get', 'mcp:prompts/list' => '$mcp_prompts_list',

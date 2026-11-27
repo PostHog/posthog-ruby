@@ -81,7 +81,6 @@ module PostHog
     # @api private
     module EventType
       CUSTOM = 'posthog:custom'
-      IDENTIFY = 'posthog:identify'
       MCP_INITIALIZE = 'mcp:initialize'
       MCP_MISSING_CAPABILITY = 'mcp:missing_capability'
       MCP_PROMPTS_GET = 'mcp:prompts/get'
@@ -94,7 +93,6 @@ module PostHog
 
       EVENT_NAME_BY_TYPE = {
         CUSTOM => Event::CUSTOM,
-        IDENTIFY => Event::IDENTIFY,
         MCP_INITIALIZE => Event::INITIALIZE,
         MCP_MISSING_CAPABILITY => Event::MISSING_CAPABILITY,
         MCP_PROMPTS_GET => Event::PROMPT_GET,

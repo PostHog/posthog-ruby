@@ -241,14 +241,6 @@ module PostHogMcpClientSessionVectors
       end
     end
 
-    it 'labels the $identify event with the session source' do
-      instrument(identify: ->(_request, _extra) { { distinct_id: 'user-1' } })
-      call_search(user_agent: CHATGPT, meta: { 'openai/session' => 'v1/conv-example-0001' })
-
-      identify = events_named(drain_events(client), '$identify').first
-      expect(identify[:properties]['$mcp_session_source']).to eq('client_metadata')
-    end
-
     it 'gives a capture outside any call a session after a first stdio call carrying a client conversation id' do
       analytics = PostHog::MCP.instrument(server, client, enable_conversation_id: false)
       meta = { 'io.modelcontextprotocol/protocolVersion' => '2026-07-28', 'io.modelcontextprotocol/clientCapabilities' => {},
