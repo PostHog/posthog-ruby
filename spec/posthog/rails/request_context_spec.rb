@@ -162,6 +162,19 @@ RSpec.describe PostHog::Rails::RequestContext do
     expect(message[:properties]['$session_id']).to eq('mixed-session')
   end
 
+  it 'matches header names that only normalize to a tracing header' do
+    call_with(
+      'http_x_posthog_distinct_id' => 'rack-style-user',
+      "x-po\uFB06hog-session-id" => 'ligature-session'
+    ) do
+      client.capture(event: 'normalized_event')
+    end
+
+    message = client.dequeue_last_message
+    expect(message[:distinct_id]).to eq('rack-style-user')
+    expect(message[:properties]['$session_id']).to eq('ligature-session')
+  end
+
   it 'ignores empty/control-only values and caps long values' do
     long_session_id = 's' * 1100
 

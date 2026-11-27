@@ -38,7 +38,9 @@ module PostHog
         return nil unless env.respond_to?(:each)
 
         target_names = candidates.map { |candidate| normalize_header_name(candidate) }
+        target_lengths = target_names.map(&:length)
         env.each do |key, value|
+          next if key.is_a?(String) && key.ascii_only? && !target_lengths.include?(key.length)
           next unless target_names.include?(normalize_header_name(key))
 
           sanitized = sanitize_header_value(value)
