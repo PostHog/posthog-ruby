@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 module PostHog
-  # PostHog did not queue the email, or the client could not tell whether it did.
+  # PostHog did not queue the email, or the client could not tell whether it did. An error with a {#message_id}
+  # is the exception: PostHog accepted that email, which may still go out, so read it with {Emails#get} before you
+  # send again.
   #
   # Branch on {#code}, PostHog's stable error code, or on {#name}, a coarse category of the failure.
   # The message never contains the secret key or the request body.
@@ -23,9 +25,16 @@ module PostHog
     attr_reader :field
     # @return [Float, nil] How long PostHog asked the client to wait before it sends again, in seconds.
     attr_reader :retry_after
+    # @return [String, nil] The message ID of an email PostHog accepted although the call failed, such as an email
+    #   whose `schedule_not_confirmed` means it may go out at another time. Read its status with {Emails#get}.
+    attr_reader :message_id
+    # @return [Array<Emails::Warning>] PostHog's warnings about an email it accepted although the call failed. The
+    #   client logs warnings only for a call that succeeds.
+    attr_reader :warnings
 
     # @api private
-    def initialize(code:, message:, status_code: nil, why: nil, fix: nil, docs_url: nil, field: nil, retry_after: nil)
+    def initialize(code:, message:, status_code: nil, why: nil, fix: nil, docs_url: nil, field: nil, retry_after: nil,
+                   message_id: nil, warnings: [])
       super(message)
       @name = self.class.name_for(status_code, code)
       @code = code
@@ -35,6 +44,8 @@ module PostHog
       @docs_url = docs_url
       @field = field
       @retry_after = retry_after
+      @message_id = message_id
+      @warnings = warnings.dup.freeze
     end
 
     SDK_ERROR_NAMES = {

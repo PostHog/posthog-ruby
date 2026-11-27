@@ -3,6 +3,7 @@
 require 'json'
 require 'net/http'
 require 'openssl'
+require 'date'
 require 'securerandom'
 require 'time'
 require 'uri'
@@ -44,19 +45,37 @@ module PostHog
   #     html: rendered_html,
   #     distinct_id: 'user_123'
   #   )
+  #
+  # @example An email scheduled for tomorrow, on PostHog Cloud
+  #   result = posthog.emails.send(
+  #     to: 'user@example.com',
+  #     template_id: '0190f6d2-7c1e-7b3a-9f5e-1c2d3e4f5a6b',
+  #     scheduled_at: Time.now + 86_400,
+  #     idempotency_key: 'trial-ending:user_123'
+  #   )
+  #   result.status # => "scheduled"
+  #   result.scheduled_at # => the time in UTC
   class Emails
     include PostHog::Logging
     include PostHog::Utils
 
-    # The queued email. A result means PostHog queued the email, not that it was delivered.
+    # The accepted email. A result means PostHog queued or scheduled the email, not that it was delivered.
     #
     # @!attribute [r] id
-    #   @return [String] The queued email's message ID.
+    #   @return [String] The accepted email's message ID.
     # @!attribute [r] replayed
     #   @return [Boolean] Whether PostHog had already accepted this idempotency key and returned the first result.
     # @!attribute [r] warnings
     #   @return [Array<Warning>]
-    SendResult = Struct.new(:id, :replayed, :warnings, keyword_init: true)
+    # @!attribute [r] scheduled_at
+    #   @return [Time, nil] When a scheduled email goes out, in UTC. +nil+ for an email that goes out now, also when
+    #     its +scheduled_at+ had already passed when PostHog accepted it.
+    SendResult = Struct.new(:id, :replayed, :warnings, :scheduled_at, keyword_init: true) do
+      # @return [String] `scheduled` when the email waits for its {#scheduled_at}, `queued` when it goes out now.
+      def status
+        scheduled_at.nil? ? 'queued' : 'scheduled'
+      end
+    end
 
     # A warning PostHog returned with a queued email.
     Warning = Struct.new(:code, :message, :fix, keyword_init: true)
@@ -64,8 +83,9 @@ module PostHog
     # What happened to an email that {Emails#send} queued.
     #
     # @!attribute [r] status
-    #   @return [String] `queued`, `sent`, `failed`, `delivered`, `bounced` or `complained`. Later SDK versions
-    #     can see values this list does not have yet.
+    #   @return [String] `scheduled`, `queued`, `sent`, `failed`, `delivered`, `bounced` or `complained`. A
+    #     scheduled email reads `scheduled` until it goes out. Later SDK versions can see values this list does not
+    #     have yet.
     # @!attribute [r] reason
     #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed`, or the bounce type
     #     of a bounced email: `hard`, `soft` or `unknown`.
@@ -76,6 +96,7 @@ module PostHog
     STATUS_PATH = '/api/messaging/emails/%<message_id>s/'
     US_APP_HOST = 'https://us.posthog.com'
     EU_APP_HOST = 'https://eu.posthog.com'
+    SCHEDULING_APP_HOSTS = [US_APP_HOST, EU_APP_HOST].freeze
     CLOUD_APP_HOSTS = {
       'https://us.i.posthog.com' => US_APP_HOST,
       'https://us.posthog.com' => US_APP_HOST,
@@ -88,6 +109,13 @@ module PostHog
     IDEMPOTENCY_KEY_PATTERN = /\A[\x21-\x7e]{1,255}\z/
     TEMPLATE_KEY_PATTERN = /\A[a-zA-Z0-9_-]{1,400}\z/
     HEADER_TOKEN_PATTERN = /\A[\x21-\x7e]+\z/
+    SCHEDULED_AT_PATTERN = /
+      \A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?
+      (?:Z|([+-]\d{2}):?(\d{2}))\z
+    /x
+    SEND_NOW_TOLERANCE_SECONDS = 60
+    SCHEDULED_AT_NEEDED = 'scheduled_at must be a Time, or an ISO 8601 time with an offset, such as ' \
+                          '2026-12-01T09:00:00Z or 2026-12-01T10:00:00+01:00, so no email was sent.'
     JSON_CONTENT = { 'Content-Type' => 'application/json' }.freeze
     SEND_KEY_NEEDED = 'Sending email needs secret_key, a project secret API key with the ' \
                       'transactional_email:write scope.'
@@ -103,9 +131,11 @@ module PostHog
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
     ].freeze
     private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
-                     :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
-                     :HEADER_TOKEN_PATTERN, :JSON_CONTENT, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY,
-                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :NETWORK_ERRORS
+                     :SCHEDULING_APP_HOSTS, :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN,
+                     :TEMPLATE_KEY_PATTERN, :HEADER_TOKEN_PATTERN, :SCHEDULED_AT_PATTERN, :SEND_NOW_TOLERANCE_SECONDS,
+                     :SCHEDULED_AT_NEEDED,
+                     :JSON_CONTENT, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY, :CODE_FORM_WHY,
+                     :TEMPLATE_FIELDS, :CODE_FIELDS, :NETWORK_ERRORS
 
     # @api private
     def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:,
@@ -181,19 +211,36 @@ module PostHog
     #   retries the send.
     # @param max_retries [Integer] Overrides the client's `email_request_max_retries` for this send. +0+ turns
     #   retries off.
-    # @return [SendResult] The queued email.
+    # @param scheduled_at [Time, DateTime, String] When to send the email, at most 7 days ahead: a +Time+, such as
+    #   +Time.now + 3600+ or a Rails time with zone, a +DateTime+, or an ISO 8601 time with an offset, such as
+    #   `2026-12-01T10:00:00+01:00`. A time that has passed sends the email now. PostHog keeps the time to the
+    #   millisecond, and the client rounds a finer time up to the next millisecond and sends that time on every retry.
+    #   When PostHog sends the email now, the client accepts that for a time up to a minute ahead by this machine's
+    #   clock, to allow for clock skew, so such an email can go out up to a minute early. Work out a relative time
+    #   once and pass the same time when you send again with the same +idempotency_key+: another time with that key
+    #   raises `idempotency_key_reused`. Only PostHog Cloud schedules emails. To stop scheduled emails, disable the
+    #   email's workflow in PostHog until they have reached a final status, which refuses every new send of it
+    #   meanwhile.
+    # @return [SendResult] The accepted email.
     # @raise [EmailError] PostHog did not queue the email, or the client could not tell whether it did.
+    #   With +scheduled_at+, {EmailError#code} is `scheduling_requires_cloud` before any request when the client's
+    #   app host isn't PostHog Cloud US or EU, such as a self-hosted PostHog, a reverse proxy or a custom domain, which
+    #   could send the email at once. It is `schedule_not_confirmed` when PostHog accepted the email without confirming
+    #   its time, also when PostHog sends now an email due more than a minute ahead by this machine's clock: the email
+    #   exists and may go out at another time, and {EmailError#message_id} names it. Read it with {#get} before you
+    #   send again. The reply's warnings are on {EmailError#warnings}, and the client logs none of them.
     #   Before any request, {EmailError#code} is `invalid_attachment` for a file the client can't send,
     #   `too_many_attachments` for more than 10 files, and `message_too_large` for files too large for one email.
     #   It is `attachment_upload_failed` when file storage refused an upload, and `not_found` with
     #   {EmailError#field} `attachments` when PostHog has no upload route for this project. Unless `app_host` is
     #   an http URL, an upload URL without https raises `api_error` on the file's field, such as
     #   `attachments__0`, before any file goes out. No email was sent.
-    # @raise [ArgumentError] An argument has the wrong type or format, or the call mixes the two forms.
+    # @raise [ArgumentError] An argument has the wrong type or format, such as a +scheduled_at+ without an offset, or
+    #   the call mixes the two forms.
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
       reply_to: nil, cc: nil, bcc: nil, attachments: nil, sensitive: nil, tracking: nil, capture_engagement: nil,
-      distinct_id: nil, idempotency_key: nil, max_retries: nil
+      distinct_id: nil, idempotency_key: nil, max_retries: nil, scheduled_at: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
@@ -202,20 +249,28 @@ module PostHog
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
+      due = scheduled_time(scheduled_at)
       files = EmailAttachments.from(fields.fetch(:attachments, []), bodies_with_derived_text(fields), fields[:subject])
       payload[:attachments] = files.references unless files.empty?
       payload[:distinct_id] = distinct_id unless distinct_id.nil?
+      payload[:scheduled_at] = time_in_iso8601(due) if due
       body = JSON.generate(payload)
       headers = { 'Content-Type' => 'application/json', 'Idempotency-Key' => idempotency_key || SecureRandom.uuid }
 
-      result = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+      result, unconfirmed = call('no email was sent', SEND_KEY_NEEDED) do |secret_key|
+        check_schedulable if due
         upload(files, secret_key, max_retries || @max_retries) unless files.empty?
         uri = URI(@app_host + SEND_PATH)
+        # A slow reply must not move a time that was more than a minute ahead into the send-now window.
+        sent_at = Time.now
         with_retries(max_retries || @max_retries) do
-          parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body))
+          parse_send_reply(request(Net::HTTP::Post.new(uri), uri, secret_key, headers, body), due, sent_at)
         end
       end
+      raise unconfirmed if unconfirmed
+
       result.warnings.each { |warning| logger.warn("PostHog email warning #{warning.code}: #{warning.message}") }
+
       result
     end
 
@@ -315,6 +370,50 @@ module PostHog
 
     def nonempty_string?(value)
       value.is_a?(String) && !value.strip.empty?
+    end
+
+    def scheduled_time(value)
+      return nil if value.nil?
+
+      instant = case value
+                when DateTime then Time.at((value - DateTime.new(1970, 1, 1)) * 86_400)
+                when Time then Time.at(value.to_r)
+                when String then offset_time(value)
+                end
+      raise ArgumentError, SCHEDULED_AT_NEEDED if instant.nil?
+
+      instant.utc.ceil(3)
+    end
+
+    def offset_time(value)
+      return nil unless value.valid_encoding? && value.encoding.ascii_compatible?
+
+      parts = SCHEDULED_AT_PATTERN.match(value)
+      return nil if parts.nil?
+
+      year, month, day, hour, minute, second, fraction, offset_hours, offset_minutes = parts.captures
+      return nil unless Date.valid_date?(year.to_i, month.to_i, day.to_i, Date::GREGORIAN)
+      return nil unless hour.to_i <= 23 && minute.to_i <= 59 && second.to_i <= 59
+      return nil unless offset_hours.to_s[1, 2].to_i <= 23 && offset_minutes.to_i <= 59
+
+      seconds = second.to_i + (fraction ? Rational(fraction.to_i, 10**fraction.size) : 0)
+      offset = offset_hours ? "#{offset_hours}:#{offset_minutes}" : '+00:00'
+      Time.new(year.to_i, month.to_i, day.to_i, hour.to_i, minute.to_i, seconds, offset)
+    end
+
+    def check_schedulable
+      return if SCHEDULING_APP_HOSTS.include?(@app_host)
+
+      uri = URI(@app_host)
+      host = uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"
+      raise EmailError.new(
+        code: 'scheduling_requires_cloud', field: 'scheduled_at',
+        message: 'Only PostHog Cloud (us.posthog.com or eu.posthog.com) schedules emails, and this client sends ' \
+                 "email to #{host}, so no email was sent.",
+        why: "A PostHog that doesn't schedule emails would send this one at once.",
+        fix: "Send without scheduled_at, or set app_host to PostHog Cloud's app host. A reverse proxy or custom " \
+             "domain can't schedule emails yet."
+      )
     end
 
     def content(template_id, template_key, fields)
@@ -593,7 +692,7 @@ module PostHog
       nil
     end
 
-    def parse_send_reply((status, payload, retry_after))
+    def parse_send_reply((status, payload, retry_after), due, sent_at)
       fields = payload.is_a?(Hash) ? payload : {}
       raise reply_error(fields, status, retry_after) unless status.between?(200, 299)
 
@@ -603,7 +702,34 @@ module PostHog
                              status_code: status)
       end
 
-      SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']))
+      result = SendResult.new(id: id, replayed: fields['replayed'] == true, warnings: warnings(fields['warnings']),
+                              scheduled_at: nil)
+      return [result, nil] if due.nil? || time_had_passed?(fields, due, sent_at)
+      return [result, schedule_not_confirmed(id, status, result.warnings)] unless confirms?(fields, due)
+
+      result.scheduled_at = due
+      [result, nil]
+    end
+
+    def time_had_passed?(fields, due, sent_at)
+      fields['status'] == 'queued' && fields.key?('scheduled_at') && fields['scheduled_at'].nil? &&
+        due <= sent_at + SEND_NOW_TOLERANCE_SECONDS
+    end
+
+    def confirms?(fields, due)
+      answered = fields['scheduled_at']
+      fields['status'] == 'scheduled' && answered.is_a?(String) && offset_time(answered) == due
+    end
+
+    def schedule_not_confirmed(message_id, status, warnings)
+      EmailError.new(
+        code: 'schedule_not_confirmed', status_code: status, field: 'scheduled_at', message_id: message_id,
+        warnings: warnings,
+        message: "PostHog accepted email #{message_id} without confirming its scheduled_at, so it may go out at " \
+                 'another time.',
+        fix: "Read what happened to the email with emails.get('#{message_id}') before you send it again: a send " \
+             'with another idempotency_key makes a second email.'
+      )
     end
 
     def warnings(entries)
