@@ -37,6 +37,7 @@ module PostHog
       EXCEPTION = '$exception'
       IDENTIFY = '$identify'
       INITIALIZE = '$mcp_initialize'
+      INPUT_REQUIRED = '$mcp_input_required'
       MISSING_CAPABILITY = '$mcp_missing_capability'
       PROMPT_GET = '$mcp_prompt_get'
       PROMPTS_LIST = '$mcp_prompts_list'
@@ -57,6 +58,7 @@ module PostHog
       DURATION_MS = '$mcp_duration_ms'
       ERROR_MESSAGE = '$mcp_error_message'
       ERROR_TYPE = '$mcp_error_type'
+      INPUT_REQUEST_METHODS = '$mcp_input_request_methods'
       IS_ERROR = '$mcp_is_error'
       INTENT = '$mcp_intent'
       INTENT_SOURCE = '$mcp_intent_source'
@@ -82,6 +84,7 @@ module PostHog
       CUSTOM = 'posthog:custom'
       IDENTIFY = 'posthog:identify'
       MCP_INITIALIZE = 'mcp:initialize'
+      MCP_INPUT_REQUIRED = 'mcp:input_required'
       MCP_MISSING_CAPABILITY = 'mcp:missing_capability'
       MCP_PROMPTS_GET = 'mcp:prompts/get'
       MCP_PROMPTS_LIST = 'mcp:prompts/list'
@@ -95,6 +98,7 @@ module PostHog
         CUSTOM => Event::CUSTOM,
         IDENTIFY => Event::IDENTIFY,
         MCP_INITIALIZE => Event::INITIALIZE,
+        MCP_INPUT_REQUIRED => Event::INPUT_REQUIRED,
         MCP_MISSING_CAPABILITY => Event::MISSING_CAPABILITY,
         MCP_PROMPTS_GET => Event::PROMPT_GET,
         MCP_PROMPTS_LIST => Event::PROMPTS_LIST,

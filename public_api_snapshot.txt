@@ -188,12 +188,14 @@ class_method PostHog::MCP.derive_session_id_from_conversation(conversation_id)
 class_method PostHog::MCP.derive_session_id_from_mcp_session(mcp_session_id)
 class_method PostHog::MCP.encode_session_id(payload)
 class_method PostHog::MCP.get_more_tools_result()
+class_method PostHog::MCP.input_request_methods(result)
 class_method PostHog::MCP.instrument(server, client = ..., options: ..., **kwargs)
 class PostHog::MCP::Analytics
 instance_method PostHog::MCP::Analytics#capture(event, properties = ...)
 instance_method PostHog::MCP::Analytics#flush()
 class PostHog::MCP::Client < PostHog::Client
 instance_method PostHog::MCP::Client#capture_initialize(client_name: ..., client_version: ..., protocol_version: ..., parameters: ..., response: ..., duration_ms: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ...)
+instance_method PostHog::MCP::Client#capture_input_required(tool_name, input_request_methods: ..., duration_ms: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ...)
 instance_method PostHog::MCP::Client#capture_missing_capability(context: ..., parameters: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ..., llm_model: ..., llm_model_source: ...)
 instance_method PostHog::MCP::Client#capture_tool_call(tool_name, intent: ..., intent_source: ..., parameters: ..., response: ..., duration_ms: ..., is_error: ..., error: ..., error_type: ..., category: ..., tool_description: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ..., llm_model: ..., llm_model_source: ...)
 instance_method PostHog::MCP::Client#capture_tools_list(tool_names: ..., parameters: ..., response: ..., duration_ms: ..., is_error: ..., error: ..., error_type: ..., protocol_version: ..., distinct_id: ..., session_id: ..., client_user_agent: ..., vendor_client: ..., set_properties: ..., groups: ..., properties: ..., timestamp: ...)
@@ -216,6 +218,7 @@ constant PostHog::MCP::Event::CUSTOM: String
 constant PostHog::MCP::Event::EXCEPTION: String
 constant PostHog::MCP::Event::IDENTIFY: String
 constant PostHog::MCP::Event::INITIALIZE: String
+constant PostHog::MCP::Event::INPUT_REQUIRED: String
 constant PostHog::MCP::Event::MISSING_CAPABILITY: String
 constant PostHog::MCP::Event::PROMPTS_LIST: String
 constant PostHog::MCP::Event::PROMPT_GET: String
@@ -276,6 +279,7 @@ constant PostHog::MCP::Property::CONVERSATION_ID: String
 constant PostHog::MCP::Property::DURATION_MS: String
 constant PostHog::MCP::Property::ERROR_MESSAGE: String
 constant PostHog::MCP::Property::ERROR_TYPE: String
+constant PostHog::MCP::Property::INPUT_REQUEST_METHODS: String
 constant PostHog::MCP::Property::INTENT: String
 constant PostHog::MCP::Property::INTENT_SOURCE: String
 constant PostHog::MCP::Property::IS_ERROR: String

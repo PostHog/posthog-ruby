@@ -98,6 +98,25 @@ module PostHog
         emit(event)
       end
 
+      # Capture an `input_required` round: the tool asked the client for more
+      # input instead of returning its result. Emits `$mcp_input_required`. Use
+      # it instead of {#capture_tool_call} when
+      # {PostHog::MCP.input_request_methods} returns the round's methods; the
+      # retry that completes the call is the tool call.
+      #
+      # @return [void]
+      def capture_input_required(tool_name, input_request_methods: [], duration_ms: nil, protocol_version: nil,
+                                 distinct_id: nil, session_id: nil, client_user_agent: nil, vendor_client: nil,
+                                 set_properties: nil, groups: nil, properties: nil, timestamp: nil)
+        event = base_event(EventType::MCP_INPUT_REQUIRED, distinct_id, session_id, set_properties, groups,
+                           properties, timestamp, client_user_agent, vendor_client)
+        event['resource_name'] = tool_name
+        event['protocol_version'] = protocol_version
+        event['duration'] = duration_ms
+        event['input_request_methods'] = InputRequired.bound(input_request_methods)
+        emit(event)
+      end
+
       # Capture a `get_more_tools` call as a missing-capability report. Emits
       # `$mcp_missing_capability` with the agent's description as `$mcp_intent`.
       #

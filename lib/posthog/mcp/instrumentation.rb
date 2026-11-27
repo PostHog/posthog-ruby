@@ -184,6 +184,17 @@ module PostHog
           raise
         end
 
+        input_request_methods = safely { InputRequired.request_methods(result) }
+        unless input_request_methods.nil?
+          # A round cannot carry a minted handle, and the retry that ends the call is the tool call.
+          safely do
+            cid = minted ? nil : conversation_id
+            session_id = prepare_request(request, conversation_id: cid)
+            record_input_required(session_id, name, request, input_request_methods, cid)
+          end
+          return result
+        end
+
         delivered = false
         # The handle appended below is unique per conversation, so an error read
         # off the delivered result would give every identical failure a different
@@ -351,6 +362,14 @@ module PostHog
         event['conversation_id'] = conversation_id
         event.delete('duration')
         event['resource_name'] = Sanitization.redact_pii(Sanitization.sanitize_captured_value(name))
+        finish_event(event, request)
+      end
+
+      def record_input_required(session_id, name, request, methods, conversation_id)
+        event = base_event(EventType::MCP_INPUT_REQUIRED, session_id, request)
+        event['resource_name'] = name
+        event['conversation_id'] = conversation_id
+        event['input_request_methods'] = methods
         finish_event(event, request)
       end
 
