@@ -143,6 +143,9 @@ module PostHog
       it 'refuses code content, because the template sets its own' do
         expect { send_template(subject: 'Hi') }
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
+        expect { send_template(category: 'newsletter') }
+          .to raise_error(ArgumentError,
+                          /template_id doesn't take category.*its own sender, subject, content and category/)
         expect { send_template(tracking: false) }
           .to raise_error(ArgumentError, /template_id doesn't take tracking/)
         expect { send_template(sensitive: true) }
@@ -220,6 +223,15 @@ module PostHog
         emails.send(to: 'user@example.com', template_key: 'digest', subject: 'Digest', text: 'Hello')
 
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'to')
+      end
+
+      it 'sends category as the key string only when the caller sets it' do
+        stub_request(:post, send_url).to_return(accept)
+
+        send_code(category: 'newsletter')
+        send_code(category: nil)
+
+        expect(sent_bodies.map { |body| body.slice('category') }).to eq([{ 'category' => 'newsletter' }, {}])
       end
 
       it 'refuses template_data, because local templates are not supported' do
@@ -793,6 +805,7 @@ module PostHog
         expect { send_code(tracking: 'no') }.to raise_error(ArgumentError, /tracking must be/)
         expect { send_code(tracking: { clicks: 'yes' }) }.to raise_error(ArgumentError, /tracking\[:clicks\]/)
         expect { send_code(reply_to: [1]) }.to raise_error(ArgumentError, /reply_to/)
+        expect { send_code(category: :newsletter) }.to raise_error(ArgumentError, /category must be a string/)
         expect { send_template(headers: {}) }.to raise_error(ArgumentError, /unknown keyword: :headers/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
       end
@@ -931,22 +944,19 @@ module PostHog
         expect(a_request(:post, send_url)).to have_been_made.once
       end
 
-      [
-        [503, 'delivery_unavailable', 2],
-        [429, 'throttled', 2],
-        [409, 'idempotency_key_in_flight', 2],
-        [429, 'quota_limited', 1],
-        [422, 'recipient_suppressed', 1]
-      ].each do |status, code, attempts|
-        it "makes #{attempts} attempts for a #{status} #{code}" do
+      [[503, 'delivery_unavailable'], [429, 'throttled'], [409, 'idempotency_key_in_flight']].each do |status, code|
+        it "retries a #{status} #{code} and sends the email" do
           stub_request(:post, send_url).to_return(refuse(status, code), accept)
 
-          begin
-            send_template
-          rescue EmailError
-            nil
-          end
-          expect(a_request(:post, send_url)).to have_been_made.times(attempts)
+          expect(send_template.id).to eq('msg_1')
+        end
+      end
+
+      [[429, 'quota_limited'], [422, 'recipient_suppressed']].each do |status, code|
+        it "raises a #{status} #{code} without retrying it" do
+          stub_request(:post, send_url).to_return(refuse(status, code), accept)
+
+          expect { send_template }.to raise_error(EmailError) { |error| expect(error.code).to eq(code) }
         end
       end
 
@@ -1082,6 +1092,8 @@ module PostHog
       end
 
       [
+        [400, 'category_not_found', 'validation_error'],
+        [400, 'marketing_copies_unsupported', 'validation_error'],
         [401, 'authentication_failed', 'missing_api_key'],
         [404, 'not_found', 'not_found'],
         [409, 'template_outdated', 'validation_error'],

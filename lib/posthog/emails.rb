@@ -14,8 +14,8 @@ require 'posthog/logging'
 require 'posthog/utils'
 
 module PostHog
-  # Sends transactional email, from an email template made in PostHog or from content your code rendered,
-  # and reads the status of each email sent. Reach it through {Client#emails}.
+  # Sends transactional email from an email template made in PostHog, and transactional or marketing email from
+  # content your code rendered. It also reads the status of each email sent. Reach it through {Client#emails}.
   #
   # A send needs the client's `secret_key`, a project secret API key (`phs_...`) with the
   # `transactional_email:write` scope: the "Send transactional email" preset in your project settings. A key with
@@ -44,6 +44,16 @@ module PostHog
   #     html: rendered_html,
   #     distinct_id: 'user_123'
   #   )
+  #
+  # @example A marketing email in one of the project's message categories
+  #   posthog.emails.send(
+  #     to: 'user@example.com',
+  #     template_key: 'monthly-digest',
+  #     subject: 'Your monthly digest',
+  #     html: rendered_html, # links to {{ unsubscribe_url }}
+  #     category: 'newsletter',
+  #     distinct_id: 'user_123'
+  #   )
   class Emails
     include PostHog::Logging
     include PostHog::Utils
@@ -67,8 +77,8 @@ module PostHog
     #   @return [String] `queued`, `sent`, `failed`, `delivered`, `bounced` or `complained`. Later SDK versions
     #     can see values this list does not have yet.
     # @!attribute [r] reason
-    #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed`, or the bounce type
-    #     of a bounced email: `hard`, `soft` or `unknown`.
+    #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed` or
+    #     `recipient_opted_out`, or the bounce type of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
 
     SEND_PATH = '/api/messaging/send/email/'
@@ -93,11 +103,12 @@ module PostHog
                       'transactional_email:write scope.'
     READ_KEY_NEEDED = 'Reading an email status needs secret_key, a project secret API key with the ' \
                       'transactional_email:read or transactional_email:write scope.'
-    TEMPLATE_FORM_WHY = 'A template made in PostHog sets its own sender, subject and content, and follows the ' \
-                        "project's engagement setting."
+    TEMPLATE_FORM_WHY = 'A template made in PostHog sets its own sender, subject, content and category, and ' \
+                        "follows the project's engagement setting."
     CODE_FORM_WHY = 'A send with template_key takes its content from your code.'
     TEMPLATE_FIELDS = %i[template_data].freeze
-    CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments sensitive tracking capture_engagement].freeze
+    CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments sensitive tracking capture_engagement
+                     category].freeze
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
@@ -173,6 +184,13 @@ module PostHog
     # @param capture_engagement [Boolean] Deprecated: use +tracking: { engagement: false }+ instead. Code form:
     #   whether PostHog captures the email's engagement events. It still works, but a send can't set both. Sent
     #   only when you set it.
+    # @param category [String] Code form: the key of one of the project's message categories, such as
+    #   `newsletter`, for the email your code rendered. A marketing category skips recipients who opted out of it or
+    #   of all marketing email, fills `{{ unsubscribe_url }}` with the recipient's preferences link, and adds
+    #   List-Unsubscribe headers. A marketing email can't have `cc` or `bcc` (`marketing_copies_unsupported`).
+    #   PostHog refuses a key that names no category with `category_not_found`, and a marketing email from the
+    #   PostHog test sender, used while the project has no verified sending domain, with
+    #   `sandbox_fields_unsupported`. Sent only when you set it, and needs a PostHog version that takes it.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -193,12 +211,12 @@ module PostHog
     def send(
       to:, template_id: nil, template_data: nil, template_key: nil, subject: nil, html: nil, text: nil, from: nil,
       reply_to: nil, cc: nil, bcc: nil, attachments: nil, sensitive: nil, tracking: nil, capture_engagement: nil,
-      distinct_id: nil, idempotency_key: nil, max_retries: nil
+      category: nil, distinct_id: nil, idempotency_key: nil, max_retries: nil
     )
       fields = {
         template_data: template_data, subject: subject, html: html, text: text, from: from, reply_to: reply_to,
         cc: cc, bcc: bcc, attachments: attachments, sensitive: sensitive, tracking: tracking,
-        capture_engagement: capture_engagement
+        capture_engagement: capture_engagement, category: category
       }.compact
       check_recipient(to, distinct_id, idempotency_key, max_retries)
       payload = content(template_id, template_key, fields).merge(to: to)
@@ -349,14 +367,14 @@ module PostHog
               'A send with template_key needs html, text or both.'
       end
 
-      %i[html text from].each do |name|
+      %i[html text from category].each do |name|
         raise ArgumentError, "#{name} must be a string." if fields.key?(name) && !fields[name].is_a?(String)
       end
       %i[capture_engagement sensitive].each do |name|
         raise ArgumentError, "#{name} must be true or false." unless [nil, true, false].include?(fields[name])
       end
 
-      code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
+      code = fields.slice(:subject, :html, :text, :from, :category).merge(template_key: template_key)
       code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
       %i[cc bcc].each do |name|
         list = fields.key?(name) ? addresses(name, fields[name]) : []
