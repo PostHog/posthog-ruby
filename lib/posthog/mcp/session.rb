@@ -2,10 +2,12 @@
 
 module PostHog
   module MCP
-    # Session id resolution, in priority order: the
-    # agent's echoed `conversation_id` handle first, then our self-encoded
-    # session token, then the transport's MCP session id, then this server's own
-    # memory (which rolls over after {INACTIVITY_TIMEOUT_MINUTES} of inactivity).
+    # Session id resolution, in priority order: the client's own conversation id,
+    # the agent's echoed `conversation_id` handle, our self-encoded session token,
+    # the transport's MCP session id, a session of its own for a request that
+    # carries none over a transport shared by every client (stateless HTTP), and
+    # last this server's own memory (which rolls over after
+    # {INACTIVITY_TIMEOUT_MINUTES} of inactivity).
     #
     # @api private
     module Session
@@ -25,8 +27,12 @@ module PostHog
       end
 
       # @return [Array(String, String)] `[session_id, source]` where source is one of
-      #   `conversation`, `token`, `mcp`, `generated`
-      def resolve(data, mcp_session_id, token: nil, conversation_id: nil)
+      #   `client_metadata`, `conversation`, `token`, `mcp`, `generated`
+      def resolve(data, mcp_session_id, token: nil, conversation_id: nil, client_conversation: nil,
+                  request_session_id: nil)
+        if present?(client_conversation)
+          return [derive_session_id_from_conversation(client_conversation), 'client_metadata']
+        end
         return [derive_session_id_from_conversation(conversation_id), 'conversation'] if present?(conversation_id)
 
         data.synchronize do
@@ -47,19 +53,37 @@ module PostHog
             return [data.session_id, 'mcp']
           end
 
+          return [request_session_id, 'generated'] if present?(request_session_id)
+
           if data.session_source == 'mcp' && data.last_mcp_session_id
             data.last_activity = now
             return [data.session_id, 'mcp']
           end
 
-          stale = (now - data.last_activity) > (INACTIVITY_TIMEOUT_MINUTES * 60)
-          if data.session_source != 'generated' || stale || data.session_id.nil?
+          if data.session_source != 'generated' || stale?(data, now) || data.session_id.nil?
             data.session_id = new_session_id
             data.session_source = 'generated'
           end
           data.last_activity = now
           [data.session_id, 'generated']
         end
+      end
+
+      # A call grouped by its client or agent is still activity on a one-client
+      # connection, so the connection's own session does not roll over under it.
+      def touch_connection(data)
+        data.synchronize do
+          now = Time.now
+          if data.session_id.nil? || (data.session_source == 'generated' && stale?(data, now))
+            data.session_id = new_session_id
+            data.session_source = 'generated'
+          end
+          data.last_activity = now if data.session_source == 'generated'
+        end
+      end
+
+      def stale?(data, now)
+        (now - data.last_activity) > (INACTIVITY_TIMEOUT_MINUTES * 60)
       end
 
       def present?(value)

@@ -36,23 +36,8 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
 
   before { allow(Kernel).to receive(:warn) }
 
-  def env_for(body, headers = {})
-    env = {
-      'REQUEST_METHOD' => 'POST', 'PATH_INFO' => '/', 'SCRIPT_NAME' => '', 'QUERY_STRING' => '',
-      'SERVER_NAME' => 'localhost', 'SERVER_PORT' => '80', 'HTTP_HOST' => 'localhost', 'rack.url_scheme' => 'http',
-      'HTTP_ACCEPT' => 'application/json, text/event-stream', 'CONTENT_TYPE' => 'application/json',
-      'rack.input' => StringIO.new(JSON.generate(body)), 'rack.errors' => StringIO.new
-    }
-    headers.each { |name, value| env["HTTP_#{name.upcase.tr('-', '_')}"] = value }
-    env
-  end
-
   def initialize_body(id = 1, version = '2025-06-18')
     rpc(id, 'initialize', { protocolVersion: version, capabilities: {}, clientInfo: { name: 'claude-code', version: '1.2.3' } })
-  end
-
-  def parse(response)
-    JSON.parse(response[2].respond_to?(:join) ? response[2].join : response[2].to_s)
   end
 
   context 'stateless mode' do
@@ -92,7 +77,7 @@ RSpec.describe 'PostHog::MCP over Streamable HTTP' do
       response = transport.call(env_for(initialize_body(1, 'draft')))
       expect(response[1]['mcp-session-id']).to be_nil
       2.times { |i| transport.call(env_for(rpc(i + 2, 'tools/call', { name: 'ping_tool', arguments: {} }))) }
-      expect(logs.count { |m| m.include?('fragment across requests') }).to eq(1)
+      expect(logs.count { |m| m.include?('a $session_id of its own') }).to eq(1)
     end
 
     {

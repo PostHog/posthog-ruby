@@ -41,6 +41,7 @@ module PostHog
       # Passed as `actor:` by a caller that has no request identity to offer, and
       # is distinct from an explicit `nil` (a request that resolved to nobody).
       UNRESOLVED_ACTOR = Object.new.freeze
+      INVOCATION_KEYS = %i[owner session_id session_source actor held held_bytes overflowed_held].freeze
 
       class << self
         def tracked?(method)
@@ -105,32 +106,49 @@ module PostHog
         @token = SessionToken.decode(header_session_id)
         @data.http_transport_seen = true if http?
         @identified_in_request = {}
+        @session_sources = {}
       end
 
       # Runs the wrapped handler and records the request.
       def dispatch(&handler)
         @start = self.class.monotonic_now
-        return dispatch_kind(&handler) if @scope
+        return dispatch_kind(&handler) if @scope && !enclosing_invocation?
 
         # Only the Streamable HTTP transport publishes a scope. Opening one for
         # every other transport too (stdio, a custom dispatcher) means the session
         # settled before the tool body runs is the one {Analytics#capture} reads
         # inside it, whatever the request is anchored on.
-        RequestScope.with(headers: {}, transport: :other) do |scope|
+        #
+        # A dispatch a tool body makes synchronously gets its own scope too. The
+        # enclosing invocation's session, identity and held events belong to it
+        # alone, and a thread it spawned still holds that scope, so the nested
+        # call must never write to it.
+        enclosing = @scope
+        RequestScope.with(headers: @headers, transport: enclosing ? enclosing[:transport] : :other) do |scope|
           @scope = scope
           dispatch_kind(&handler)
+        ensure
+          enclosing[:mint] = scope[:mint] if enclosing && scope[:mint]
         end
       end
 
       private
 
       def dispatch_kind(&)
+        @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) } if @kind == :tools_call
+        safely { drop_client_conversation_key }
         case @kind
         when :tools_call then dispatch_tool_call(&)
         when :tools_list then dispatch_tools_list(&)
         when :initialize then dispatch_initialize(&)
         else dispatch_generic(&)
         end
+      ensure
+        safely { release_custom_events(@scope[:session_id]) }
+      end
+
+      def enclosing_invocation?
+        INVOCATION_KEYS.any? { |key| @scope.key?(key) }
       end
 
       # --- dispatchers -------------------------------------------------------
@@ -146,11 +164,13 @@ module PostHog
         # Resolution reads the stripped values, never `original_arguments`: only an
         # argument this layer injected is ours to interpret. A `conversation_id` or
         # `context` the tool declares itself stays application data and is left to it.
-        conversation_id, minted = safely([nil, false]) do
-          ConversationId.resolve(@options.enable_conversation_id, stripped[ConversationId::PARAM_NAME], name,
-                                 missing_name)
-        end
+        handle_free = safely(false) { client_row&.handle_free }
         request = request_with_arguments(original_arguments)
+        conversation_id, minted = safely([nil, false]) do
+          ConversationId.resolve(@options.enable_conversation_id && !@client_conversation,
+                                 stripped[ConversationId::PARAM_NAME], name, missing_name,
+                                 mint: !handle_free && !carries_session?)
+        end
 
         if virtual_tool?(name)
           # Run the gem's own handler so validation, in-flight tracking and
@@ -172,7 +192,7 @@ module PostHog
           return result
         end
 
-        safely { prime_session(request, minted ? nil : conversation_id) }
+        safely { prime_session(request, minted ? nil : conversation_id, hold_custom_events: minted) }
         begin
           result = yield
         rescue StandardError => e
@@ -191,7 +211,7 @@ module PostHog
         error_source = result
         unless no_response?(result) || conversation_id.nil?
           safely do
-            if @data.tool_output_instructions[name]
+            if @data.tool_output_instructions[name] && !handle_free
               result, delivered = ConversationId.mirror_instructions(result, conversation_id)
             end
             if minted
@@ -205,6 +225,7 @@ module PostHog
         safely do
           cid = minted && !delivered ? nil : conversation_id
           session_id = prepare_request(request, conversation_id: cid)
+          release_custom_events(session_id)
           record_tool_call(session_id, name, request, result: result, conversation_id: cid,
                                                       stripped: stripped, error_source: error_source)
         end
@@ -228,7 +249,8 @@ module PostHog
           if tools.is_a?(Array)
             names = tools.map { |tool| fetch(tool, :name) }.compact
             empty = tools.empty?
-            mutated = tools.map { |tool| mutate_tool(tool) }
+            advertise_handle = !client_row&.handle_free
+            mutated = tools.map { |tool| mutate_tool(tool, advertise_handle) }
             result = result.merge(SchemaMutation.key_for(result, :tools) => mutated)
           end
         end
@@ -405,6 +427,7 @@ module PostHog
         event = {
           'event_type' => event_type,
           'session_id' => session_id,
+          'session_source' => @session_sources[session_id],
           'duration' => duration_ms,
           'client_name' => nil,
           'client_version' => nil,
@@ -454,17 +477,45 @@ module PostHog
       # recorded under. A minted handle is not known to have reached the agent
       # until the call returns, so it stays out of here. {#prepare_request} runs
       # again after the call; the second run is idempotent.
-      def prime_session(request, conversation_id)
+      def prime_session(request, conversation_id, hold_custom_events: false)
         session_id = prepare_request(request, conversation_id: conversation_id)
-        @scope[:session_id] = session_id if @scope.is_a?(Hash)
+        @data.synchronize do
+          @scope[:owner] = @data
+          @scope[:session_id] = session_id
+          @scope[:session_source] = @session_sources[session_id]
+          @scope[:held] = [] if hold_custom_events
+        end
+      end
+
+      def release_custom_events(session_id)
+        return unless @scope.key?(:held)
+
+        held = @data.synchronize do
+          next nil unless @scope.key?(:held)
+
+          @scope[:session_id] = session_id
+          @scope[:session_source] = @session_sources[session_id]
+          @scope[:actor] = actor_for(session_id)
+          @scope.delete(:held)
+        end
+        actor = actor_for(session_id)
+        held&.each do |input|
+          self.class.capture_event(@data, input.merge('session_id' => session_id,
+                                                      'session_source' => @session_sources[session_id]),
+                                   actor: actor)
+        end
       end
 
       # Resolve the session id and run identify.
       def prepare_request(request, conversation_id: nil, token: nil)
         token ||= @token
         session_id, source = Session.resolve(@data, mcp_session_id(token), token: token,
-                                                                           conversation_id: conversation_id)
+                                                                           conversation_id: conversation_id,
+                                                                           client_conversation: @client_conversation,
+                                                                           request_session_id: request_session_id)
+        @session_sources[session_id] = source
         warn_stateless_session_not_wired if source == 'generated' && http?
+        Session.touch_connection(@data) if (@client_conversation || conversation_id) && !http?
 
         # A tool call prepares twice: once before the body to pin the session, and
         # once after it, when the conversation anchor is known. A customer's
@@ -478,7 +529,10 @@ module PostHog
           # overwritten while the handler ran.
           @identified_in_request[session_id] = actor
           @scope[:actor] = actor if @scope.is_a?(Hash)
-          self.class.capture_event(@data, identify_event, actor: actor) if identify_event
+          if identify_event
+            self.class.capture_event(@data, identify_event.merge('session_source' => source),
+                                     actor: actor)
+          end
         end
         session_id
       end
@@ -501,14 +555,28 @@ module PostHog
         payload
       end
 
+      def carries_session?
+        !@token.nil? || !mcp_session_id(@token).nil?
+      end
+
+      def request_session_id
+        @request_session_id ||= (Session.new_session_id if http?)
+      end
+
+      def client_row
+        return @client_row if defined?(@client_row)
+
+        @client_row = ClientConversation.recognize(@headers['user-agent'], client_identity(@request)[0])
+      end
+
       def warn_stateless_session_not_wired
         return if @data.warned_no_stateless_session
 
         @data.warned_no_stateless_session = true
         Log.warn(
           @options,
-          'Warning: an MCP request arrived over streamable HTTP with no session id, so PostHog generated a ' \
-          'per-process $session_id that will fragment across requests and pods. In stateless mode the ' \
+          'Warning: an MCP request arrived over streamable HTTP with no session id, so PostHog gave it a ' \
+          '$session_id of its own, shared with no other request. In stateless mode the ' \
           'client must replay the Mcp-Session-Id header PostHog::MCP mints at initialize; for a custom Rack ' \
           'stack add PostHog::MCP::RackMiddleware. Conversation ids, which are enabled by default, also anchor ' \
           'the session without any middleware. See https://posthog.com/docs/mcp-analytics/installation#ruby.'
@@ -521,9 +589,12 @@ module PostHog
         SessionToken.read_header(@headers)
       end
 
-      # The transport's own session id (never our token).
+      # The transport's own session id (never our token). A 2026-07-28 request
+      # carries none: the session the gem gives it is assigned afresh to each request.
       def mcp_session_id(token)
-        transport_id = @session.respond_to?(:session_id) ? @session.session_id : nil
+        if @session.respond_to?(:session_id) && self.class.legacy_era?(protocol_version)
+          transport_id = @session.session_id
+        end
         return transport_id if transport_id.is_a?(String) && !transport_id.empty?
 
         token ? nil : header_session_id
@@ -539,7 +610,8 @@ module PostHog
       end
 
       def client_identity(request)
-        info = envelope_client_info || session_client || server_client
+        # One instance serves every stateless HTTP client, so its handshake may be another client's.
+        info = envelope_client_info || session_client || (server_client unless http?)
         info = fetch(request_params(request), :clientInfo) if info.nil? && @kind == :initialize
         name = info.is_a?(Hash) ? fetch(info, :name) : nil
         version = info.is_a?(Hash) ? fetch(info, :version) : nil
@@ -594,6 +666,17 @@ module PostHog
       def request_params(request)
         params = request.is_a?(Hash) ? (request[:params] || request['params']) : nil
         params.is_a?(Hash) ? params : {}
+      end
+
+      # A recognized client's conversation id only groups the call; its value is never sent.
+      # Dropped once for every method, before any callback or event reads the request.
+      def drop_client_conversation_key
+        meta = envelope_meta
+        return unless client_row && meta
+
+        @params = @params.merge(SchemaMutation.key_for(@params, :_meta) => meta.except(client_row.key,
+                                                                                       client_row.key.to_sym))
+        @request = @request.merge(SchemaMutation.key_for(@request, :params) => @params)
       end
 
       def request_with_arguments(arguments)
@@ -673,7 +756,7 @@ module PostHog
         stripped
       end
 
-      def mutate_tool(tool)
+      def mutate_tool(tool, advertise_handle)
         return tool unless tool.is_a?(Hash)
 
         name = fetch(tool, :name)
@@ -691,7 +774,7 @@ module PostHog
         if @options.enable_conversation_id
           updated = SchemaMutation.add_conversation_id_parameter(schema, tool_name: name, options: @options)
           owned << ConversationId::PARAM_NAME unless updated.equal?(schema)
-          schema = updated
+          schema = updated if advertise_handle
         end
         if @options.capture_model_enabled?
           updated = SchemaMutation.add_model_parameter(
@@ -703,7 +786,7 @@ module PostHog
 
         mutated = tool.merge(SchemaMutation.key_for(tool, :inputSchema) => schema)
         declared = nil
-        if @options.enable_conversation_id
+        if @options.enable_conversation_id && advertise_handle
           output_schema = fetch(tool, :outputSchema)
           new_output, declared = SchemaMutation.add_output_instructions(output_schema, tool_name: name,
                                                                                        options: @options)

@@ -9,6 +9,9 @@ module PostHog
     class Analytics
       FLUSH_TIMEOUT_SECONDS = 10
       private_constant :FLUSH_TIMEOUT_SECONDS
+      MAX_HELD_EVENTS = 1000
+      MAX_HELD_BYTES = 4 * 1024 * 1024
+      private_constant :MAX_HELD_EVENTS, :MAX_HELD_BYTES
 
       # @api private
       def initialize(server)
@@ -39,14 +42,14 @@ module PostHog
         return if data.nil?
 
         scope = RequestScope.current
-        scope = nil unless scope.is_a?(Hash)
-        Instrumentation.capture_event(data, {
-                                        'session_id' => current_session_id(data, scope),
-                                        'event_type' => EventType::CUSTOM,
-                                        'event_name' => event,
-                                        'timestamp' => Time.now.utc,
-                                        'properties' => properties
-                                      }, actor: scoped_actor(scope))
+        scope = nil unless scope.is_a?(Hash) && scope[:owner].equal?(data)
+        input = { 'event_type' => EventType::CUSTOM, 'event_name' => event, 'timestamp' => Time.now.utc,
+                  'properties' => properties }
+        return if hold(data, scope, input)
+
+        session_id, source = current_session(data, scope)
+        Instrumentation.capture_event(data, input.merge('session_id' => session_id, 'session_source' => source),
+                                      actor: scoped_actor(scope))
         nil
       end
 
@@ -80,13 +83,50 @@ module PostHog
       # created before the request. Fail closed with a standalone session
       # rather than filing the event under another caller's identity; over stdio a
       # server only ever talks to one client, so the fallback stays.
-      def current_session_id(data, scope)
-        scoped = scope ? scope[:session_id] : nil
-        return scoped if scoped
-        return data.session_id unless data.http_transport_seen
+      def current_session(data, scope)
+        return scope.values_at(:session_id, :session_source) if scope&.[](:session_id)
+        return [data.session_id, data.session_source] unless data.http_transport_seen
 
         warn_unscoped_capture(data)
-        Session.new_session_id
+        [Session.new_session_id, 'generated']
+      end
+
+      # The sink's own sanitize and truncate steps run at capture, so a held event
+      # is a snapshot no later change to its properties reaches, and its size is bounded.
+      # {Sink#process} runs both steps again on release; they are idempotent, so the second pass is deliberate.
+      def hold(data, scope, input)
+        return false unless scope&.key?(:held)
+
+        snapshot = Truncation.truncate_event(Sanitization.sanitize_event(
+                                               Sanitization.stringify_keys(input.merge('duration' => 0))
+                                             ))
+        bytes = JSON.generate(snapshot['properties'] || {}).bytesize
+        data.synchronize do
+          held = scope[:held]
+          next false unless held
+
+          held_bytes = scope.fetch(:held_bytes, 0) + bytes
+          if held.size < MAX_HELD_EVENTS && held_bytes <= MAX_HELD_BYTES
+            held << snapshot
+            scope[:held_bytes] = held_bytes
+            next true
+          end
+
+          warn_overflow(data, scope)
+          false
+        end
+      rescue StandardError => e
+        Log.debug(data.options, "analytics.capture could not hold its event, sending it now: #{e.message}")
+        false
+      end
+
+      def warn_overflow(data, scope)
+        return if scope[:overflowed_held]
+
+        scope[:overflowed_held] = true
+        Log.warn(data.options, "Warning: a tool call captured more than #{MAX_HELD_EVENTS} custom events or " \
+                               "#{MAX_HELD_BYTES / 1024 / 1024} MiB of them before its conversation handle was " \
+                               'delivered; sending the rest with the session the call has so far')
       end
 
       # The identity the in-flight request resolved, which {Instrumentation} pinned
