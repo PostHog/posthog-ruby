@@ -3,39 +3,40 @@
 require 'logger'
 
 module PostHog
-  # Wraps an existing logger and adds a prefix to all messages.
+  # Adds a prefix to all messages and writes them to the logger the block
+  # returns, resolving it on every call.
   #
   # @api private
   class PrefixedLogger
-    # @param logger [Logger, #debug, #info, #warn, #error]
     # @param prefix [String]
-    def initialize(logger, prefix)
-      @logger = logger
+    # @yieldreturn [Logger, #debug, #info, #warn, #error]
+    def initialize(prefix, &resolve_logger)
       @prefix = prefix
+      @resolve_logger = resolve_logger
     end
 
     def debug(msg)
-      @logger.debug("#{@prefix} #{msg}")
+      @resolve_logger.call.debug("#{@prefix} #{msg}")
     end
 
     def info(msg)
-      @logger.info("#{@prefix} #{msg}")
+      @resolve_logger.call.info("#{@prefix} #{msg}")
     end
 
     def warn(msg)
-      @logger.warn("#{@prefix} #{msg}")
+      @resolve_logger.call.warn("#{@prefix} #{msg}")
     end
 
     def error(msg)
-      @logger.error("#{@prefix} #{msg}")
+      @resolve_logger.call.error("#{@prefix} #{msg}")
     end
 
     def level=(severity)
-      @logger.level = severity
+      @resolve_logger.call.level = severity
     end
 
     def level
-      @logger.level
+      @resolve_logger.call.level
     end
   end
 
@@ -43,18 +44,13 @@ module PostHog
     class << self
       # @return [Logger, PostHog::PrefixedLogger] The logger used by the SDK.
       def logger
-        return @logger if @logger
-
-        base_logger =
-          if defined?(::Rails)
-            ::Rails.logger
-          else
-            logger = Logger.new $stderr
-            logger.progname = 'PostHog'
-            logger.level = Logger::WARN
-            logger
-          end
-        @logger = PrefixedLogger.new(base_logger, '[posthog-ruby]')
+        @logger ||= begin
+          stderr_logger = Logger.new $stderr
+          stderr_logger.progname = 'PostHog'
+          stderr_logger.level = Logger::WARN
+          # Rails.logger is nil until the app boots, so look it up on every call.
+          PrefixedLogger.new('[posthog-ruby]') { (defined?(::Rails) && ::Rails.logger) || stderr_logger }
+        end
       end
 
       # @param logger [Logger, #debug, #info, #warn, #error] Custom logger used by the SDK.
