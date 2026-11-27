@@ -48,13 +48,20 @@ module PostHog
           stderr_logger = Logger.new $stderr
           stderr_logger.progname = 'PostHog'
           stderr_logger.level = Logger::WARN
-          # Rails.logger is nil until the app boots, so look it up on every call.
-          PrefixedLogger.new('[posthog-ruby]') { (defined?(::Rails) && ::Rails.logger) || stderr_logger }
+          PrefixedLogger.new('[posthog-ruby]') { rails_logger || stderr_logger }
         end
       end
 
       # @param logger [Logger, #debug, #info, #warn, #error] Custom logger used by the SDK.
       attr_writer :logger
+
+      private
+
+      # Rails.logger is nil until the app boots, and gems such as
+      # rails-html-sanitizer define ::Rails without it.
+      def rails_logger
+        ::Rails.logger if defined?(::Rails) && ::Rails.respond_to?(:logger)
+      end
     end
 
     def self.included(base)

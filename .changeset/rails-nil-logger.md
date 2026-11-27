@@ -2,4 +2,4 @@
 'posthog-ruby': patch
 ---
 
-Creating a `PostHog::Client` when Rails is loaded but the app hasn't booted yet (so `Rails.logger` is `nil`) no longer raises `NoMethodError`. The default logger now looks up `Rails.logger` on every log call: it writes to `$stderr` while `Rails.logger` is `nil` and switches to `Rails.logger` once the app sets it.
+`PostHog::Client.new` no longer raises `NoMethodError` when `Rails` is defined but has no usable logger: before the app boots (`Rails.logger` is `nil`), or when a gem such as `rails-html-sanitizer` defines `Rails` without railties. The default logger now looks up `Rails.logger` on every log call. It writes to `$stderr` until `Rails.logger` is set, then switches to it.
