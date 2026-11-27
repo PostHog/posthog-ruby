@@ -34,14 +34,29 @@ module PostHog
 
       # Capture a tool invocation. Emits `$mcp_tool_call` (+ `$exception` on error).
       #
+      # Every event of this client carries a `$session_id`: the `session_id` you
+      # pass, unchanged, or else a fresh one of its own. Pass your connection's id
+      # on a one-client connection (stdio) so its calls group. A tool call whose
+      # `request_meta` (the `tools/call` request's `_meta`) carries a conversation
+      # id from a client that `client_user_agent` or `client_name` recognizes, such
+      # as ChatGPT's `openai/session`, is grouped by that id instead.
+      #
+      # @param request_meta [Hash, nil] the `tools/call` request's `_meta`
+      # @param client_name [String, nil] the client's `initialize` `clientInfo` name
       # @return [void]
       def capture_tool_call(tool_name, intent: nil, intent_source: nil, parameters: nil, response: nil,
                             duration_ms: nil, is_error: false, error: nil, error_type: nil, category: nil,
                             tool_description: nil, protocol_version: nil, distinct_id: nil, session_id: nil,
                             client_user_agent: nil, vendor_client: nil, set_properties: nil, groups: nil,
-                            properties: nil, timestamp: nil, llm_model: nil, llm_model_source: nil)
+                            properties: nil, timestamp: nil, llm_model: nil, llm_model_source: nil,
+                            request_meta: nil, client_name: nil)
+        conversation = ClientConversation.read(ClientConversation.recognize(client_user_agent, client_name),
+                                               request_meta)
+        session_id = Session.derive_session_id_from_conversation(conversation) if conversation
         event = base_event(EventType::MCP_TOOLS_CALL, distinct_id, session_id, set_properties, groups, properties,
-                           timestamp, client_user_agent, vendor_client)
+                           timestamp, client_user_agent, vendor_client,
+                           session_source: conversation ? 'client_metadata' : nil)
+        event['client_name'] = client_name
         event['resource_name'] = tool_name
         event['tool_description'] = tool_description
         event['tool_category'] = category
@@ -101,8 +116,11 @@ module PostHog
       # Capture a `get_more_tools` call as a missing-capability report. Emits
       # `$mcp_missing_capability` with the agent's description as `$mcp_intent`.
       #
+      # `parameters` is accepted for compatibility and not sent: the report is
+      # already the event's `$mcp_intent`.
+      #
       # @return [void]
-      def capture_missing_capability(context: nil, parameters: nil, protocol_version: nil, distinct_id: nil,
+      def capture_missing_capability(context: nil, parameters: nil, protocol_version: nil, distinct_id: nil, # rubocop:disable Lint/UnusedMethodArgument
                                      session_id: nil, client_user_agent: nil, vendor_client: nil,
                                      set_properties: nil, groups: nil, properties: nil, timestamp: nil,
                                      llm_model: nil, llm_model_source: nil)
@@ -110,7 +128,6 @@ module PostHog
                            properties, timestamp, client_user_agent, vendor_client)
         event['resource_name'] = @missing_capability_tool_name
         event['protocol_version'] = protocol_version
-        event['parameters'] = parameters
         apply_intent(event, context, 'context_parameter')
         apply_model(event, llm_model, llm_model_source)
         emit(event)
@@ -190,10 +207,13 @@ module PostHog
       private
 
       def base_event(event_type, distinct_id, session_id, set_properties, groups, properties, timestamp,
-                     client_user_agent, vendor_client)
+                     client_user_agent, vendor_client, session_source: nil)
+        session_source ||= session_id.is_a?(String) && !session_id.empty? ? 'transport' : 'generated'
+        session_id = Session.new_session_id if session_source == 'generated'
         event = {
           'event_type' => event_type,
           'session_id' => session_id,
+          'session_source' => session_source,
           'timestamp' => timestamp || Time.now.utc,
           'properties' => properties,
           'groups' => groups,

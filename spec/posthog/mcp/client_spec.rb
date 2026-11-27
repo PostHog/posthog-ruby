@@ -44,14 +44,13 @@ RSpec.describe PostHog::MCP::Client do
 
   let(:client) { described_class.new(api_key: 'phc_test', test_mode: true) }
 
-  it 'captures tool calls with $lib override, anonymous distinct id and error scalars' do
+  it 'captures tool calls with $lib override, the session as anonymous distinct id, and error scalars' do
     client.capture_tool_call('execute-sql', is_error: false, response: { ok: true })
     event = client.dequeue_last_message
     expect(event[:event]).to eq('$mcp_tool_call')
-    expect(event[:distinct_id]).to eq('anonymous')
+    expect(event[:distinct_id]).to eq(event[:properties]['$session_id'])
     expect(event[:properties]).to include('$process_person_profile' => false, '$lib' => 'posthog-ruby-mcp',
                                           '$lib_version' => PostHog::VERSION, '$mcp_is_error' => false)
-    expect(event[:properties]).not_to have_key('$session_id')
 
     client.capture_tool_call('add', is_error: true, error: ArgumentError.new('bad input'), distinct_id: 'user-123',
                                     set_properties: { email: 'a@b.com' }, groups: { organization: 'org_1' })
@@ -110,8 +109,9 @@ RSpec.describe PostHog::MCP::Client do
     expect(props['$mcp_listed_tool_names']).to eq(%w[execute-sql query-logs get_more_tools])
 
     client.capture_missing_capability(context: '  wanted a tool to export to CSV ', distinct_id: 'u',
-                                      llm_model: ' claude-opus-4-8 ')
+                                      llm_model: ' claude-opus-4-8 ', parameters: { context: 'export' })
     event = client.dequeue_last_message
+    expect(event[:properties]).not_to have_key('$mcp_parameters')
     expect(event[:event]).to eq('$mcp_missing_capability')
     expect(event[:properties]).to include('$mcp_intent' => 'wanted a tool to export to CSV',
                                           '$mcp_intent_source' => 'context_parameter',
@@ -233,5 +233,93 @@ RSpec.describe PostHog::MCP::Client do
     expect(stripped.intent).to eq('agent intent')
 
     expect(client.prepare_tool_call('search', { context: 'application data' }).args).to eq({})
+  end
+end
+
+RSpec.describe PostHog::MCP::Client, 'sessions' do
+  let(:client) { described_class.new(api_key: 'phc_test', test_mode: true) }
+
+  def sent
+    drain_events(client).map do |event|
+      [event[:distinct_id], *event[:properties].values_at('$session_id', '$mcp_session_source')]
+    end
+  end
+
+  {
+    'capture_tool_call' => ->(c, **kw) { c.capture_tool_call('search_docs', **kw) },
+    'capture_initialize' => ->(c, **kw) { c.capture_initialize(**kw) },
+    'capture_tools_list' => ->(c, **kw) { c.capture_tools_list(**kw) },
+    'capture_missing_capability' => ->(c, **kw) { c.capture_missing_capability(**kw) }
+  }.each do |method, capture|
+    it "#{method} gives a call without a session a fresh one of its own" do
+      2.times { capture.call(client) }
+
+      events = sent
+      expect(events.map { |(_, session, source)| [session[/\Ases_\h{8}-\h{4}-7/].nil?, source] })
+        .to eq([[false, 'generated'], [false, 'generated']])
+      expect(events.map { |(_, session, _)| session }.uniq.size).to eq(2)
+      expect(events.map { |(distinct_id, session, _)| distinct_id == session }).to eq([true, true])
+    end
+
+    it "#{method} sends a session the caller passes unchanged" do
+      capture.call(client, session_id: 'ses_mine')
+
+      expect(sent).to eq([%w[ses_mine ses_mine transport]])
+    end
+  end
+
+  {
+    'empty' => '',
+    'not a String' => 42
+  }.each do |name, session_id|
+    it "treats a session id that is #{name} as none and generates one" do
+      client.capture_tool_call('search_docs', session_id: session_id)
+
+      source = sent.first.last
+      expect(source).to eq('generated')
+    end
+  end
+
+  it 'gives the $exception of an error call the same session and source as its $mcp_tool_call' do
+    client.capture_tool_call('search_docs', session_id: 'ses_mine', is_error: true)
+
+    events = drain_events(client)
+    expect(events.map { |event| event[:event] }).to eq(%w[$mcp_tool_call $exception])
+    expect(events.map { |event| event[:properties].values_at('$session_id', '$mcp_session_source') })
+      .to eq([%w[ses_mine transport]] * 2)
+  end
+
+  it 'sends the client name of a tool call as $mcp_client_name' do
+    client.capture_tool_call('search_docs', client_name: 'Visual Studio Code')
+
+    expect(drain_events(client).first[:properties]['$mcp_client_name']).to eq('Visual Studio Code')
+  end
+
+  vscode_meta = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
+  {
+    'ChatGPT recognized by its User-Agent' =>
+      [{ 'openai/session' => 'v1/conv-example-0001' }, { client_user_agent: 'openai-mcp/1.0.0 (ChatGPT)' },
+       %w[ses_2f5d35b7108d17c807766f2f769a1e8c client_metadata]],
+    'VS Code recognized by its client name' =>
+      [vscode_meta, { client_name: 'Visual Studio Code' }, %w[ses_0571acb894e6753d33e37e5c2b327c59 client_metadata]],
+    'a key its recognized client does not define' =>
+      [{ 'openai/session' => 'v1/conv-example-0001' }, { client_name: 'Visual Studio Code' }, %w[ses_mine transport]],
+    'a client nothing recognizes' =>
+      [{ 'openai/session' => 'v1/conv-example-0001' }, {}, %w[ses_mine transport]]
+  }.each do |case_name, (request_meta, keywords, session)|
+    it "groups a tool call by its _meta conversation id only for #{case_name}" do
+      client.capture_tool_call('search_docs', session_id: 'ses_mine', request_meta: request_meta, **keywords)
+
+      expect(sent.first[1..]).to eq(session)
+    end
+  end
+
+  it 'never raises into the dispatcher on a User-Agent that is not valid UTF-8' do
+    user_agent = (+"openai-mcp/1.0.0 (ChatGPT) \xFF").force_encoding('UTF-8')
+
+    expect do
+      client.capture_tool_call('search_docs', client_user_agent: user_agent,
+                                              request_meta: { 'openai/session' => 'v1/conv-example-0001' })
+    end.not_to raise_error
   end
 end

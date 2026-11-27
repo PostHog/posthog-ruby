@@ -10,9 +10,14 @@ module PostHog
     module ClientConversation
       Row = Struct.new(:key, :id, :user_agent, :client_names, :handle_free, keyword_init: true) do
         def recognizes?(user_agent, client_name)
-          return true if user_agent.is_a?(String) && self.user_agent.match?(user_agent)
+          return true if readable?(user_agent) && self.user_agent.match?(user_agent)
 
-          client_name.is_a?(String) && client_names.any? { |name| name.casecmp?(client_name) }
+          readable?(client_name) && client_names.any? { |name| name.casecmp?(client_name) }
+        end
+
+        # A header with bytes invalid in its encoding would raise in the match.
+        def readable?(value)
+          value.is_a?(String) && value.valid_encoding?
         end
       end
 
