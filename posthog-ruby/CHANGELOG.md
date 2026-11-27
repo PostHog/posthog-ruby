@@ -1,5 +1,12 @@
 # posthog-ruby
 
+## 3.35.4
+
+### Patch Changes
+
+- 7351215: The default logger (used outside Rails when `PostHog::Logging.logger` isn't set) now writes to `$stderr` instead of `$stdout`, so failed sends can't corrupt a program's stdout, such as a stdio MCP server's JSON-RPC stream. To keep logs on stdout, set `PostHog::Logging.logger = Logger.new($stdout)`.
+- 867628c: In `sync_mode`, `flush(timeout:)` and `shutdown(timeout:)` now honor the timeout. If a request is still in flight when it elapses, they return `false` instead of waiting for the request and its retries to finish. `shutdown` then closes the connection once that request completes. A timed call from an `on_error` callback returns `false` right away instead of raising `ThreadError`. Calls without a timeout behave as before.
+
 ## 3.35.3
 
 ### Patch Changes
