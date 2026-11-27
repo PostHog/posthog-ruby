@@ -43,7 +43,7 @@ module PostHog
 
       def read(row, meta)
         value = row && SchemaMutation.fetch(meta, row.key)
-        id = row.id.call(value) if value.is_a?(String)
+        id = row.id.call(value) if value.is_a?(String) && value.valid_encoding?
         id && "#{row.key}:#{id}"
       end
     end
