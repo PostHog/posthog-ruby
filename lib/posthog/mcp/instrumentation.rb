@@ -467,6 +467,7 @@ module PostHog
       def prime_session(request, conversation_id, hold_custom_events: false)
         session_id = prepare_request(request, conversation_id: conversation_id)
         @data.synchronize do
+          @scope[:owner] = @data
           @scope[:session_id] = session_id
           @scope[:session_source] = @session_sources[session_id]
           @scope[:held] = [] if hold_custom_events

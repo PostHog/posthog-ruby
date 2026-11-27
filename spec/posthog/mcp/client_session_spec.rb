@@ -297,6 +297,18 @@ module PostHogMcpClientSessionVectors
         other&.join(2)
       end
 
+      it 'sends an event captured through another server\'s handle to that server\'s client' do
+        instrument
+        other_client = new_test_client
+        other_server = MCP::Server.new(name: 'other-server', version: '1.0.0')
+        other_analytics = PostHog::MCP.instrument(other_server, other_client)
+        PostHogMcpSearchDocsTool.before_capture = -> { other_analytics.capture('other_event') }
+        call_search
+
+        expect(events_named(drain_events(client), 'other_event')).to be_empty
+        expect(events_named(drain_events(other_client), 'other_event').size).to eq(1)
+      end
+
       it 'carries the client conversation session' do
         instrument
         call_search(user_agent: CHATGPT, meta: { 'openai/session' => 'v1/conv-example-0001' })

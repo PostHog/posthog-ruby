@@ -42,7 +42,7 @@ module PostHog
         return if data.nil?
 
         scope = RequestScope.current
-        scope = nil unless scope.is_a?(Hash)
+        scope = nil unless scope.is_a?(Hash) && scope[:owner].equal?(data)
         input = { 'event_type' => EventType::CUSTOM, 'event_name' => event, 'timestamp' => Time.now.utc,
                   'properties' => properties }
         return if hold(data, scope, input)
