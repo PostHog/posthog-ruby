@@ -17,5 +17,25 @@ module PostHog
         end.not_to output.to_stdout
       end
     end
+
+    describe '.logger default under Rails' do
+      let(:rails) { Module.new { singleton_class.attr_accessor :logger } }
+
+      before do
+        stub_const('Rails', rails)
+        Logging.logger = nil
+      end
+
+      it 'writes to stderr until Rails.logger exists, then to Rails.logger' do
+        expect { Logging.logger.error('before boot') }
+          .to output(/ERROR -- PostHog: \[posthog-ruby\] before boot/).to_stderr
+
+        rails_log = StringIO.new
+        rails.logger = Logger.new(rails_log)
+
+        expect { Logging.logger.error('after boot') }.not_to output.to_stderr
+        expect(rails_log.string).to include('[posthog-ruby] after boot')
+      end
+    end
   end
 end
