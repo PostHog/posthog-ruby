@@ -125,7 +125,7 @@ RSpec.describe 'Feature flag evaluation inputs' do
     end
   end
 
-  it 'preserves the remote capture flag context without adding group enrichment' do
+  it 'sends the remote capture flag context with the same group enrichment as evaluate_flags' do
     properties = { 'company' => { 'unmatched' => false }.freeze }.freeze
     flags = { person_properties: { 'unmatched' => nil }.freeze, group_properties: properties }.freeze
     requests = []
@@ -139,7 +139,8 @@ RSpec.describe 'Feature flag evaluation inputs' do
     expect(requests.length).to eq(1)
     expect(requests[0]['groups']).to eq(groups)
     expect(requests[0]['person_properties']).to eq('unmatched' => nil)
-    expect(requests[0]['group_properties']).to eq(properties)
+    expect(requests[0]['group_properties']).to eq('company' => { '$group_key' => 'acme', 'unmatched' => false })
+    expect(properties).to eq('company' => { 'unmatched' => false })
   end
 
   it 'normalizes boolean capture flag inputs once without changing caller groups' do

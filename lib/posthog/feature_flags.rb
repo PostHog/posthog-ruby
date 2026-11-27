@@ -11,6 +11,7 @@ require 'posthog/feature_flag'
 require 'posthog/flag_definition_cache'
 require 'posthog/unresolved_flag_reason'
 require 'posthog/flag_evaluation_errors'
+require 'posthog/known_absent_property_keys'
 require 'digest'
 
 module PostHog
@@ -36,6 +37,10 @@ module PostHog
     NUMERIC_OPERATORS = %w[gt gte lt lte].freeze
     DATE_OPERATORS = %w[is_date_before is_date_after].freeze
     SEMVER_COMPARISON_OPERATORS = %w[semver_eq semver_neq semver_gt semver_gte semver_lt semver_lte].freeze
+    # Every property-filter operator this SDK evaluates locally.
+    LOCAL_OPERATORS = (%w[exact is_not is_set is_not_set icontains not_icontains starts_with not_starts_with
+                          ends_with not_ends_with semver_tilde semver_caret semver_wildcard] +
+                       REGEX_OPERATORS + NUMERIC_OPERATORS + DATE_OPERATORS + SEMVER_COMPARISON_OPERATORS).freeze
 
     # @param polling_interval [Integer, nil] Seconds between local feature flag definition polls.
     #   Defaults to {Defaults::FeatureFlags::POLLING_INTERVAL_SECONDS}.
@@ -147,7 +152,8 @@ module PostHog
       person_properties = {},
       group_properties = {},
       only_evaluate_locally = false,
-      raise_on_error = false
+      raise_on_error = false,
+      known_absent: nil
     )
       groups, person_properties, group_properties = normalize_flag_evaluation_inputs(
         groups, person_properties, group_properties
@@ -159,7 +165,8 @@ module PostHog
         person_properties,
         group_properties,
         only_evaluate_locally,
-        raise_on_error
+        raise_on_error,
+        known_absent: known_absent
       )
 
       if flags_data.key?(:featureFlags)
@@ -175,13 +182,15 @@ module PostHog
       groups = {},
       person_properties = {},
       group_properties = {},
-      _only_evaluate_locally = false
+      _only_evaluate_locally = false,
+      known_absent: nil
     )
       flags_data = get_all_flags_and_payloads(
         distinct_id,
         groups,
         person_properties,
-        group_properties
+        group_properties,
+        known_absent: known_absent
       )
 
       if flags_data.key?(:featureFlagPayloads)
@@ -193,7 +202,7 @@ module PostHog
     end
 
     def get_flags(distinct_id, groups = {}, person_properties = {}, group_properties = {}, flag_keys = nil,
-                  disable_geoip = nil)
+                  disable_geoip = nil, known_absent: nil)
       flag_keys = flag_keys.map(&:to_s) if flag_keys.is_a?(Array)
       request_data = {
         distinct_id: distinct_id,
@@ -201,6 +210,7 @@ module PostHog
         person_properties: person_properties,
         group_properties: group_properties
       }
+      request_data.merge!(known_absent.request_fields) if known_absent
       request_data[:flag_keys_to_evaluate] = flag_keys if flag_keys && !flag_keys.empty?
       # The flags endpoint treats an omitted/null value as false; serialize that same default explicitly.
       request_data[:geoip_disable] = disable_geoip.nil? ? false : disable_geoip
@@ -241,7 +251,8 @@ module PostHog
       person_properties = {},
       group_properties = {},
       only_evaluate_locally = false,
-      snapshot: nil
+      snapshot: nil,
+      known_absent: nil
     )
       key = key.to_s
 
@@ -256,7 +267,7 @@ module PostHog
       unless feature_flag.nil?
         begin
           response = _compute_flag_locally(feature_flag, distinct_id, groups, person_properties, group_properties,
-                                           snapshot: snapshot)
+                                           snapshot: snapshot, known_absent: known_absent)
           payload = _compute_flag_payload_locally(key, response, snapshot: snapshot) unless response.nil?
           logger.debug "Successfully computed flag locally: #{key} -> #{response}"
         rescue RequiresServerEvaluation, InconclusiveMatchError => e
@@ -286,7 +297,7 @@ module PostHog
         begin
           errors = []
           flags_data = get_all_flags_and_payloads(distinct_id, groups, person_properties, group_properties,
-                                                  only_evaluate_locally, true)
+                                                  only_evaluate_locally, true, known_absent: known_absent)
           if flags_data.key?(:featureFlags)
             flags = stringify_keys(flags_data[:featureFlags] || {})
             payloads = stringify_keys(flags_data[:featureFlagPayloads] || {})
@@ -340,7 +351,8 @@ module PostHog
       groups = {},
       person_properties = {},
       group_properties = {},
-      only_evaluate_locally = false
+      only_evaluate_locally = false,
+      known_absent: nil
     )
       if @quota_limited.true?
         logger.debug 'Not fetching flags from server - quota limited'
@@ -353,7 +365,8 @@ module PostHog
         groups,
         person_properties,
         group_properties,
-        only_evaluate_locally
+        only_evaluate_locally,
+        known_absent: known_absent
       )
 
       response[:featureFlags]
@@ -365,7 +378,8 @@ module PostHog
       person_properties = {},
       group_properties = {},
       only_evaluate_locally = false,
-      raise_on_error = false
+      raise_on_error = false,
+      known_absent: nil
     )
       load_feature_flags
       snapshot = _evaluation_snapshot
@@ -378,7 +392,7 @@ module PostHog
 
       snapshot[:flags].each do |flag|
         match_value = _compute_flag_locally(flag, distinct_id, groups, person_properties, group_properties,
-                                            snapshot: snapshot)
+                                            snapshot: snapshot, known_absent: known_absent)
         flags[flag[:key]] = match_value
         match_payload = _compute_flag_payload_locally(flag[:key], match_value, snapshot: snapshot)
         payloads[flag[:key]] = match_payload if match_payload
@@ -397,7 +411,8 @@ module PostHog
 
       if fallback_to_server && !only_evaluate_locally
         begin
-          flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties)
+          flags_and_payloads = get_flags(distinct_id, groups, person_properties, group_properties,
+                                         known_absent: known_absent)
           flag_details = flags_and_payloads[:flags]
           errors_while_computing = flags_and_payloads[:errorsWhileComputingFlags] || false
           quota_limited = flags_and_payloads[:quotaLimited]
@@ -460,7 +475,8 @@ module PostHog
       groups = {},
       person_properties = {},
       group_properties = {},
-      only_evaluate_locally = false
+      only_evaluate_locally = false,
+      known_absent: nil
     )
       key = key.to_s
       load_feature_flags
@@ -474,13 +490,15 @@ module PostHog
           person_properties,
           group_properties,
           true,
-          snapshot: snapshot
+          snapshot: snapshot,
+          known_absent: known_absent
         )[0]
       end
       response = nil
       response = _compute_flag_payload_locally(key, match_value, snapshot: snapshot) unless match_value.nil?
       if response.nil? && !only_evaluate_locally
-        flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
+        flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties,
+                                              known_absent: known_absent)
         response = flags_payloads[key.downcase] || nil
       end
       response
@@ -498,6 +516,12 @@ module PostHog
     end
 
     # Class methods
+
+    # A usable group key is a non-empty string or a number. Any other key counts as no key, matching
+    # the server: conditions aggregated on that group type are skipped.
+    def self.usable_group_key?(group_key)
+      (group_key.is_a?(String) && !group_key.empty?) || group_key.is_a?(Numeric)
+    end
 
     def self.pick_unresolved_reason(current, reason)
       return reason if current.nil?
@@ -758,16 +782,31 @@ module PostHog
 
     private_class_method :boolean_like?, :legacy_truthy?, :sorted_composite, :property_string, :exact_property_match?
 
-    def self.match_property(property, property_values, cohort_properties = {}, property_matching_version: 1)
+    # @param known_absent_scope [PostHog::KnownAbsentPropertyKeys::Scope, nil] Keys of property_values known
+    #   to be absent. A filter the scope covers resolves definitively by operator, even when property_values
+    #   has a value for it.
+    def self.match_property(property, property_values, cohort_properties = {}, property_matching_version: 1,
+                            known_absent_scope: nil)
       # only looks for matches where key exists in property_values
 
       # Handle cohort properties
       if extract_value(property, :type) == 'cohort'
         return match_cohort(property, property_values, cohort_properties,
-                            property_matching_version: property_matching_version)
+                            property_matching_version: property_matching_version,
+                            known_absent_scope: known_absent_scope)
       end
 
+      # An unsupported filter type stays inconclusive even when its key is listed known absent.
       assert_property_filter_type_supported(property)
+
+      if known_absent_scope&.covers?(property)
+        # Like the flags service, a listed key resolves without parsing the condition value. An operator
+        # this SDK does not implement stays inconclusive, so it still falls back to the server.
+        operator = property[:operator] || property['operator'] || 'exact'
+        assert_operator_supported(operator)
+        assert_condition_value_present(property, operator)
+        return KnownAbsentPropertyKeys::MATCHING_OPERATORS.include?(operator)
+      end
 
       begin
         match_property_value(property, property_values, property_matching_version)
@@ -777,6 +816,17 @@ module PostHog
         raise
       end
     end
+
+    # An omitted or JSON null condition value leaves a value-requiring operator inconclusive, even for a
+    # known-absent key, because is_not would otherwise match.
+    def self.assert_condition_value_present(property, operator)
+      return if %w[is_set is_not_set].include?(operator)
+      return unless (property.key?(:value) ? property[:value] : property['value']).nil?
+
+      raise InconclusiveMatchError.new("Missing condition value for operator #{operator}",
+                                       reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+    end
+    private_class_method :assert_condition_value_present
 
     def self.match_property_value(property, property_values, property_matching_version)
       key = (property[:key] || property['key']).to_sym
@@ -868,6 +918,13 @@ module PostHog
     end
     private_class_method :match_property_value
 
+    def self.assert_operator_supported(operator)
+      return if LOCAL_OPERATORS.include?(operator)
+
+      raise InconclusiveMatchError.new("Unknown operator: #{operator}",
+                                       reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
+    end
+
     # Filter types matched against the person or group properties the call passes. A missing, null, or empty
     # type is a person filter. Cohort and flag filters have their own matching. Any other type, such as
     # person_metadata (a value the flags service reads from the persons table, not from person properties),
@@ -892,10 +949,8 @@ module PostHog
     def self.assert_filter_supported(property)
       value = property.key?(:value) ? property[:value] : property['value']
       operator = property[:operator] || property['operator'] || 'exact'
+      assert_operator_supported(operator)
       case operator
-      when 'exact', 'is_not', 'is_set', 'is_not_set', 'icontains', 'not_icontains', 'starts_with',
-           'not_starts_with', 'ends_with', 'not_ends_with'
-        nil
       when *REGEX_OPERATORS
         # An empty input is the most portable one, so this raises only for a pattern that needs the
         # server whatever the value. Compile without matching, so a server-supplied pattern never runs
@@ -914,9 +969,6 @@ module PostHog
         semver_caret_bounds(value)
       when 'semver_wildcard'
         semver_wildcard_bounds(value)
-      else
-        raise InconclusiveMatchError.new("Unknown operator: #{operator}",
-                                         reason: UnresolvedFlagReason::UNSUPPORTED_DEFINITION)
       end
     end
 
@@ -1091,7 +1143,8 @@ module PostHog
     end
     private_class_method :regex_repetition_end
 
-    def self.match_cohort(property, property_values, cohort_properties, property_matching_version: 1)
+    def self.match_cohort(property, property_values, cohort_properties, property_matching_version: 1,
+                          known_absent_scope: nil)
       # Cohort properties are in the form of property groups like this:
       # {
       #   "cohort_id" => {
@@ -1112,10 +1165,12 @@ module PostHog
       end
 
       match_property_group(property_group, property_values, cohort_properties,
-                           property_matching_version: property_matching_version)
+                           property_matching_version: property_matching_version,
+                           known_absent_scope: known_absent_scope)
     end
 
-    def self.match_property_group(property_group, property_values, cohort_properties, property_matching_version: 1)
+    def self.match_property_group(property_group, property_values, cohort_properties, property_matching_version: 1,
+                                  known_absent_scope: nil)
       return true if property_group.nil? || property_group.empty?
 
       group_type = extract_value(property_group, :type)
@@ -1126,12 +1181,14 @@ module PostHog
       if nested_property_group?(properties)
         property_group_items_match?(properties, group_type) do |group|
           match_property_group(group, property_values, cohort_properties,
-                               property_matching_version: property_matching_version)
+                               property_matching_version: property_matching_version,
+                               known_absent_scope: known_absent_scope)
         end
       else
         property_group_items_match?(properties, group_type) do |prop|
           matches = match_property(prop, property_values, cohort_properties,
-                                   property_matching_version: property_matching_version)
+                                   property_matching_version: property_matching_version,
+                                   known_absent_scope: known_absent_scope)
           extract_value(prop, :negation) ? !matches : matches
         end
       end
@@ -1194,9 +1251,14 @@ module PostHog
     # @param distinct_id [String] The distinct ID being evaluated
     # @param properties [Hash] Person properties for evaluation
     # @param cohort_properties [Hash] Cohort properties for evaluation
+    # @param context [Hash, nil] The evaluation inputs of the top-level flag. Each dependency is evaluated from
+    #   them like a standalone flag, with its own aggregation, bucketing identifier and properties, as the flags
+    #   service does.
     # @return [Boolean] True if all dependencies in the chain evaluate to true, false otherwise
-    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, cohort_properties,
-                                 snapshot: _evaluation_snapshot)
+    def evaluate_flag_dependency(property, evaluation_cache, distinct_id, properties, _cohort_properties = {},
+                                 snapshot: _evaluation_snapshot, context: nil)
+      context ||= { distinct_id: distinct_id, groups: {}, person_properties: properties, group_properties: {},
+                    known_absent: nil }
       if snapshot[:flags_by_key].nil? || evaluation_cache.nil?
         # Cannot evaluate flag dependencies without required context
         raise InconclusiveMatchError.new(
@@ -1232,13 +1294,10 @@ module PostHog
           else
             # Recursively evaluate the dependency using existing instance method
             begin
-              dep_result = match_feature_flag_properties(
-                dep_flag,
-                distinct_id,
-                properties,
-                evaluation_cache,
-                cohort_properties,
-                snapshot: snapshot
+              dep_result = _compute_flag_locally(
+                dep_flag, context[:distinct_id], context[:groups], context[:person_properties],
+                context[:group_properties],
+                snapshot: snapshot, known_absent: context[:known_absent], evaluation_cache: evaluation_cache
               )
               evaluation_cache[dep_flag_key] = dep_result
             rescue RequiresServerEvaluation => e
@@ -1396,7 +1455,7 @@ module PostHog
 
     private_class_method :extract_value, :find_cohort_property, :nested_property_group?,
                          :property_group_items_match?, :assert_property_filter_type_supported,
-                         :assert_filter_supported,
+                         :assert_filter_supported, :assert_operator_supported,
                          :unsupported_property?, :unsupported_property_group?, :unsupported_filter?
 
     # Publish/capture all matching state together so a poll cannot switch semantics
@@ -1406,7 +1465,7 @@ module PostHog
     end
 
     def _compute_flag_locally(flag, distinct_id, groups = {}, person_properties = {}, group_properties = {},
-                              snapshot: _evaluation_snapshot)
+                              snapshot: _evaluation_snapshot, known_absent: nil, evaluation_cache: nil)
       # An inactive flag is false whatever its experience continuity setting.
       return false unless flag[:active]
 
@@ -1415,21 +1474,20 @@ module PostHog
                                            reason: UnresolvedFlagReason::EXPERIENCE_CONTINUITY)
       end
 
-      # Create evaluation cache for flag dependencies
-      evaluation_cache = {}
+      evaluation_cache ||= {}
+      context = { distinct_id: distinct_id, groups: groups, person_properties: person_properties,
+                  group_properties: group_properties, known_absent: known_absent }
 
       flag_filters = flag[:filters] || {}
 
       aggregation_group_type_index = flag_filters[:aggregation_group_type_index]
       if aggregation_group_type_index.nil?
-        local_person_properties = person_properties || {}
-        unless local_person_properties.key?(:distinct_id) || local_person_properties.key?('distinct_id')
-          local_person_properties = local_person_properties.merge(distinct_id: distinct_id)
-        end
-
-        return match_feature_flag_properties(flag, distinct_id, local_person_properties, evaluation_cache,
+        return match_feature_flag_properties(flag, distinct_id, person_properties_with_distinct_id(context),
+                                             evaluation_cache,
                                              snapshot[:cohorts], groups: groups, group_properties: group_properties,
-                                                                 snapshot: snapshot)
+                                                                 snapshot: snapshot, known_absent: known_absent,
+                                                                 known_absent_scope: known_absent&.person_scope,
+                                                                 context: context)
       end
 
       group_name = snapshot[:group_type_mapping][aggregation_group_type_index.to_s.to_sym]
@@ -1445,17 +1503,22 @@ module PostHog
 
       group_name_symbol = group_name.to_sym
 
-      unless groups.key?(group_name_symbol)
-        # Group flags are never enabled if appropriate `groups` aren't passed in
-        # don't failover to `/flags/`, since response will be the same
-        logger.warn "[FEATURE FLAGS] Can't compute group feature flag: #{flag[:key]} without group names passed in"
-        return false
+      # Without a usable group key, conditions aggregated on the group are skipped one by one below, so a
+      # person condition can still match. The holdout runs first and buckets on the group key, so a holdout
+      # that excludes anyone can't be resolved without one.
+      if holdout_excludes_anyone?(flag_filters[:holdout]) &&
+         !FeatureFlagsPoller.usable_group_key?(groups[group_name_symbol])
+        raise InconclusiveMatchError.new('Flag has a holdout bucketed on a group key that was not passed in',
+                                         reason: UnresolvedFlagReason::MISSING_CONTEXT)
       end
 
       focused_group_properties = group_properties[group_name_symbol]
       match_feature_flag_properties(flag, groups[group_name_symbol], focused_group_properties, evaluation_cache,
                                     snapshot[:cohorts], groups: groups, group_properties: group_properties,
-                                                        snapshot: snapshot)
+                                                        snapshot: snapshot, known_absent: known_absent,
+                                                        known_absent_scope: known_absent&.group_scope(
+                                                          group_name, aggregation_group_type_index
+                                                        ), context: context)
     end
 
     def _compute_flag_payload_locally(key, match_value, snapshot: _evaluation_snapshot)
@@ -1471,8 +1534,11 @@ module PostHog
       response
     end
 
+    # known_absent_scope holds the listed keys for `properties`; known_absent holds every listing, so a
+    # condition aggregated by another group type can use that group type's keys.
     def match_feature_flag_properties(flag, distinct_id, properties, evaluation_cache, cohort_properties = {},
-                                      groups: {}, group_properties: {}, snapshot: _evaluation_snapshot)
+                                      groups: {}, group_properties: {}, snapshot: _evaluation_snapshot,
+                                      known_absent: nil, known_absent_scope: nil, context: nil)
       flag_filters = flag[:filters] || {}
 
       # Holdouts precede release conditions: a held-out identifier is excluded from
@@ -1497,21 +1563,26 @@ module PostHog
 
         effective_properties = properties
         effective_bucketing = distinct_id
+        effective_known_absent_scope = known_absent_scope
 
-        # Mixed-override path: condition-level aggregation differs from flag-level.
-        # This assumes flag-level aggregation is nil for mixed flags.
-        if condition_aggregation != flag_aggregation
-          if condition_aggregation.nil?
-            # Person condition under a mixed flag — caller already passed person props/bucketing.
-          else
-            group_name = snapshot[:group_type_mapping][condition_aggregation.to_s.to_sym]
-            if group_name.nil? || !groups.key?(group_name.to_sym)
-              logger.debug do
-                "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
-                  "group type index #{condition_aggregation} not available"
-              end
-              next
+        if condition_aggregation.nil?
+          # A person condition under a group flag uses the person, not the group the caller resolved.
+          unless flag_aggregation.nil? || context.nil?
+            effective_properties = person_properties_with_distinct_id(context)
+            effective_bucketing = context[:distinct_id]
+            effective_known_absent_scope = known_absent&.person_scope
+          end
+        else
+          # A condition aggregated on a group without a usable key is skipped, and later conditions still run.
+          group_name = snapshot[:group_type_mapping][condition_aggregation.to_s.to_sym]
+          if group_name.nil? || !FeatureFlagsPoller.usable_group_key?(groups[group_name.to_sym])
+            logger.debug do
+              "[FEATURE FLAGS] Skipping group condition for flag '#{flag[:key]}': " \
+                "group type index #{condition_aggregation} not available"
             end
+            next
+          end
+          if condition_aggregation != flag_aggregation
             unless group_properties.key?(group_name.to_sym)
               inconclusive_reason = FeatureFlagsPoller.pick_unresolved_reason(
                 inconclusive_reason, UnresolvedFlagReason::MISSING_CONTEXT
@@ -1520,11 +1591,13 @@ module PostHog
             end
             effective_properties = group_properties[group_name.to_sym]
             effective_bucketing = groups[group_name.to_sym]
+            effective_known_absent_scope = known_absent&.group_scope(group_name, condition_aggregation)
           end
         end
 
         case condition_match_outcome(flag, effective_bucketing, condition, effective_properties, evaluation_cache,
-                                     cohort_properties, snapshot: snapshot)
+                                     cohort_properties, snapshot: snapshot, context: context,
+                                                        known_absent_scope: effective_known_absent_scope)
         when :match
           variant_override = condition[:variant]
           flag_multivariate = flag_filters[:multivariate] || {}
@@ -1563,6 +1636,13 @@ module PostHog
       false
     end
 
+    def person_properties_with_distinct_id(context)
+      person_properties = context[:person_properties] || {}
+      return person_properties if person_properties.key?(:distinct_id) || person_properties.key?('distinct_id')
+
+      person_properties.merge(distinct_id: context[:distinct_id])
+    end
+
     def _definition_unresolved_reason(flag, snapshot)
       self.class.definition_unresolved_reason(flag, snapshot[:flags_by_key] || {}, snapshot[:cohorts],
                                               snapshot[:group_type_mapping])
@@ -1585,7 +1665,7 @@ module PostHog
     # Distinguishing :no_match from :out_of_rollout_bound lets the caller implement the
     # early_exit behavior (mirrors the server-side Rust evaluation engine).
     def condition_match_outcome(flag, distinct_id, condition, properties, evaluation_cache, cohort_properties = {},
-                                snapshot: _evaluation_snapshot)
+                                snapshot: _evaluation_snapshot, known_absent_scope: nil, context: nil)
       rollout_percentage = condition[:rollout_percentage]
 
       unless (condition[:properties] || []).empty?
@@ -1597,10 +1677,11 @@ module PostHog
           matches =
             if prop[:type] == 'flag'
               evaluate_flag_dependency(prop, evaluation_cache, distinct_id, properties, cohort_properties,
-                                       snapshot: snapshot)
+                                       snapshot: snapshot, context: context)
             else
               FeatureFlagsPoller.match_property(prop, properties, cohort_properties,
-                                                property_matching_version: snapshot[:property_matching_version])
+                                                property_matching_version: snapshot[:property_matching_version],
+                                                known_absent_scope: known_absent_scope)
             end
           return :no_match unless matches
         rescue RequiresServerEvaluation => e
@@ -1654,19 +1735,28 @@ module PostHog
     # no usable holdout or the identifier falls outside it, leaving ordinary evaluation
     # unchanged.
     def holdout_variant_for(holdout, bucketing_value)
-      return nil unless holdout.is_a?(Hash)
-
-      id = holdout[:id]
-      exclusion_percentage = holdout[:exclusion_percentage]
-      return nil if id.nil? || !exclusion_percentage.is_a?(Numeric)
-
-      # The server clamps an out-of-range percentage rather than rejecting it, and treats
-      # 100 as everyone without hashing, so a full holdout can't miss on a hash boundary.
-      # Fractional percentages are kept as-is.
-      percentage = exclusion_percentage.to_f.clamp(0, 100)
+      percentage = holdout_exclusion_percentage(holdout)
+      return nil if percentage.nil?
+      # The server treats 100 as everyone without hashing, so a full holdout can't miss on a hash boundary.
       return nil if percentage < 100 && _holdout_hash(bucketing_value) > (percentage / 100)
 
-      "holdout-#{id}"
+      "holdout-#{holdout[:id]}"
+    end
+
+    def holdout_excludes_anyone?(holdout)
+      percentage = holdout_exclusion_percentage(holdout)
+      !percentage.nil? && percentage.positive?
+    end
+
+    # The exclusion percentage of a usable holdout, or nil. The server clamps an out-of-range percentage
+    # rather than rejecting it. Fractional percentages are kept as-is.
+    def holdout_exclusion_percentage(holdout)
+      return nil unless holdout.is_a?(Hash)
+
+      exclusion_percentage = holdout[:exclusion_percentage]
+      return nil if holdout[:id].nil? || !exclusion_percentage.is_a?(Numeric)
+
+      exclusion_percentage.to_f.clamp(0, 100)
     end
 
     # Holdout membership hashes `holdout-<bucketing value>` with no separator, salt, flag
