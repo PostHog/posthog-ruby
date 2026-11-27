@@ -73,11 +73,12 @@ module PostHog
       # connection, so the connection's own session does not roll over under it.
       def touch_connection(data)
         data.synchronize do
-          next unless data.session_source == 'generated'
-
           now = Time.now
-          data.session_id = new_session_id if stale?(data, now)
-          data.last_activity = now
+          if data.session_id.nil? || (data.session_source == 'generated' && stale?(data, now))
+            data.session_id = new_session_id
+            data.session_source = 'generated'
+          end
+          data.last_activity = now if data.session_source == 'generated'
         end
       end
 

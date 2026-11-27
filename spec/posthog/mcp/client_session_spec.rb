@@ -249,6 +249,18 @@ module PostHogMcpClientSessionVectors
       expect(identify[:properties]['$mcp_session_source']).to eq('client_metadata')
     end
 
+    it 'gives a capture outside any call a session after a first stdio call carrying a client conversation id' do
+      analytics = PostHog::MCP.instrument(server, client, enable_conversation_id: false)
+      meta = { 'io.modelcontextprotocol/protocolVersion' => '2026-07-28', 'io.modelcontextprotocol/clientCapabilities' => {},
+               'io.modelcontextprotocol/clientInfo' => { 'name' => 'Visual Studio Code', 'version' => '1.100.0' },
+               'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
+      server.handle(rpc(1, 'tools/call', { name: 'search_docs', arguments: { query: 'flags' }, _meta: meta }))
+      analytics.capture('outside_call')
+
+      outside = events_named(drain_events(client), 'outside_call').first
+      expect(outside[:properties]['$session_id']).to match(/\Ases_/)
+    end
+
     {
       'keeps a connection session a client-id call kept active' => [[0, 20, 40, 45], true],
       'rolls a connection session over after 30 idle minutes, even under a client-id call' => [[0, 40, 41], false]
