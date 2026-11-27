@@ -8,6 +8,7 @@ require 'posthog/logging'
 require 'posthog/defaults'
 require 'posthog/backoff_policy'
 require 'posthog/feature_flag'
+require 'posthog/feature_flag_result'
 require 'posthog/flag_definition_cache'
 require 'posthog/unresolved_flag_reason'
 require 'posthog/flag_evaluation_errors'
@@ -483,7 +484,10 @@ module PostHog
         flags_payloads = get_feature_payloads(distinct_id, groups, person_properties, group_properties)
         response = flags_payloads[key.downcase] || nil
       end
-      response
+      # This getter hands back the payload in its stored, serialized form, so
+      # validate it rather than decoding it: a payload that isn't valid JSON
+      # reads as no payload here too.
+      FeatureFlagResult.validate_serialized_payload(response)
     end
 
     def shutdown_poller

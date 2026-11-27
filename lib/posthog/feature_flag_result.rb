@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'posthog/logging'
 
 module PostHog
   # Represents the result of a feature flag evaluation
@@ -59,23 +60,39 @@ module PostHog
       end
     end
 
-    # Deserialize a flag payload. Strings are JSON-parsed (with the raw string
-    # returned when the body is not valid JSON); already-deserialized values
-    # pass through. Public so {FeatureFlagEvaluations} can normalize payloads
-    # the same way {FeatureFlagResult} does.
+    # Deserialize a flag payload. Strings are JSON-parsed; a string that is not
+    # valid JSON (including an empty or whitespace-only one) reads as no payload
+    # and is logged, rather than being handed back raw. Already-deserialized
+    # values pass through. Public so {FeatureFlagEvaluations} can normalize
+    # payloads the same way {FeatureFlagResult} does.
     #
     # @param payload [Object, String, nil] The raw payload value.
-    # @return [Object, nil] The parsed payload.
+    # @return [Object, nil] The parsed payload, or nil when it cannot be decoded.
     def self.parse_payload(payload)
       return nil if payload.nil?
       return payload unless payload.is_a?(String)
-      return nil if payload.empty?
 
       begin
         JSON.parse(payload)
-      rescue JSON::ParserError
-        payload
+      rescue JSON::ParserError => e
+        Logging.logger.warn("[FEATURE FLAGS] Discarding a payload that is not valid JSON: #{e.message}")
+        nil
       end
+    end
+
+    # Validate a payload that stays in its serialized form. Returns the string
+    # unchanged when it decodes, and nil when it does not, so accessors that
+    # hand back serialized JSON agree with the decoded accessors about which
+    # payloads exist.
+    #
+    # @param payload [Object, String, nil] The raw payload value.
+    # @return [Object, nil] The payload as given, or nil when it cannot be decoded.
+    # @api private
+    def self.validate_serialized_payload(payload)
+      return nil if payload.nil?
+      return payload unless payload.is_a?(String)
+
+      parse_payload(payload).nil? ? nil : payload
     end
   end
 end
