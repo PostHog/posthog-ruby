@@ -112,22 +112,29 @@ module PostHog
       # Runs the wrapped handler and records the request.
       def dispatch(&handler)
         @start = self.class.monotonic_now
-        return dispatch_kind(&handler) if @scope
+        return dispatch_kind(&handler) if @scope && !enclosing_invocation?
 
         # Only the Streamable HTTP transport publishes a scope. Opening one for
         # every other transport too (stdio, a custom dispatcher) means the session
         # settled before the tool body runs is the one {Analytics#capture} reads
         # inside it, whatever the request is anchored on.
-        RequestScope.with(headers: {}, transport: :other) do |scope|
+        #
+        # A dispatch a tool body makes synchronously gets its own scope too. The
+        # enclosing invocation's session, identity and held events belong to it
+        # alone, and a thread it spawned still holds that scope, so the nested
+        # call must never write to it.
+        enclosing = @scope
+        RequestScope.with(headers: @headers, transport: enclosing ? enclosing[:transport] : :other) do |scope|
           @scope = scope
           dispatch_kind(&handler)
+        ensure
+          enclosing[:mint] = scope[:mint] if enclosing && scope[:mint]
         end
       end
 
       private
 
       def dispatch_kind(&)
-        enclosing = suspend_enclosing_invocation
         @client_conversation = safely { ClientConversation.read(client_row, envelope_meta) } if @kind == :tools_call
         safely { drop_client_conversation_key }
         case @kind
@@ -138,23 +145,10 @@ module PostHog
         end
       ensure
         safely { release_custom_events(@scope[:session_id]) }
-        resume_enclosing_invocation(enclosing)
       end
 
-      # A tool body can dispatch another request synchronously, which reuses this
-      # scope. The enclosing invocation's session, identity and held events belong
-      # to it alone: the nested one starts from none and hands them back on return,
-      # so it neither drops nor releases (through its own sink) what the outer
-      # tool captured.
-      def suspend_enclosing_invocation
-        @data.synchronize { INVOCATION_KEYS.to_h { |key| [key, @scope.delete(key)] }.compact }
-      end
-
-      def resume_enclosing_invocation(enclosing)
-        @data.synchronize do
-          INVOCATION_KEYS.each { |key| @scope.delete(key) }
-          @scope.merge!(enclosing)
-        end
+      def enclosing_invocation?
+        INVOCATION_KEYS.any? { |key| @scope.key?(key) }
       end
 
       # --- dispatchers -------------------------------------------------------

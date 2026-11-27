@@ -326,6 +326,57 @@ module PostHogMcpClientSessionVectors
         expect(events_named(events, 'outer_event').size).to eq(1)
       end
 
+      {
+        'an anonymous outer call' => ->(_request, _extra) {},
+        'an identified outer call' => ->(_request, _extra) { { distinct_id: 'user-1' } }
+      }.each do |outer, identify|
+        it "leaves #{outer}'s scope untouched while a nested dispatch runs" do
+          instrument(identify: identify)
+          other_server = MCP::Server.new(name: 'other-server', version: '1.0.0')
+          PostHog::MCP.instrument(other_server, new_test_client)
+          outer_scope = nil
+          snapshot = nil
+          during = nil
+          other_server.resources_list_handler { |_params| (during = outer_scope.dup) && [] }
+          PostHogMcpSearchDocsTool.before_capture = lambda do
+            outer_scope = PostHog::MCP::RequestScope.current
+            snapshot = outer_scope.dup
+            other_server.handle({ jsonrpc: '2.0', id: 9, method: 'resources/list' })
+          end
+          call_search
+
+          expect(snapshot).to include(:owner, :session_id, :actor, :held)
+          expect(during).to eq(snapshot)
+          expect(outer_scope).to include(actor: snapshot[:actor])
+        end
+      end
+
+      it 'keeps a spawned thread\'s custom event with the outer call while a nested dispatch runs' do
+        instrument
+        other_server = MCP::Server.new(name: 'other-server', version: '1.0.0')
+        PostHog::MCP.instrument(other_server, new_test_client)
+        go = Queue.new
+        thread = nil
+        other_server.resources_list_handler do |_params|
+          go << true
+          thread.join(5)
+          []
+        end
+        PostHogMcpSearchDocsTool.before_capture = lambda do
+          thread = Thread.new do
+            go.pop
+            PostHogMcpSearchDocsTool.analytics.capture('thread_event')
+          end
+          other_server.handle({ jsonrpc: '2.0', id: 9, method: 'resources/list' })
+        end
+        call_search
+
+        events = drain_events(client)
+        expect(events_named(events, 'thread_event').map { |e| e[:properties]['$session_id'] }).to eq(call_sessions(events).map(&:first))
+      ensure
+        thread&.join(2)
+      end
+
       it 'carries the client conversation session' do
         instrument
         call_search(user_agent: CHATGPT, meta: { 'openai/session' => 'v1/conv-example-0001' })
