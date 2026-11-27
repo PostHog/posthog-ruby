@@ -111,9 +111,12 @@ RSpec.describe PostHog::MCP::Session do
   let(:data) { PostHog::MCP::TrackingData.new(options: PostHog::MCP::Options.new, sink: nil) }
 
   it 'anchors on an echoed conversation id without touching shared state' do
+    expect do
+      described_class.resolve(data, 'transport-session', conversation_id: '0198d3a7-1111-7222-8333-444455556666')
+    end
+      .not_to(change { data.session_id })
     expect(described_class.resolve(data, 'transport-session', conversation_id: '0198d3a7-1111-7222-8333-444455556666'))
       .to eq(%w[ses_57a5f3768678e803a4af9566ca8a661b conversation])
-    expect(data.session_id).to be_nil
   end
 
   it 'uses a token session verbatim, hashes transport sessions stickily, and generates otherwise' do
@@ -130,14 +133,16 @@ RSpec.describe PostHog::MCP::Session do
                                    nil)).to eq([PostHog::MCP.derive_session_id_from_mcp_session('mcp-123'), 'mcp'])
   end
 
-  it 'rolls generated sessions over after 30 minutes of inactivity' do
+  it 'rolls only a generated session over, and only when asked after 30 idle minutes' do
     first, = described_class.resolve(data, nil)
+    data.last_tool_call_end = Time.now - (31 * 60)
     expect(described_class.resolve(data, nil)[0]).to eq(first)
-    data.last_activity = Time.now - (31 * 60)
+    described_class.start_tool_call(data)
     expect(described_class.resolve(data, nil)[0]).not_to eq(first)
+
     token = PostHog::MCP::SessionTokenPayload.new(session_id: 'ses_tok')
     described_class.resolve(data, nil, token: token)
-    data.last_activity = Time.now - (31 * 60)
+    described_class.start_tool_call(data)
     expect(described_class.resolve(data, nil, token: token)[0]).to eq('ses_tok')
   end
 end

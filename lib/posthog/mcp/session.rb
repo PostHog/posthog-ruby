@@ -36,12 +36,9 @@ module PostHog
         return [derive_session_id_from_conversation(conversation_id), 'conversation'] if present?(conversation_id)
 
         data.synchronize do
-          now = Time.now
-
           if token
             data.session_id = token.session_id
             data.session_source = 'token'
-            data.last_activity = now
             return [data.session_id, 'token']
           end
 
@@ -49,41 +46,39 @@ module PostHog
             data.session_id = derive_session_id_from_mcp_session(mcp_session_id)
             data.last_mcp_session_id = mcp_session_id
             data.session_source = 'mcp'
-            data.last_activity = now
             return [data.session_id, 'mcp']
           end
 
           return [request_session_id, 'generated'] if present?(request_session_id)
 
-          if data.session_source == 'mcp' && data.last_mcp_session_id
-            data.last_activity = now
-            return [data.session_id, 'mcp']
-          end
+          return [data.session_id, 'mcp'] if data.session_source == 'mcp' && data.last_mcp_session_id
 
-          if data.session_source != 'generated' || stale?(data, now) || data.session_id.nil?
+          if data.session_source != 'generated'
             data.session_id = new_session_id
             data.session_source = 'generated'
           end
-          data.last_activity = now
           [data.session_id, 'generated']
         end
       end
 
-      # A call grouped by its client or agent is still activity on a one-client
-      # connection, so the connection's own session does not roll over under it.
-      def touch_connection(data)
+      # A desktop app can keep one stdio process alive across many chats.
+      def start_tool_call(data)
         data.synchronize do
-          now = Time.now
-          if data.session_id.nil? || (data.session_source == 'generated' && stale?(data, now))
-            data.session_id = new_session_id
-            data.session_source = 'generated'
-          end
-          data.last_activity = now if data.session_source == 'generated'
+          data.session_id = new_session_id if data.session_source == 'generated' && idle?(data)
+          data.tool_calls_in_flight += 1
         end
       end
 
-      def stale?(data, now)
-        (now - data.last_activity) > (INACTIVITY_TIMEOUT_MINUTES * 60)
+      def end_tool_call(data)
+        data.synchronize do
+          data.tool_calls_in_flight -= 1
+          data.last_tool_call_end = Time.now
+        end
+      end
+
+      def idle?(data)
+        data.tool_calls_in_flight.zero? && !data.last_tool_call_end.nil? &&
+          Time.now - data.last_tool_call_end >= INACTIVITY_TIMEOUT_MINUTES * 60
       end
 
       def present?(value)
