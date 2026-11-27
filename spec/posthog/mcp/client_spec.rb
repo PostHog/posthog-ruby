@@ -268,6 +268,33 @@ RSpec.describe PostHog::MCP::Client, 'sessions' do
     end
   end
 
+  {
+    'empty' => '',
+    'not a String' => 42
+  }.each do |name, session_id|
+    it "treats a session id that is #{name} as none and generates one" do
+      client.capture_tool_call('search_docs', session_id: session_id)
+
+      source = sent.first.last
+      expect(source).to eq('generated')
+    end
+  end
+
+  it 'gives the $exception of an error call the same session and source as its $mcp_tool_call' do
+    client.capture_tool_call('search_docs', session_id: 'ses_mine', is_error: true)
+
+    events = drain_events(client)
+    expect(events.map { |event| event[:event] }).to eq(%w[$mcp_tool_call $exception])
+    expect(events.map { |event| event[:properties].values_at('$session_id', '$mcp_session_source') })
+      .to eq([%w[ses_mine transport]] * 2)
+  end
+
+  it 'sends the client name of a tool call as $mcp_client_name' do
+    client.capture_tool_call('search_docs', client_name: 'Visual Studio Code')
+
+    expect(drain_events(client).first[:properties]['$mcp_client_name']).to eq('Visual Studio Code')
+  end
+
   vscode_meta = { 'vscode.conversationId' => '3f1c2b7e-8d4a-4c6b-9a1e-5f2d7c8b9a0e' }
   {
     'ChatGPT recognized by its User-Agent' =>
