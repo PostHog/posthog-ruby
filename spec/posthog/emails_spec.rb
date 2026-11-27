@@ -30,13 +30,9 @@ module PostHog
     end
 
     def sent_bodies
-      sent_raw_bodies.map { |raw| JSON.parse(raw) }
-    end
-
-    def sent_raw_bodies
       bodies = []
       expect(a_request(:post, send_url).with do |request|
-        bodies << request.body
+        bodies << JSON.parse(request.body)
       end).to have_been_made.at_least_once
       bodies
     end
@@ -147,7 +143,7 @@ module PostHog
       it 'refuses code content, because the template sets its own' do
         expect { send_template(subject: 'Hi') }
           .to raise_error(ArgumentError, /template_id doesn't take subject.*send with template_key/)
-        expect { send_template(category: Emails::TRANSACTIONAL) }
+        expect { send_template(category: 'newsletter') }
           .to raise_error(ArgumentError,
                           /template_id doesn't take category.*its own sender, subject, content and category/)
         expect { send_template(tracking: false) }
@@ -229,210 +225,13 @@ module PostHog
         expect(sent_bodies.first.keys).to contain_exactly('template_key', 'subject', 'text', 'to')
       end
 
-      it 'sends a marketing MessageCategory with its description, omitting nil and keeping empty strings' do
-        stub_request(:post, send_url).to_return(accept)
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-
-        with_desc = send_code(
-          category: Emails::MessageCategory.new(
-            key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly product news'
-          ),
-          html: html
-        )
-        without_desc = send_code(
-          category: Emails::MessageCategory.new(key: 'announcements', type: 'marketing', name: 'Announcements'),
-          html: html
-        )
-        empty_desc = send_code(
-          category: Emails::MessageCategory.new(
-            key: 'updates', type: 'marketing', name: 'Updates', description: ''
-          ),
-          html: html
-        )
-
-        expect([with_desc.id, without_desc.id, empty_desc.id]).to eq(%w[msg_1 msg_1 msg_1])
-        expect(sent_bodies.map { |body| body.slice('html', 'category') }).to eq([
-                                                                                  {
-                                                                                    'html' => html,
-                                                                                    'category' => {
-                                                                                      'key' => 'newsletter',
-                                                                                      'type' => 'marketing',
-                                                                                      'name' => 'Newsletter',
-                                                                                      'description' =>
-                                                                                        'Monthly product news'
-                                                                                    }
-                                                                                  },
-                                                                                  {
-                                                                                    'html' => html,
-                                                                                    'category' => {
-                                                                                      'key' => 'announcements',
-                                                                                      'type' => 'marketing',
-                                                                                      'name' => 'Announcements'
-                                                                                    }
-                                                                                  },
-                                                                                  {
-                                                                                    'html' => html,
-                                                                                    'category' => {
-                                                                                      'key' => 'updates',
-                                                                                      'type' => 'marketing',
-                                                                                      'name' => 'Updates',
-                                                                                      'description' => ''
-                                                                                    }
-                                                                                  }
-                                                                                ])
-      end
-
-      it 'normalizes valid UTF-16LE category strings to UTF-8 on the wire' do
-        stub_request(:post, send_url).to_return(accept)
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        utf16_category = Emails::MessageCategory.new(
-          key: 'newsletter'.encode(Encoding::UTF_16LE),
-          type: 'marketing'.encode(Encoding::UTF_16LE),
-          name: 'Café 🍵'.encode(Encoding::UTF_16LE),
-          description: 'Überblick 📰'.encode(Encoding::UTF_16LE)
-        )
-
-        transactional = send_code(category: 'transactional'.encode(Encoding::UTF_16LE))
-        marketing = send_code(category: utf16_category, html: html)
-
-        expect([transactional.id, marketing.id]).to eq(%w[msg_1 msg_1])
-        expect(sent_bodies.map { |body| body.slice('html', 'category') }).to eq([
-                                                                                  {
-                                                                                    'html' => '<p>Reset</p>',
-                                                                                    'category' => 'transactional'
-                                                                                  },
-                                                                                  {
-                                                                                    'html' => html,
-                                                                                    'category' => {
-                                                                                      'key' => 'newsletter',
-                                                                                      'type' => 'marketing',
-                                                                                      'name' => 'Café 🍵',
-                                                                                      'description' => 'Überblick 📰'
-                                                                                    }
-                                                                                  }
-                                                                                ])
-      end
-
-      it 'accepts valid UTF-8 bytes tagged as ASCII-8BIT on category fields' do
-        stub_request(:post, send_url).to_return(accept)
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        binary_category = Emails::MessageCategory.new(
-          key: 'cafe-news'.b,
-          type: 'marketing'.b,
-          name: 'Café'.b,
-          description: 'Café updates'.b
-        )
-
-        result = send_code(category: binary_category, html: html)
-
-        expect(result.id).to eq('msg_1')
-        expect(sent_bodies.first.slice('html', 'category')).to eq(
-          'html' => html,
-          'category' => { 'key' => 'cafe-news', 'type' => 'marketing',
-                          'name' => 'Café', 'description' => 'Café updates' }
-        )
-      end
-
-      it 'serializes String subclasses on category fields as plain JSON strings' do
-        stub_request(:post, send_url).to_return(accept)
-        spoofed_string = Class.new(String) do
-          def initialize(value, serialized)
-            super(value)
-            @serialized = serialized
-          end
-
-          def to_json(*)
-            @serialized
-          end
-        end
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        category = Emails::MessageCategory.new(
-          key: spoofed_string.new('newsletter', '"spoofed-key"'),
-          type: spoofed_string.new('marketing', '"transactional"'),
-          name: spoofed_string.new('Newsletter', '"Spoofed"'),
-          description: spoofed_string.new('Monthly news', '"Spoofed desc"')
-        )
-
-        result = send_code(category: category, html: html)
-
-        expect(result.id).to eq('msg_1')
-        expect(sent_bodies.first.slice('html', 'category')).to eq(
-          'html' => html,
-          'category' => {
-            'key' => 'newsletter',
-            'type' => 'marketing',
-            'name' => 'Newsletter',
-            'description' => 'Monthly news'
-          }
-        )
-      end
-
-      it 'reads a single MessageCategory snapshot instead of field-by-field getters' do
-        stub_request(:post, send_url).to_return(accept)
-        mutating_category = Class.new(Emails::MessageCategory) do
-          def name
-            self.key = 'receipts'
-            self.type = 'transactional'
-            super
-          end
-        end
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-        category = mutating_category.new(
-          key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly news'
-        )
-
-        result = send_code(category: category, html: html)
-
-        expect(result.id).to eq('msg_1')
-        expect(sent_bodies.first.slice('html', 'category')).to eq(
-          'html' => html,
-          'category' => {
-            'key' => 'newsletter',
-            'type' => 'marketing',
-            'name' => 'Newsletter',
-            'description' => 'Monthly news'
-          }
-        )
-      end
-
-      it 'sends a transactional MessageCategory and the TRANSACTIONAL sentinel on the wire' do
+      it 'sends category as the key string only when the caller sets it' do
         stub_request(:post, send_url).to_return(accept)
 
-        categorized = send_code(
-          category: Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts')
-        )
-        uncategorized = send_code(category: Emails::TRANSACTIONAL)
+        send_code(category: 'newsletter')
+        send_code(category: nil)
 
-        expect([categorized.id, uncategorized.id]).to eq(%w[msg_1 msg_1])
-        expect(sent_bodies.map { |body| body['category'] }).to eq([
-                                                                    { 'key' => 'receipts', 'type' => 'transactional',
-                                                                      'name' => 'Receipts' },
-                                                                    'transactional'
-                                                                  ])
-      end
-
-      it 'omits category on the wire when category is omitted or nil' do
-        stub_request(:post, send_url).to_return(accept)
-
-        omitted = send_code(template_key: 'order-receipt')
-        explicit_nil = send_code(template_key: 'order-receipt', category: nil)
-
-        expect([omitted.id, explicit_nil.id]).to eq(%w[msg_1 msg_1])
-        raw_bodies = sent_raw_bodies
-        expect(raw_bodies.length).to eq(2)
-        raw_bodies.each do |raw|
-          expect(JSON.parse(raw)).not_to have_key('category')
-        end
-      end
-
-      it 'surfaces a server category_mismatch refusal on TRANSACTIONAL as EmailError' do
-        stub_request(:post, send_url).to_return(refuse(400, 'category_mismatch'))
-
-        expect { send_code(template_key: 'order-receipt', category: Emails::TRANSACTIONAL) }
-          .to raise_error(EmailError) do |error|
-            expect([error.code, error.name]).to eq(%w[category_mismatch validation_error])
-          end
-        expect(sent_bodies.first['category']).to eq('transactional')
+        expect(sent_bodies.map { |body| body.slice('category') }).to eq([{ 'category' => 'newsletter' }, {}])
       end
 
       it 'refuses template_data, because local templates are not supported' do
@@ -563,24 +362,6 @@ module PostHog
         send_code(**overrides)
       rescue EmailError => e
         e
-      end
-
-      it 'sends a transactional MessageCategory alongside copies and attachments' do
-        category = Emails::MessageCategory.new(key: 'receipts', type: 'transactional', name: 'Receipts')
-
-        result = send_code(
-          category: category,
-          cc: 'finance@example.com',
-          attachments: [{ filename: 'receipt.pdf', content: pdf }]
-        )
-
-        expect(result.id).to eq('msg_1')
-        expect(bucket[pdf_sha256]).to eq(pdf)
-        expect(outbox.first).to include(
-          'category' => { 'key' => 'receipts', 'type' => 'transactional', 'name' => 'Receipts' },
-          'cc' => ['finance@example.com'],
-          'attachments' => [hash_including('filename' => 'receipt.pdf', 'sha256' => pdf_sha256)]
-        )
       end
 
       it 'sends cc and bcc as lists' do
@@ -1024,78 +805,9 @@ module PostHog
         expect { send_code(tracking: 'no') }.to raise_error(ArgumentError, /tracking must be/)
         expect { send_code(tracking: { clicks: 'yes' }) }.to raise_error(ArgumentError, /tracking\[:clicks\]/)
         expect { send_code(reply_to: [1]) }.to raise_error(ArgumentError, /reply_to/)
+        expect { send_code(category: :newsletter) }.to raise_error(ArgumentError, /category must be a string/)
         expect { send_template(headers: {}) }.to raise_error(ArgumentError, /unknown keyword: :headers/)
         expect(a_request(:any, %r{/messaging/})).not_to have_been_made
-      end
-
-      context 'with invalid category values' do
-        let(:newsletter) { { key: 'newsletter', type: 'marketing', name: 'Newsletter' } }
-        let(:case_insensitive_string) do
-          Class.new(String) do
-            def ==(other)
-              other.is_a?(String) && casecmp?(other)
-            end
-          end
-        end
-
-        {
-          'a string other than TRANSACTIONAL' => ->(_) { 'newsletter' },
-          'a plain Hash instead of MessageCategory' => ->(base) { base },
-          'a BasicObject category' => ->(_) { BasicObject.new },
-          'a non-string category key' => ->(base) { Emails::MessageCategory.new(**base, key: :newsletter) },
-          'a BasicObject category key' => ->(base) { Emails::MessageCategory.new(**base, key: BasicObject.new) },
-          'an unknown category type' => ->(base) { Emails::MessageCategory.new(**base, type: 'promotional') },
-          'a BasicObject category type' => ->(base) { Emails::MessageCategory.new(**base, type: BasicObject.new) },
-          'a nil category name' => ->(base) { Emails::MessageCategory.new(**base, name: nil) },
-          'a BasicObject category name' => ->(base) { Emails::MessageCategory.new(**base, name: BasicObject.new) },
-          'a non-string category description' => ->(base) { Emails::MessageCategory.new(**base, description: 1) },
-          'a BasicObject category description' =>
-            ->(base) { Emails::MessageCategory.new(**base, description: BasicObject.new) }
-        }.each do |label, build_category|
-          it "refuses #{label} before any request" do
-            expect { send_code(category: build_category.call(newsletter)) }.to raise_error(ArgumentError, /\Acategory/)
-            expect(a_request(:any, %r{/messaging/})).not_to have_been_made
-          end
-        end
-
-        malformed_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
-        malformed_utf16 = "\x00\xD8".dup.force_encoding(Encoding::UTF_16LE)
-        {
-          'invalid binary bytes on category' => ->(_) { "\xFF".b },
-          'invalid binary bytes on category key' => ->(base) { Emails::MessageCategory.new(**base, key: "\xFF".b) },
-          'invalid binary bytes on category type' => ->(base) { Emails::MessageCategory.new(**base, type: "\xFF".b) },
-          'invalid binary bytes on category description' =>
-            ->(base) { Emails::MessageCategory.new(**base, description: "\xFF".b) },
-          'malformed UTF-8 on category' => ->(_) { malformed_utf8 },
-          'malformed UTF-8 on category name' => ->(base) { Emails::MessageCategory.new(**base, name: malformed_utf8) },
-          'malformed UTF-8 on category description' =>
-            ->(base) { Emails::MessageCategory.new(**base, description: malformed_utf8) },
-          'malformed UTF-16LE lone surrogate on category' => ->(_) { malformed_utf16 },
-          'malformed UTF-16LE lone surrogate on category name' =>
-            ->(base) { Emails::MessageCategory.new(**base, name: malformed_utf16) },
-          'malformed UTF-16LE lone surrogate on category description' =>
-            ->(base) { Emails::MessageCategory.new(**base, description: malformed_utf16) }
-        }.each do |label, build_category|
-          it "refuses #{label} before any request" do
-            expect { send_code(category: build_category.call(newsletter)) }
-              .to raise_error(ArgumentError, /\Acategory.*must be valid UTF-8\.\z/)
-            expect(a_request(:any, %r{/messaging/})).not_to have_been_made
-          end
-        end
-
-        it 'reports an unsupported source encoding such as UTF-7 before any request' do
-          utf7_name = 'Newsletter'.dup.force_encoding(Encoding::UTF_7)
-
-          expect { send_code(category: Emails::MessageCategory.new(**newsletter, name: utf7_name)) }
-            .to raise_error(ArgumentError, /\Acategory name encoding UTF-7 cannot be transcoded to UTF-8\.\z/)
-          expect(a_request(:any, %r{/messaging/})).not_to have_been_made
-        end
-
-        it 'refuses a case-insensitive String subclass for TRANSACTIONAL before any request' do
-          expect { send_code(category: case_insensitive_string.new('TRANSACTIONAL')) }
-            .to raise_error(ArgumentError, /\Acategory/)
-          expect(a_request(:any, %r{/messaging/})).not_to have_been_made
-        end
       end
     end
 
@@ -1248,27 +960,6 @@ module PostHog
         end
       end
 
-      it 'raises a 422 recipient_opted_out on a marketing send without retrying it' do
-        stub_request(:post, send_url).to_return(
-          refuse(422, 'recipient_opted_out', type: 'invalid_request', detail: 'Recipient opted out.'),
-          accept
-        )
-        category = Emails::MessageCategory.new(key: 'newsletter', type: 'marketing', name: 'Newsletter')
-        html = '<p>News</p><a href="{{ unsubscribe_url }}">Unsubscribe</a>'
-
-        expect { send_code(template_key: 'monthly-digest', html: html, category: category) }
-          .to raise_error(EmailError, 'Recipient opted out.') do |error|
-            expect(error.status_code).to eq(422)
-            expect(error.code).to eq('recipient_opted_out')
-            expect(error.name).to eq('validation_error')
-          end
-        expect(a_request(:post, send_url)).to have_been_made.once
-        expect(sent_bodies.first.slice('template_key', 'category')).to eq(
-          'template_key' => 'monthly-digest',
-          'category' => { 'key' => 'newsletter', 'type' => 'marketing', 'name' => 'Newsletter' }
-        )
-      end
-
       it 'retries a network error, and reports it as service_unavailable' do
         stub_request(:post, send_url).to_raise(Errno::ECONNREFUSED)
 
@@ -1401,6 +1092,8 @@ module PostHog
       end
 
       [
+        [400, 'category_not_found', 'validation_error'],
+        [400, 'marketing_copies_unsupported', 'validation_error'],
         [401, 'authentication_failed', 'missing_api_key'],
         [404, 'not_found', 'not_found'],
         [409, 'template_outdated', 'validation_error'],

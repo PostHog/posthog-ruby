@@ -51,9 +51,7 @@ module PostHog
   #     template_key: 'monthly-digest',
   #     subject: 'Your monthly digest',
   #     html: rendered_html, # links to {{ unsubscribe_url }}
-  #     category: PostHog::Emails::MessageCategory.new(
-  #       key: 'newsletter', type: 'marketing', name: 'Newsletter', description: 'Monthly product news'
-  #     ),
+  #     category: 'newsletter',
   #     distinct_id: 'user_123'
   #   )
   class Emails
@@ -80,32 +78,8 @@ module PostHog
     #     can see values this list does not have yet.
     # @!attribute [r] reason
     #   @return [String, nil] Why a failed email was not sent, such as `recipient_suppressed` or
-    #     `recipient_opted_out`, or the bounce type
-    #     of a bounced email: `hard`, `soft` or `unknown`.
+    #     `recipient_opted_out`, or the bounce type of a bounced email: `hard`, `soft` or `unknown`.
     Status = Struct.new(:id, :status, :created_at, :status_at, :reason, keyword_init: true)
-
-    # The built-in `category` of {#send}: a transactional email with no category. Unlike leaving `category` out, it
-    # doesn't follow the category of the template that `template_key` names, so PostHog refuses it for a template in a
-    # category.
-    TRANSACTIONAL = 'transactional'
-
-    # A message category that a send defines in code. PostHog creates the category the first time a send names its
-    # key, or restores it if it was deleted, and otherwise leaves it unchanged. Its name and description apply only
-    # when the send creates the category; change them later in PostHog. Recipients opt in to and out of it in their
-    # email preferences.
-    #
-    # @!attribute [r] key
-    #   @return [String] The category's key, such as `newsletter`. It names the category in the opt-out and
-    #     preferences APIs.
-    # @!attribute [r] type
-    #   @return [String] `marketing` or `transactional`. It must match the type of an existing category with the
-    #     same key.
-    # @!attribute [r] name
-    #   @return [String] The name recipients see in their email preferences, used only when the send creates the
-    #     category.
-    # @!attribute [r] description
-    #   @return [String, nil] What the category's emails are about, used only when the send creates the category.
-    MessageCategory = Struct.new(:key, :type, :name, :description, keyword_init: true)
 
     SEND_PATH = '/api/messaging/send/email/'
     UPLOADS_PATH = '/api/messaging/attachments/uploads/'
@@ -135,7 +109,6 @@ module PostHog
     TEMPLATE_FIELDS = %i[template_data].freeze
     CODE_FIELDS = %i[subject html text from reply_to cc bcc attachments sensitive tracking capture_engagement
                      category].freeze
-    CATEGORY_TYPES = [TRANSACTIONAL, 'marketing'].freeze
     NETWORK_ERRORS = [
       Timeout::Error, SocketError, SystemCallError, IOError, EOFError, OpenSSL::SSL::SSLError,
       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::ProtocolError, Zlib::Error
@@ -143,7 +116,7 @@ module PostHog
     private_constant :SEND_PATH, :UPLOADS_PATH, :STATUS_PATH, :US_APP_HOST, :EU_APP_HOST, :CLOUD_APP_HOSTS,
                      :MAX_RETRY_DELAY_SECONDS, :UUID_PATTERN, :IDEMPOTENCY_KEY_PATTERN, :TEMPLATE_KEY_PATTERN,
                      :HEADER_TOKEN_PATTERN, :JSON_CONTENT, :SEND_KEY_NEEDED, :READ_KEY_NEEDED, :TEMPLATE_FORM_WHY,
-                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :CATEGORY_TYPES, :NETWORK_ERRORS
+                     :CODE_FORM_WHY, :TEMPLATE_FIELDS, :CODE_FIELDS, :NETWORK_ERRORS
 
     # @api private
     def initialize(secret_key:, host:, app_host:, timeout:, max_retries:, migrated_from:, user_agent:, disabled:,
@@ -211,27 +184,13 @@ module PostHog
     # @param capture_engagement [Boolean] Deprecated: use +tracking: { engagement: false }+ instead. Code form:
     #   whether PostHog captures the email's engagement events. It still works, but a send can't set both. Sent
     #   only when you set it.
-    # @param category [String, MessageCategory] Code form: {TRANSACTIONAL} for a transactional email with no category,
-    #   or the {MessageCategory} the email belongs to. Left out, when code-send categories are enabled for the project,
-    #   the email follows the transactional category of the template that `template_key` names, or is transactional
-    #   with no category; when categories are disabled for the project, PostHog sends no per-send category override (a
-    #   matching saved template still uses its workflow's stored configuration, and a transactional-enabled template
-    #   in a marketing category still returns `marketing_template`). A marketing email skips recipients who opted out
-    #   of its category or of all marketing, can't have copies (`copies_not_allowed`), can't carry attachments
-    #   (`workflow_can_wait` on a verified sender because marketing sending limits can hold delivery, or
-    #   `sandbox_fields_unsupported` when using the PostHog test sender), and needs a clickable link whose `href`
-    #   points to `{{ unsubscribe_url }}` (with optional query string or fragment) in its `html` (or
-    #   `{{ unsubscribe_url }}` in its `text` when it has no `html`). When code-send categories are disabled for the
-    #   project, a send with {TRANSACTIONAL} and a fresh `template_key` can still queue, while an explicit
-    #   {MessageCategory} is refused with `categories_not_enabled` (and any `category` returns HTTP 400 on an older
-    #   PostHog server). PostHog also refuses a send with `category_mismatch` when the type differs from the existing
-    #   category's, when `template_key` names a transactional-enabled saved email template in another transactional
-    #   category (including {TRANSACTIONAL} for a template in a category), or when `template_key` matches an
-    #   uncategorized transactional-enabled saved template and the send passes a {MessageCategory};
-    #   `marketing_template` when `template_key` names a transactional-enabled saved email template in a marketing
-    #   category (a saved template never enabled for transactional sends returns `template_not_transactional`);
-    #   `too_many_categories` when the project can't take another category; `unsubscribe_link_required`;
-    #   `copies_not_allowed`; `workflow_can_wait`; `sandbox_fields_unsupported`; or `recipient_opted_out`.
+    # @param category [String] Code form: the key of one of the project's message categories, such as
+    #   `newsletter`, for the email your code rendered. A marketing category skips recipients who opted out of it or
+    #   of all marketing email, fills `{{ unsubscribe_url }}` with the recipient's preferences link, and adds
+    #   List-Unsubscribe headers. A marketing email can't have `cc` or `bcc` (`marketing_copies_unsupported`).
+    #   PostHog refuses a key that names no category with `category_not_found`, and a marketing email from the
+    #   PostHog test sender, used while the project has no verified sending domain, with
+    #   `sandbox_fields_unsupported`. Sent only when you set it, and needs a PostHog version that takes it.
     # @param distinct_id [String] The recipient's distinct ID in your product. The email's events go to this
     #   person. Without it, they go to a person whose distinct ID is the email address.
     # @param idempotency_key [String] 1 to 255 visible ASCII characters. A send with a key PostHog has already
@@ -408,14 +367,14 @@ module PostHog
               'A send with template_key needs html, text or both.'
       end
 
-      %i[html text from].each do |name|
+      %i[html text from category].each do |name|
         raise ArgumentError, "#{name} must be a string." if fields.key?(name) && !fields[name].is_a?(String)
       end
       %i[capture_engagement sensitive].each do |name|
         raise ArgumentError, "#{name} must be true or false." unless [nil, true, false].include?(fields[name])
       end
 
-      code = fields.slice(:subject, :html, :text, :from).merge(template_key: template_key)
+      code = fields.slice(:subject, :html, :text, :from, :category).merge(template_key: template_key)
       code[:reply_to] = addresses(:reply_to, fields[:reply_to]) if fields.key?(:reply_to)
       %i[cc bcc].each do |name|
         list = fields.key?(name) ? addresses(name, fields[name]) : []
@@ -424,7 +383,6 @@ module PostHog
       code[:capture_engagement] = fields[:capture_engagement] if fields.key?(:capture_engagement)
       code[:sensitive] = fields[:sensitive] if fields.key?(:sensitive)
       code[:tracking] = tracking(fields[:tracking]) if fields.key?(:tracking)
-      code[:category] = category_payload(fields[:category]) if fields.key?(:category)
       code
     end
 
@@ -452,62 +410,6 @@ module PostHog
       return list if list.is_a?(Array) && list.all? { |address| nonempty_string?(address) }
 
       raise ArgumentError, "#{name} must be one address or a list of addresses."
-    end
-
-    def category_payload(category)
-      case category
-      when String
-        return TRANSACTIONAL if TRANSACTIONAL.eql?(encode_utf8(category, 'category'))
-      when MessageCategory
-        return normalize_category(category).compact
-      end
-
-      raise ArgumentError, 'category must be PostHog::Emails::TRANSACTIONAL or a PostHog::Emails::MessageCategory.'
-    end
-
-    def normalize_category(category)
-      raw_key, raw_type, raw_name, raw_description = Struct.instance_method(:to_a).bind_call(category)
-      raise ArgumentError, 'category key and name must be strings.' unless [raw_key, raw_name].all?(String)
-
-      key = encode_utf8(raw_key, 'category key')
-      name = encode_utf8(raw_name, 'category name')
-      type = case raw_type
-             when String then encode_utf8(raw_type, 'category type')
-             end
-      raise ArgumentError, "category type must be 'marketing' or 'transactional'." unless category_type?(type)
-
-      { key: key, type: type, name: name, description: normalize_category_description(raw_description) }
-    end
-
-    def normalize_category_description(description)
-      case description
-      when nil then nil
-      when String then encode_utf8(description, 'category description')
-      else raise ArgumentError, 'category description must be a string.'
-      end
-    end
-
-    def encode_utf8(value, field)
-      plain = String.new(value)
-      utf8 = transcode_utf8(plain)
-      raise ArgumentError, "#{field} must be valid UTF-8." unless utf8.valid_encoding?
-
-      utf8
-    rescue Encoding::ConverterNotFoundError
-      raise ArgumentError, "#{field} encoding #{plain.encoding.name} cannot be transcoded to UTF-8."
-    rescue EncodingError
-      raise ArgumentError, "#{field} must be valid UTF-8."
-    end
-
-    def transcode_utf8(plain)
-      return plain if plain.encoding == Encoding::UTF_8
-      return plain.force_encoding(Encoding::UTF_8) if plain.encoding == Encoding::ASCII_8BIT
-
-      plain.encode(Encoding::UTF_8)
-    end
-
-    def category_type?(value)
-      CATEGORY_TYPES.include?(value)
     end
 
     def call(nothing_done, key_needed)
