@@ -49,7 +49,7 @@ module PostHog
           if defined?(::Rails)
             ::Rails.logger
           else
-            logger = Logger.new $stdout
+            logger = Logger.new $stderr
             logger.progname = 'PostHog'
             logger.level = Logger::WARN
             logger

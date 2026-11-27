@@ -5,8 +5,8 @@ module PostHog
     # Logging for the MCP integration.
     #
     # Debug-level chatter goes only to the `logger:` option (a no-op by default),
-    # because a stdio MCP server owns `$stdout` for the protocol and the core
-    # SDK's default logger writes there. Warnings additionally reach the app's
+    # because a stdio MCP server owns `$stdout` for the protocol and an
+    # app-configured logger may write there. Warnings additionally reach the app's
     # logger when Rails is loaded (where {PostHog::Logging.logger} wraps
     # `Rails.logger`) and stderr otherwise, so misconfiguration is never silent
     # and never corrupts a stdio transport.
